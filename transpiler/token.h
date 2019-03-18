@@ -40,6 +40,6 @@ Token peek_ts(TokenStream *ts);
 Token get_from_ts(TokenStream *ts);
 void advance_ts(TokenStream *ts);
 void free_token_stream(TokenStream *ts);
-void printToken(Token tok);
+void print_token(Token tok);
 
 #endif

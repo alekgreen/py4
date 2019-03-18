@@ -147,18 +147,17 @@ Token next_token(FILE *fp)
     return make_token(TOKEN_SYMBOL, buffer);
 }
 
-void lexer(FILE *fp)
+TokenStream *lexer(FILE *fp)
 {   
-    Token *tokens = malloc(sizeof(Token) * 100);
+    TokenStream *ts = create_token_stream();
     Token curr;
-    int i = 0;
     while (1) {
-        if (i >= 100) break;
         curr = next_token(fp);
-        tokens[i] = curr;
-        printToken(tokens[i]);
-        i++;
+        add_token_to_ts(ts, curr);
         if (curr.type == TOKEN_EOF) break;
     }
-    free(tokens);
+    while (ts->pos < ts->count) {
+        print_token(get_from_ts(ts));
+    }
+    return ts;
 }

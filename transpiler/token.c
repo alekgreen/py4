@@ -36,7 +36,7 @@ Token make_token(TokenType type, const char *value)
 
 void add_token_to_ts(TokenStream *ts, Token tok)
 {
-    if (ts->capacity >= ts->count){
+    if (ts->count >= ts->capacity){
         ts->capacity *= 2;
         ts->data = realloc(ts->data, sizeof(Token) * ts->capacity);
         if (!ts->data) {
@@ -75,7 +75,7 @@ void free_token_stream(TokenStream *ts)
     }
 }
 
-void printToken(Token tok)
+void print_token(Token tok)
 {
     switch(tok.type) {
         case TOKEN_KEYWORD: printf("(KEYWORD, "); break;
