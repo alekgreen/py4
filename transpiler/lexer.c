@@ -1,5 +1,3 @@
-// simple lexer
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,45 +14,11 @@ const char *KEYWORDS[] = {
 const char *OPERATORS[] = { "+", "-", "*", "/", "=", "!", "==", "!=", "<", ">", "<=", ">=", NULL };
 const char *PUNCTS[]    = { "(", ")", "{", "}", "[", "]", ":", ",", ".", NULL };
 
-void printToken(Token tok)
-{
-    switch(tok.type) {
-        case TOKEN_KEYWORD: printf("(KEYWORD, "); break;
-        case TOKEN_IDENTIFIER: printf("(IDENTIFIER, "); break;
-        case TOKEN_SYMBOL: printf("(SYMBOL, "); break;
-        case TOKEN_NUMBER: printf("(NUMBER, "); break;
-        case TOKEN_OPERATOR: printf("(OPERATOR, "); break;
-        case TOKEN_ASSIGN: printf("(ASSIGN, "); break;
-        case TOKEN_PLUS: printf("(PLUS, "); break;
-        case TOKEN_MINUS: printf("(MINUS, "); break;
-        case TOKEN_PUNCT: printf("(PUNCT, "); break;
-        case TOKEN_COLON: printf("(COLON, "); break;
-        case TOKEN_UNKNOWN: printf("(UNKNOWN, "); break;
-        case TOKEN_INDENT: printf("(INDENT, "); break;
-        case TOKEN_DEDENT: printf("(DEDENT, "); break;
-        case TOKEN_NEWLINE: printf("(NEWLINE, "); break;
-        case TOKEN_LPAREN: printf("(LPAREN, "); break;
-        case TOKEN_RPAREN: printf("(RPAREN, "); break;
-        case TOKEN_RARROW: printf("(RARROW, "); break;
-        case TOKEN_EOF: printf("(EOF, "); break;
-    }
-    printf("\"%s\")\n", tok.value);
-}
-
 int fpeek(FILE *stream)
 {
     int c = fgetc(stream);
     ungetc(c, stream);
     return c;
-}
-
-Token make_token(TokenType type, const char *value)
-{
-    Token t;
-    t.type = type;
-    strncpy(t.value, value, sizeof(t.value) - 1);
-    t.value[sizeof(t.value) - 1] = '\0';
-    return t;
 }
 
 int is_keyword(const char *lexeme)
@@ -116,7 +80,7 @@ Token next_token(FILE *fp)
     if (c == '\t') return make_token(TOKEN_INDENT, "\\t");
 
     if (is_letter(c)) {
-        while (is_letter(fpeek(fp))) {
+        while (is_letter(fpeek(fp)) || is_digit(fpeek(fp))) {
             c = fgetc(fp);
             buffer[i] = c;
             i++;
@@ -197,18 +161,4 @@ void lexer(FILE *fp)
         if (curr.type == TOKEN_EOF) break;
     }
     free(tokens);
-}
-
-
-int main() 
-{
-    FILE *fp;
-
-    fp = fopen("example1.p4", "r");
-
-    lexer(fp);
-
-    fclose(fp);
-
-    return 0;
 }
