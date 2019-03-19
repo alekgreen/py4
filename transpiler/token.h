@@ -41,6 +41,7 @@ Token expect(TokenStream *ts, TokenType type);
 Token get_from_ts(TokenStream *ts);
 void advance_ts(TokenStream *ts);
 void free_token_stream(TokenStream *ts);
+const char *token_type_to_str(TokenType type);
 void print_token(Token tok);
 void reset_ts(TokenStream *ts);
 void debug_print_ts(const TokenStream *ts);

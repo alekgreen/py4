@@ -11,17 +11,21 @@ typedef enum {
     NODE_EXPRESSION,
     NODE_EXPRESSION_PRIME,
     NODE_TERMINAL,
+    NODE_COLON,
+    NODE_ASSIGN,
+    NODE_OPERATOR,
     NODE_EPSILON
 } NodeKind;
 
 typedef struct ParseNode {
     NodeKind kind;
+    TokenType token_type;
     char *value;
     struct ParseNode **children;
     size_t child_count;
 } ParseNode;
 
-ParseNode *create_node(NodeKind kind, const char *value);
+ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value);
 void add_child(ParseNode *parent, ParseNode *child);
 void free_tree(ParseNode *node);
 const char *node_kind_to_str(NodeKind kind);

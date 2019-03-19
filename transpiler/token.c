@@ -85,30 +85,35 @@ void free_token_stream(TokenStream *ts)
     }
 }
 
+const char *token_type_to_str(TokenType type)
+{
+    switch (type) {
+        case TOKEN_KEYWORD:    return "KEYWORD";
+        case TOKEN_IDENTIFIER: return "IDENTIFIER";
+        case TOKEN_SYMBOL:     return "SYMBOL";
+        case TOKEN_NUMBER:     return "NUMBER";
+        case TOKEN_OPERATOR:   return "OPERATOR";
+        case TOKEN_ASSIGN:     return "ASSIGN";
+        case TOKEN_PLUS:       return "PLUS";
+        case TOKEN_MINUS:      return "MINUS";
+        case TOKEN_PUNCT:      return "PUNCT";
+        case TOKEN_COLON:      return "COLON";
+        case TOKEN_UNKNOWN:    return "UNKNOWN";
+        case TOKEN_INDENT:     return "INDENT";
+        case TOKEN_DEDENT:     return "DEDENT";
+        case TOKEN_NEWLINE:    return "NEWLINE";
+        case TOKEN_LPAREN:     return "LPAREN";
+        case TOKEN_RPAREN:     return "RPAREN";
+        case TOKEN_RARROW:     return "RARROW";
+        case TOKEN_NULL:       return "NULL";
+        case TOKEN_EOF:        return "EOF";
+        default:               return "UNSET";
+    }
+}
+
 void print_token(Token tok)
 {
-    switch(tok.type) {
-        case TOKEN_KEYWORD: printf("(KEYWORD, "); break;
-        case TOKEN_IDENTIFIER: printf("(IDENTIFIER, "); break;
-        case TOKEN_SYMBOL: printf("(SYMBOL, "); break;
-        case TOKEN_NUMBER: printf("(NUMBER, "); break;
-        case TOKEN_OPERATOR: printf("(OPERATOR, "); break;
-        case TOKEN_ASSIGN: printf("(ASSIGN, "); break;
-        case TOKEN_PLUS: printf("(PLUS, "); break;
-        case TOKEN_MINUS: printf("(MINUS, "); break;
-        case TOKEN_PUNCT: printf("(PUNCT, "); break;
-        case TOKEN_COLON: printf("(COLON, "); break;
-        case TOKEN_UNKNOWN: printf("(UNKNOWN, "); break;
-        case TOKEN_INDENT: printf("(INDENT, "); break;
-        case TOKEN_DEDENT: printf("(DEDENT, "); break;
-        case TOKEN_NEWLINE: printf("(NEWLINE, "); break;
-        case TOKEN_LPAREN: printf("(LPAREN, "); break;
-        case TOKEN_RPAREN: printf("(RPAREN, "); break;
-        case TOKEN_RARROW: printf("(RARROW, "); break;
-        case TOKEN_EOF: printf("(EOF, "); break;
-        case TOKEN_NULL: printf("(NULL, "); break;
-    }
-    printf("\"%s\")\n", tok.value);
+    printf("(%s, \"%s\")\n", token_type_to_str(tok.type), tok.value);
 }
 
 void reset_ts(TokenStream *ts) { ts->pos = 0; }
