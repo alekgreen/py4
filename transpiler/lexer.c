@@ -156,8 +156,8 @@ TokenStream *lexer(FILE *fp)
         add_token_to_ts(ts, curr);
         if (curr.type == TOKEN_EOF) break;
     }
-    while (ts->pos < ts->count) {
-        print_token(get_from_ts(ts));
-    }
+    // while (ts->pos < ts->count) {
+    //     print_token(get_from_ts(ts));
+    // }
     return ts;
 }

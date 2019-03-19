@@ -3,6 +3,6 @@
 #include "token.h"
 
 Token next_token(FILE *fp);
-void lexer(FILE *fp);
+TokenStream *lexer(FILE *fp);
 
 #endif

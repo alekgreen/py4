@@ -51,14 +51,24 @@ Token get_from_ts(TokenStream *ts)
 {   
     if (ts->pos < ts->count)
         return ts->data[ts->pos++];
-    return make_token(TOKEN_NULL, "");
+    return make_token(TOKEN_EOF, "");
 }
 
 Token peek_ts(TokenStream *ts)
 {
     if (ts->pos < ts->count)
         return ts->data[ts->pos];
-    return make_token(TOKEN_NULL, "");
+    return make_token(TOKEN_EOF, "");
+}
+
+Token expect(TokenStream *ts, TokenType type)
+{
+    Token t = get_from_ts(ts);
+    if (t.type != type) {
+        fprintf(stderr, "Parse error: expected %d, got %d (%s)\n", type, t.type, t.value);
+        exit(1);
+    }
+    return t;
 }
 
 void advance_ts(TokenStream *ts)
@@ -99,4 +109,13 @@ void print_token(Token tok)
         case TOKEN_NULL: printf("(NULL, "); break;
     }
     printf("\"%s\")\n", tok.value);
+}
+
+void reset_ts(TokenStream *ts) { ts->pos = 0; }
+
+void debug_print_ts(const TokenStream *ts)
+{
+    for (int i = 0; i < ts->count; ++i) {
+        print_token(ts->data[i]);
+    }
 }
