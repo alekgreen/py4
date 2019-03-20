@@ -1,6 +1,8 @@
 #ifndef TOKEN_H
 #define TOKEN_H
 
+#include <stdio.h>
+
 typedef enum {
     TOKEN_KEYWORD,
     TOKEN_IDENTIFIER,
@@ -16,6 +18,7 @@ typedef enum {
     TOKEN_DEDENT,
     TOKEN_NEWLINE,
     TOKEN_LPAREN, TOKEN_RPAREN,
+    TOKEN_COMMA,
     TOKEN_RARROW,
     TOKEN_NULL,
     TOKEN_EOF

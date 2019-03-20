@@ -104,6 +104,7 @@ const char *token_type_to_str(TokenType type)
         case TOKEN_NEWLINE:    return "NEWLINE";
         case TOKEN_LPAREN:     return "LPAREN";
         case TOKEN_RPAREN:     return "RPAREN";
+        case TOKEN_COMMA:      return "COMMA";
         case TOKEN_RARROW:     return "RARROW";
         case TOKEN_NULL:       return "NULL";
         case TOKEN_EOF:        return "EOF";
