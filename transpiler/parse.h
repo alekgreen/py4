@@ -1,16 +1,26 @@
 #ifndef PARSE_H
 #define PARSE_H
+
+#include <stddef.h>
+
 #include "token.h"
 #include "lexer.h"
 
 typedef enum {
     NODE_S,
-    NODE_T,
     NODE_STATEMENT,
+    NODE_SIMPLE_STATEMENT,
     NODE_STATEMENT_TAIL,
+    NODE_FUNCTION_DEF,
+    NODE_PARAMETERS,
+    NODE_PARAMETER,
+    NODE_RETURN_TYPE,
+    NODE_SUITE,
+    NODE_EXPRESSION_STATEMENT,
     NODE_EXPRESSION,
-    NODE_EXPRESSION_PRIME,
-    NODE_TERMINAL,
+    NODE_PRIMARY,
+    NODE_CALL,
+    NODE_ARGUMENTS,
     NODE_COLON,
     NODE_ASSIGN,
     NODE_OPERATOR,
@@ -32,12 +42,9 @@ const char *node_kind_to_str(NodeKind kind);
 void print_tree(ParseNode *node, int depth);
 
 ParseNode *parse_S(TokenStream *ts);
-ParseNode *parse_T(TokenStream *ts);
 ParseNode *parse_STATEMENT(TokenStream *ts);
 ParseNode *parse_STATEMENT_TAIL(TokenStream *ts);
 ParseNode *parse_EXPRESSION(TokenStream *ts);
-ParseNode *parse_EXPRESSION_PRIME(TokenStream *ts);
-ParseNode *parse_TERMINAL(TokenStream *ts);
 ParseNode *parse(TokenStream *ts);
 
 #endif

@@ -1,15 +1,93 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "parse.h"
 
+static char *dup_string(const char *value)
+{
+    size_t len;
+    char *copy;
+
+    if (value == NULL) {
+        return NULL;
+    }
+
+    len = strlen(value) + 1;
+    copy = malloc(len);
+    if (copy == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    memcpy(copy, value, len);
+    return copy;
+}
+
+static Token peek_n(TokenStream *ts, int offset)
+{
+    int index = ts->pos + offset;
+
+    if (index >= 0 && index < ts->count) {
+        return ts->data[index];
+    }
+    return make_token(TOKEN_EOF, "");
+}
+
+static int is_keyword_token(Token tok, const char *value)
+{
+    return tok.type == TOKEN_KEYWORD && strcmp(tok.value, value) == 0;
+}
+
+static int is_operator_token(Token tok)
+{
+    return tok.type == TOKEN_PLUS || tok.type == TOKEN_MINUS || tok.type == TOKEN_OPERATOR;
+}
+
+static void parse_error(Token tok, const char *message)
+{
+    fprintf(stderr, "Parse error: %s near '%s'\n", message, tok.value);
+    exit(1);
+}
+
+static Token expect_keyword(TokenStream *ts, const char *value)
+{
+    Token tok = expect(ts, TOKEN_KEYWORD);
+
+    if (strcmp(tok.value, value) != 0) {
+        parse_error(tok, "unexpected keyword");
+    }
+
+    return tok;
+}
+
+static void skip_newlines(TokenStream *ts)
+{
+    while (peek_ts(ts).type == TOKEN_NEWLINE) {
+        get_from_ts(ts);
+    }
+}
+
+static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts);
+static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
+static ParseNode *parse_SUITE(TokenStream *ts);
+static ParseNode *parse_PARAMETERS(TokenStream *ts);
+static ParseNode *parse_ARGUMENTS(TokenStream *ts);
+static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
+static ParseNode *parse_PRIMARY(TokenStream *ts);
 
 ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value)
 {
     ParseNode *node = malloc(sizeof(ParseNode));
+
+    if (node == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
     node->kind = kind;
     node->token_type = token_type;
-    node->value = value ? strdup(value) : NULL;
+    node->value = dup_string(value);
     node->children = NULL;
     node->child_count = 0;
     return node;
@@ -17,150 +95,318 @@ ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value)
 
 void add_child(ParseNode *parent, ParseNode *child)
 {
-    parent->children = realloc(parent->children, sizeof(ParseNode*) * (parent->child_count + 1));
+    ParseNode **children = realloc(parent->children,
+        sizeof(ParseNode *) * (parent->child_count + 1));
+
+    if (children == NULL) {
+        perror("realloc");
+        exit(1);
+    }
+
+    parent->children = children;
     parent->children[parent->child_count++] = child;
 }
 
-void free_tree(ParseNode *n)
+void free_tree(ParseNode *node)
 {
-    if (!n) return;
-    for (size_t i = 0; i < n->child_count; i++)
-        free_tree(n->children[i]);
-    free(n->children);
-    if (n->value) free (n->value);
-    free(n);
-}
+    if (node == NULL) {
+        return;
+    }
 
-void skip_newlines(TokenStream *ts) {
-    while (peek_ts(ts).type == TOKEN_NEWLINE) get_from_ts(ts);
+    for (size_t i = 0; i < node->child_count; i++) {
+        free_tree(node->children[i]);
+    }
+
+    free(node->children);
+    free(node->value);
+    free(node);
 }
 
 const char *node_kind_to_str(NodeKind kind)
 {
     switch (kind) {
-        case NODE_S:                return "S";
-        case NODE_T:                return "T";
-        case NODE_STATEMENT:        return "STATEMENT";
-        case NODE_STATEMENT_TAIL:   return "STATEMENT_TAIL";
-        case NODE_EXPRESSION:       return "EXPRESSION";
-        case NODE_EXPRESSION_PRIME: return "EXPRESSION'";
-        case NODE_TERMINAL:         return "TERMINAL";
-        case NODE_COLON:            return "COLON";
-        case NODE_ASSIGN:           return "ASSIGN";
-        case NODE_OPERATOR:         return "OPERATOR";
-        case NODE_EPSILON:          return "ε";
-        default:                    return "UNKNOWN";
+        case NODE_S:                    return "PROGRAM";
+        case NODE_STATEMENT:            return "STATEMENT";
+        case NODE_SIMPLE_STATEMENT:     return "SIMPLE_STATEMENT";
+        case NODE_STATEMENT_TAIL:       return "STATEMENT_TAIL";
+        case NODE_FUNCTION_DEF:         return "FUNCTION_DEF";
+        case NODE_PARAMETERS:           return "PARAMETERS";
+        case NODE_PARAMETER:            return "PARAMETER";
+        case NODE_RETURN_TYPE:          return "RETURN_TYPE";
+        case NODE_SUITE:                return "SUITE";
+        case NODE_EXPRESSION_STATEMENT: return "EXPRESSION_STATEMENT";
+        case NODE_EXPRESSION:           return "EXPRESSION";
+        case NODE_PRIMARY:              return "PRIMARY";
+        case NODE_CALL:                 return "CALL";
+        case NODE_ARGUMENTS:            return "ARGUMENTS";
+        case NODE_COLON:                return "COLON";
+        case NODE_ASSIGN:               return "ASSIGN";
+        case NODE_OPERATOR:             return "OPERATOR";
+        case NODE_EPSILON:              return "EPSILON";
+        default:                        return "UNKNOWN";
     }
 }
 
-void print_tree(ParseNode *n, int depth)
+void print_tree(ParseNode *node, int depth)
 {
-    if (!n) return;
-    for (int i = 0; i < depth; i++) {
-        if (i == depth - 1)
-            printf("├── ");
-        else
-            printf("│   ");
+    if (node == NULL) {
+        return;
     }
-    printf("%s", node_kind_to_str(n->kind));
-    if (n->value) printf(" (%s, %s)", token_type_to_str(n->token_type), n->value);
+
+    for (int i = 0; i < depth; i++) {
+        printf(i == depth - 1 ? "├── " : "│   ");
+    }
+
+    printf("%s", node_kind_to_str(node->kind));
+    if (node->value != NULL) {
+        printf(" (%s, %s)", token_type_to_str(node->token_type), node->value);
+    }
     printf("\n");
-    for (size_t i = 0; i < n->child_count; i++)
-        print_tree(n->children[i], depth + 1);
+
+    for (size_t i = 0; i < node->child_count; i++) {
+        print_tree(node->children[i], depth + 1);
+    }
+}
+
+static ParseNode *parse_statement_list(TokenStream *ts, TokenType terminator, NodeKind kind)
+{
+    ParseNode *root = create_node(kind, TOKEN_NULL, NULL);
+
+    skip_newlines(ts);
+    while (peek_ts(ts).type != terminator && peek_ts(ts).type != TOKEN_EOF) {
+        add_child(root, parse_STATEMENT(ts));
+        skip_newlines(ts);
+    }
+
+    if (root->child_count == 0) {
+        add_child(root, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+    }
+
+    return root;
 }
 
 ParseNode *parse_S(TokenStream *ts)
-{   
-    skip_newlines(ts);
-    ParseNode *root = create_node(NODE_S, TOKEN_NULL, NULL);
-
-    if (peek_ts(ts).type == TOKEN_EOF)
-        return create_node(NODE_EPSILON, TOKEN_NULL, "ε");
-
-    while (peek_ts(ts).type == TOKEN_IDENTIFIER) {
-        add_child(root, parse_STATEMENT(ts));
-
-        if (peek_ts(ts).type == TOKEN_NEWLINE)
-            get_from_ts(ts);
-        else
-            break;
-    }
-    return root;
+{
+    return parse_statement_list(ts, TOKEN_EOF, NODE_S);
 }
 
 ParseNode *parse_STATEMENT(TokenStream *ts)
 {
-    ParseNode *n = create_node(NODE_STATEMENT, TOKEN_NULL, NULL);
-    Token id = expect(ts, TOKEN_IDENTIFIER);
-    add_child(n, create_node(NODE_TERMINAL, id.type, id.value));
-    add_child(n, parse_STATEMENT_TAIL(ts));
-    return n;
+    ParseNode *node = create_node(NODE_STATEMENT, TOKEN_NULL, NULL);
+
+    if (is_keyword_token(peek_ts(ts), "def")) {
+        add_child(node, parse_FUNCTION_DEF(ts));
+    } else {
+        add_child(node, parse_SIMPLE_STATEMENT(ts));
+    }
+
+    return node;
+}
+
+static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_SIMPLE_STATEMENT, TOKEN_NULL, NULL);
+    Token first = peek_ts(ts);
+    Token second = peek_n(ts, 1);
+
+    if (first.type == TOKEN_IDENTIFIER &&
+        (second.type == TOKEN_COLON || second.type == TOKEN_ASSIGN)) {
+        Token identifier = expect(ts, TOKEN_IDENTIFIER);
+        add_child(node, create_node(NODE_PRIMARY, identifier.type, identifier.value));
+        add_child(node, parse_STATEMENT_TAIL(ts));
+        return node;
+    }
+
+    add_child(node, parse_EXPRESSION_STATEMENT(ts));
+    return node;
+}
+
+static ParseNode *parse_FUNCTION_DEF(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_FUNCTION_DEF, TOKEN_NULL, NULL);
+    Token name;
+
+    expect_keyword(ts, "def");
+    name = expect(ts, TOKEN_IDENTIFIER);
+    add_child(node, create_node(NODE_PRIMARY, name.type, name.value));
+
+    expect(ts, TOKEN_LPAREN);
+    add_child(node, parse_PARAMETERS(ts));
+    expect(ts, TOKEN_RPAREN);
+
+    if (peek_ts(ts).type == TOKEN_RARROW) {
+        ParseNode *return_type = create_node(NODE_RETURN_TYPE, TOKEN_NULL, NULL);
+        Token type_tok;
+
+        expect(ts, TOKEN_RARROW);
+        type_tok = get_from_ts(ts);
+        if (type_tok.type != TOKEN_KEYWORD && type_tok.type != TOKEN_IDENTIFIER) {
+            parse_error(type_tok, "expected return type");
+        }
+        add_child(return_type, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+        add_child(node, return_type);
+    }
+
+    expect(ts, TOKEN_COLON);
+    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    add_child(node, parse_SUITE(ts));
+    expect(ts, TOKEN_DEDENT);
+
+    return node;
+}
+
+static ParseNode *parse_PARAMETERS(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_PARAMETERS, TOKEN_NULL, NULL);
+
+    if (peek_ts(ts).type == TOKEN_RPAREN) {
+        add_child(node, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+        return node;
+    }
+
+    while (1) {
+        Token param = expect(ts, TOKEN_IDENTIFIER);
+        add_child(node, create_node(NODE_PARAMETER, param.type, param.value));
+
+        if (peek_ts(ts).type != TOKEN_COMMA) {
+            break;
+        }
+        get_from_ts(ts);
+    }
+
+    return node;
 }
 
 ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
 {
-    ParseNode *n = create_node(NODE_STATEMENT_TAIL, TOKEN_NULL, NULL);
+    ParseNode *node = create_node(NODE_STATEMENT_TAIL, TOKEN_NULL, NULL);
     Token look = peek_ts(ts);
+
     if (look.type == TOKEN_COLON) {
+        Token type_tok;
+
         expect(ts, TOKEN_COLON);
-        add_child(n, create_node(NODE_COLON, TOKEN_COLON, ":"));
-        Token type_tok = expect(ts, TOKEN_KEYWORD);
-        add_child(n, create_node(NODE_TERMINAL, type_tok.type, type_tok.value));
+        add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+
+        type_tok = get_from_ts(ts);
+        if (type_tok.type != TOKEN_KEYWORD && type_tok.type != TOKEN_IDENTIFIER) {
+            parse_error(type_tok, "expected type name");
+        }
+        add_child(node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+
         expect(ts, TOKEN_ASSIGN);
-        add_child(n, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
-        add_child(n, parse_EXPRESSION(ts));
-    } else if (look.type == TOKEN_ASSIGN) {
-        expect(ts, TOKEN_ASSIGN);
-        add_child(n, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
-        add_child(n, parse_EXPRESSION(ts));
-    } else {
-        fprintf(stderr, "Parse error in STATEMENT_TAIL: unexpected token %s\n", look.value);
-        exit(1);
+        add_child(node, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
+        add_child(node, parse_EXPRESSION(ts));
+        return node;
     }
-    return n;
+
+    if (look.type == TOKEN_ASSIGN) {
+        expect(ts, TOKEN_ASSIGN);
+        add_child(node, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
+        add_child(node, parse_EXPRESSION(ts));
+        return node;
+    }
+
+    parse_error(look, "unexpected token in statement tail");
+    return NULL;
+}
+
+static ParseNode *parse_SUITE(TokenStream *ts)
+{
+    return parse_statement_list(ts, TOKEN_DEDENT, NODE_SUITE);
+}
+
+static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_EXPRESSION_STATEMENT, TOKEN_NULL, NULL);
+
+    add_child(node, parse_EXPRESSION(ts));
+    return node;
 }
 
 ParseNode *parse_EXPRESSION(TokenStream *ts)
 {
-    ParseNode *n = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
-    add_child(n, parse_TERMINAL(ts));
-    add_child(n, parse_EXPRESSION_PRIME(ts));
-    return n;
-}
+    ParseNode *node = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
 
-ParseNode *parse_EXPRESSION_PRIME(TokenStream *ts)
-{
-    Token look = peek_ts(ts);
-    if (look.type == TOKEN_PLUS || look.type == TOKEN_MINUS || look.type == TOKEN_OPERATOR) {
-        ParseNode *n = create_node(NODE_EXPRESSION_PRIME, TOKEN_NULL, NULL);
+    add_child(node, parse_PRIMARY(ts));
+    while (is_operator_token(peek_ts(ts))) {
         Token op = get_from_ts(ts);
-        add_child(n, create_node(NODE_OPERATOR, op.type, op.value));
-        add_child(n, parse_TERMINAL(ts));
-        add_child(n, parse_EXPRESSION_PRIME(ts));
-        return n;
+        add_child(node, create_node(NODE_OPERATOR, op.type, op.value));
+        add_child(node, parse_PRIMARY(ts));
     }
-    return create_node(NODE_EPSILON, TOKEN_NULL, "ε");
+
+    return node;
 }
 
-ParseNode *parse_TERMINAL(TokenStream *ts)
+static ParseNode *parse_PRIMARY(TokenStream *ts)
 {
-    Token t = peek_ts(ts);
-    ParseNode *n = create_node(NODE_TERMINAL, TOKEN_NULL, NULL);
-    if (t.type == TOKEN_NUMBER || t.type == TOKEN_IDENTIFIER) {
-        t = get_from_ts(ts);
-        n->value = strdup(t.value);
-        return n;
+    Token tok = peek_ts(ts);
+
+    if (tok.type == TOKEN_NUMBER) {
+        tok = get_from_ts(ts);
+        return create_node(NODE_PRIMARY, tok.type, tok.value);
     }
-    fprintf(stderr, "Parse error: expected TERMINAL but got %s\n", t.value);
-    exit(1);
+
+    if (tok.type == TOKEN_IDENTIFIER) {
+        ParseNode *base;
+
+        tok = get_from_ts(ts);
+        base = create_node(NODE_PRIMARY, tok.type, tok.value);
+
+        if (peek_ts(ts).type == TOKEN_LPAREN) {
+            ParseNode *call = create_node(NODE_CALL, TOKEN_NULL, NULL);
+
+            add_child(call, base);
+            expect(ts, TOKEN_LPAREN);
+            add_child(call, parse_ARGUMENTS(ts));
+            expect(ts, TOKEN_RPAREN);
+            return call;
+        }
+
+        return base;
+    }
+
+    if (tok.type == TOKEN_LPAREN) {
+        expect(ts, TOKEN_LPAREN);
+        ParseNode *expr = parse_EXPRESSION(ts);
+        expect(ts, TOKEN_RPAREN);
+        return expr;
+    }
+
+    parse_error(tok, "expected expression");
+    return NULL;
+}
+
+static ParseNode *parse_ARGUMENTS(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_ARGUMENTS, TOKEN_NULL, NULL);
+
+    if (peek_ts(ts).type == TOKEN_RPAREN) {
+        add_child(node, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+        return node;
+    }
+
+    while (1) {
+        add_child(node, parse_EXPRESSION(ts));
+        if (peek_ts(ts).type != TOKEN_COMMA) {
+            break;
+        }
+        get_from_ts(ts);
+    }
+
+    return node;
 }
 
 ParseNode *parse(TokenStream *ts)
 {
     ParseNode *root = parse_S(ts);
-    Token look = peek_ts(ts);
-    if (look.type != TOKEN_EOF) {
-        fprintf(stderr, "Warning: tokens remaining after parse\n");
+
+    if (peek_ts(ts).type != TOKEN_EOF) {
+        parse_error(peek_ts(ts), "unexpected tokens remaining after parse");
     }
+
     return root;
 }

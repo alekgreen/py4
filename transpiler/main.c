@@ -2,9 +2,11 @@
 #include "lexer.h"
 #include "parse.h"
 
-int main(void)
+int main(int argc, char **argv)
 {
-    FILE *fp = fopen("example0.p4", "r");
+    const char *input_path = argc > 1 ? argv[1] : "example0.p4";
+    FILE *fp = fopen(input_path, "r");
+
     if (!fp) {
         perror("fopen");
         return 1;
