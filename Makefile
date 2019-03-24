@@ -1,7 +1,7 @@
 CC := gcc
 CFLAGS := -Wall -Wextra -Wpedantic -std=c11
 TARGET := py4
-PY4_SRC := transpiler/main.c transpiler/lexer.c transpiler/parse.c transpiler/token.c transpiler/codegen.c
+PY4_SRC := transpiler/main.c transpiler/lexer.c transpiler/parse.c transpiler/token.c transpiler/codegen.c transpiler/semantic.c
 
 INPUT ?= examples/functions.p4
 OUTPUT ?= out.c
@@ -19,7 +19,7 @@ transpile: $(TARGET)
 
 run: transpile
 	$(CC) -std=c11 $(OUTPUT) -o $(RUN_TARGET)
-	$(RUN_TARGET)
+	$(if $(filter /%,$(RUN_TARGET)),$(RUN_TARGET),./$(RUN_TARGET))
 
 clean:
 	rm -f $(TARGET) $(OUTPUT) $(RUN_TARGET)

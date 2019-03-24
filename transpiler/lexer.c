@@ -11,6 +11,7 @@
 
 static const char *KEYWORDS[] = {
     "def",
+    "return",
     "int",
     "None",
     NULL

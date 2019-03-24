@@ -10,6 +10,8 @@ typedef struct {
     int indent_level;
     int has_user_main;
     int has_top_level_simple_statements;
+    int current_function_is_main;
+    const char *current_function_return_type;
 } CodegenContext;
 
 static void codegen_error(const char *message, ...)
@@ -220,9 +222,36 @@ static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr
     fputs(";\n", ctx->out);
 }
 
+static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_stmt)
+{
+    emit_indent(ctx);
+
+    if (return_stmt->child_count != 1) {
+        codegen_error("malformed return statement");
+    }
+
+    if (is_epsilon_node(return_stmt->children[0])) {
+        if (ctx->current_function_is_main) {
+            fputs("return 0;\n", ctx->out);
+        } else {
+            fputs("return;\n", ctx->out);
+        }
+        return;
+    }
+
+    fputs("return ", ctx->out);
+    emit_expression(ctx, return_stmt->children[0]);
+    fputs(";\n", ctx->out);
+}
+
 static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *simple_stmt)
 {
     const ParseNode *first_child = simple_stmt->children[0];
+
+    if (first_child->kind == NODE_RETURN_STATEMENT) {
+        emit_return_statement(ctx, first_child);
+        return;
+    }
 
     if (first_child->kind == NODE_EXPRESSION_STATEMENT) {
         emit_expression_statement(ctx, first_child);
@@ -335,10 +364,14 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
 {
     int is_c_main = is_main_function(function_def);
     const char *return_type = function_return_type(function_def);
+    int prev_is_main = ctx->current_function_is_main;
+    const char *prev_return_type = ctx->current_function_return_type;
 
     emit_function_signature(ctx, function_def, 0);
     fputs("\n{\n", ctx->out);
     ctx->indent_level++;
+    ctx->current_function_is_main = is_c_main;
+    ctx->current_function_return_type = return_type;
 
     if (is_c_main && ctx->has_top_level_simple_statements) {
         emit_indent(ctx);
@@ -347,11 +380,13 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
 
     emit_suite(ctx, function_suite(function_def));
 
-    if (is_c_main || strcmp(return_type, "int") == 0) {
+    if (is_c_main) {
         emit_indent(ctx);
         fputs("return 0;\n", ctx->out);
     }
 
+    ctx->current_function_is_main = prev_is_main;
+    ctx->current_function_return_type = prev_return_type;
     ctx->indent_level--;
     fputs("}\n", ctx->out);
 }
@@ -473,6 +508,10 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             if (payload->children[0]->kind == NODE_EXPRESSION_STATEMENT) {
                 emit_expression_statement(ctx, payload->children[0]);
                 continue;
+            }
+
+            if (payload->children[0]->kind == NODE_RETURN_STATEMENT) {
+                codegen_error("return is not valid at module scope");
             }
 
             name = simple_statement_name(payload);

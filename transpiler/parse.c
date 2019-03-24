@@ -69,6 +69,7 @@ static void skip_newlines(TokenStream *ts)
 }
 
 static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts);
+static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
@@ -128,6 +129,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_S:                    return "PROGRAM";
         case NODE_STATEMENT:            return "STATEMENT";
         case NODE_SIMPLE_STATEMENT:     return "SIMPLE_STATEMENT";
+        case NODE_RETURN_STATEMENT:     return "RETURN_STATEMENT";
         case NODE_STATEMENT_TAIL:       return "STATEMENT_TAIL";
         case NODE_FUNCTION_DEF:         return "FUNCTION_DEF";
         case NODE_PARAMETERS:           return "PARAMETERS";
@@ -209,6 +211,11 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
     Token first = peek_ts(ts);
     Token second = peek_n(ts, 1);
 
+    if (is_keyword_token(first, "return")) {
+        add_child(node, parse_RETURN_STATEMENT(ts));
+        return node;
+    }
+
     if (first.type == TOKEN_IDENTIFIER &&
         (second.type == TOKEN_COLON || second.type == TOKEN_ASSIGN)) {
         Token identifier = expect(ts, TOKEN_IDENTIFIER);
@@ -218,6 +225,21 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
     }
 
     add_child(node, parse_EXPRESSION_STATEMENT(ts));
+    return node;
+}
+
+static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_RETURN_STATEMENT, TOKEN_NULL, NULL);
+
+    expect_keyword(ts, "return");
+    if (peek_ts(ts).type == TOKEN_NEWLINE || peek_ts(ts).type == TOKEN_DEDENT ||
+        peek_ts(ts).type == TOKEN_EOF) {
+        add_child(node, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+        return node;
+    }
+
+    add_child(node, parse_EXPRESSION(ts));
     return node;
 }
 

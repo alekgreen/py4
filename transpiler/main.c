@@ -4,6 +4,7 @@
 #include "codegen.h"
 #include "lexer.h"
 #include "parse.h"
+#include "semantic.h"
 
 int main(int argc, char **argv)
 {
@@ -43,6 +44,7 @@ int main(int argc, char **argv)
         print_tree(root, 0);
     }
 
+    typecheck_program(root);
     emit_c_program(stdout, root);
 
     free_tree(root);
