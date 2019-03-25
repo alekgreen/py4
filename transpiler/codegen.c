@@ -83,6 +83,9 @@ static const char *map_type_name(const ParseNode *type_node)
     if (strcmp(type_node->value, "int") == 0) {
         return "int";
     }
+    if (strcmp(type_node->value, "float") == 0) {
+        return "double";
+    }
     if (strcmp(type_node->value, "None") == 0) {
         return "void";
     }
@@ -203,8 +206,9 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         codegen_error("print currently supports exactly one argument");
     }
 
-    fputs("printf(\"%d\\n\", ", ctx->out);
+    fputs("printf(\"%g\\n\", (double)(", ctx->out);
     emit_expression(ctx, arguments->children[0]);
+    fputc(')', ctx->out);
     fputs(");\n", ctx->out);
 }
 
@@ -333,11 +337,12 @@ static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters
 
     for (size_t i = 0; i < parameters->child_count; i++) {
         const ParseNode *param = parameters->children[i];
+        const ParseNode *type_node = expect_child(param, 0, NODE_PRIMARY);
 
         if (i > 0) {
             fputs(", ", ctx->out);
         }
-        fprintf(ctx->out, "int %s", param->value);
+        fprintf(ctx->out, "%s %s", map_type_name(type_node), param->value);
     }
 }
 

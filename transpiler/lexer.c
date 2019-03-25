@@ -13,6 +13,7 @@ static const char *KEYWORDS[] = {
     "def",
     "return",
     "int",
+    "float",
     "None",
     NULL
 };
@@ -155,9 +156,14 @@ static void tokenize_line(TokenStream *ts, const char *cursor)
         }
 
         if (is_digit(*cursor)) {
+            int seen_dot = 0;
+
             start = cursor;
             cursor++;
-            while (is_digit(*cursor)) {
+            while (is_digit(*cursor) || (!seen_dot && *cursor == '.' && is_digit(cursor[1]))) {
+                if (*cursor == '.') {
+                    seen_dot = 1;
+                }
                 cursor++;
             }
             push_buffered_token(ts, TOKEN_NUMBER, start, (size_t)(cursor - start));
@@ -267,7 +273,26 @@ Token next_token(FILE *fp)
     }
 
     if (is_digit((char)c)) {
-        while (is_digit((char)fpeek(fp))) {
+        int seen_dot = 0;
+
+        while (is_digit((char)fpeek(fp)) ||
+            (!seen_dot && fpeek(fp) == '.')) {
+            if (fpeek(fp) == '.') {
+                int dot = fgetc(fp);
+                int next = fpeek(fp);
+
+                if (!is_digit((char)next)) {
+                    ungetc(dot, fp);
+                    break;
+                }
+                seen_dot = 1;
+                if (i + 1 >= (int)sizeof(buffer)) {
+                    fprintf(stderr, "Lexer error: token too long\n");
+                    exit(1);
+                }
+                buffer[i++] = (char)dot;
+                continue;
+            }
             if (i + 1 >= (int)sizeof(buffer)) {
                 fprintf(stderr, "Lexer error: token too long\n");
                 exit(1);

@@ -291,7 +291,16 @@ static ParseNode *parse_PARAMETERS(TokenStream *ts)
 
     while (1) {
         Token param = expect(ts, TOKEN_IDENTIFIER);
-        add_child(node, create_node(NODE_PARAMETER, param.type, param.value));
+        ParseNode *param_node = create_node(NODE_PARAMETER, param.type, param.value);
+        Token type_tok;
+
+        expect(ts, TOKEN_COLON);
+        type_tok = get_from_ts(ts);
+        if (type_tok.type != TOKEN_KEYWORD && type_tok.type != TOKEN_IDENTIFIER) {
+            parse_error(type_tok, "expected parameter type");
+        }
+        add_child(param_node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+        add_child(node, param_node);
 
         if (peek_ts(ts).type != TOKEN_COMMA) {
             break;

@@ -7,6 +7,7 @@
 
 typedef enum {
     TYPE_INT,
+    TYPE_FLOAT,
     TYPE_NONE
 } ValueType;
 
@@ -69,6 +70,9 @@ static ValueType parse_type_name(const char *name)
     if (strcmp(name, "int") == 0) {
         return TYPE_INT;
     }
+    if (strcmp(name, "float") == 0) {
+        return TYPE_FLOAT;
+    }
     if (strcmp(name, "None") == 0) {
         return TYPE_NONE;
     }
@@ -80,9 +84,23 @@ static const char *type_name(ValueType type)
 {
     switch (type) {
         case TYPE_INT: return "int";
+        case TYPE_FLOAT: return "float";
         case TYPE_NONE: return "None";
         default: return "unknown";
     }
+}
+
+static int is_numeric_type(ValueType type)
+{
+    return type == TYPE_INT || type == TYPE_FLOAT;
+}
+
+static int is_assignable(ValueType target, ValueType value)
+{
+    if (target == value) {
+        return 1;
+    }
+    return target == TYPE_FLOAT && value == TYPE_INT;
 }
 
 static int is_epsilon_node(const ParseNode *node)
@@ -163,6 +181,21 @@ static int is_print_call(const ParseNode *call)
     return callee->value != NULL && strcmp(callee->value, "print") == 0;
 }
 
+static const ParseNode *function_parameter(const ParseNode *function_def, size_t index)
+{
+    const ParseNode *parameters = expect_child(function_def, 1, NODE_PARAMETERS);
+
+    return expect_child(parameters, index, NODE_PARAMETER);
+}
+
+static ValueType parameter_type(const ParseNode *function_def, size_t index)
+{
+    const ParseNode *param = function_parameter(function_def, index);
+    const ParseNode *type_node = expect_child(param, 0, NODE_PRIMARY);
+
+    return parse_type_name(type_node->value);
+}
+
 static ValueType infer_call_type(
     const ParseNode *call,
     Scope *scope,
@@ -178,8 +211,8 @@ static ValueType infer_call_type(
         if (arguments->child_count != 1) {
             semantic_error("print expects zero or one argument");
         }
-        if (infer_expression_type(arguments->children[0], scope, functions) != TYPE_INT) {
-            semantic_error("print argument must be int");
+        if (!is_numeric_type(infer_expression_type(arguments->children[0], scope, functions))) {
+            semantic_error("print argument must be numeric");
         }
         return TYPE_NONE;
     }
@@ -201,8 +234,12 @@ static ValueType infer_call_type(
     }
 
     for (size_t i = 0; i < arguments->child_count; i++) {
-        if (infer_expression_type(arguments->children[i], scope, functions) != TYPE_INT) {
-            semantic_error("function '%s' arguments must be int", fn->name);
+        ValueType expected = parameter_type(fn->node, i);
+        ValueType actual = infer_expression_type(arguments->children[i], scope, functions);
+
+        if (!is_assignable(expected, actual)) {
+            semantic_error("function '%s' argument %zu expects %s but got %s",
+                fn->name, i + 1, type_name(expected), type_name(actual));
         }
     }
 
@@ -216,7 +253,7 @@ static ValueType infer_primary_type(
 {
     if (node->kind == NODE_PRIMARY) {
         if (node->token_type == TOKEN_NUMBER) {
-            return TYPE_INT;
+            return strchr(node->value, '.') != NULL ? TYPE_FLOAT : TYPE_INT;
         }
         if (node->token_type == TOKEN_IDENTIFIER) {
             VariableBinding *var = find_variable(scope, node->value);
@@ -244,6 +281,7 @@ static ValueType infer_expression_type(
     Scope *scope,
     FunctionInfo *functions)
 {
+    const char *op = NULL;
     ValueType type;
 
     if (expr->kind != NODE_EXPRESSION || expr->child_count == 0) {
@@ -255,22 +293,34 @@ static ValueType infer_expression_type(
         return type;
     }
 
-    if (type != TYPE_INT) {
-        semantic_error("operators require int operands");
-    }
-
     for (size_t i = 1; i < expr->child_count; i++) {
         const ParseNode *child = expr->children[i];
 
         if (child->kind == NODE_OPERATOR) {
+            op = child->value;
             continue;
         }
-        if (infer_primary_type(child, scope, functions) != TYPE_INT) {
-            semantic_error("operators require int operands");
+
+        ValueType rhs = infer_primary_type(child, scope, functions);
+        if (!is_numeric_type(type) || !is_numeric_type(rhs)) {
+            semantic_error("operators require numeric operands");
+        }
+
+        if (op != NULL &&
+            (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+             strcmp(op, "<") == 0 || strcmp(op, ">") == 0 ||
+             strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0)) {
+            type = TYPE_INT;
+        } else if (op != NULL && strcmp(op, "/") == 0) {
+            type = TYPE_FLOAT;
+        } else if (type == TYPE_FLOAT || rhs == TYPE_FLOAT) {
+            type = TYPE_FLOAT;
+        } else {
+            type = TYPE_INT;
         }
     }
 
-    return TYPE_INT;
+    return type;
 }
 
 static int is_type_assignment(const ParseNode *statement_tail)
@@ -329,7 +379,7 @@ static void typecheck_return_statement(
     }
 
     ValueType expr_type = infer_expression_type(return_stmt->children[0], scope, functions);
-    if (expr_type != current_function->return_type) {
+    if (!is_assignable(current_function->return_type, expr_type)) {
         semantic_error("function '%s' returns %s but got %s",
             current_function->name,
             type_name(current_function->return_type),
@@ -366,7 +416,7 @@ static void typecheck_simple_statement(
 
     if (is_type_assignment(statement_tail)) {
         ValueType declared_type = parse_type_name(expect_child(statement_tail, 1, NODE_PRIMARY)->value);
-        if (expr_type != declared_type) {
+        if (!is_assignable(declared_type, expr_type)) {
             semantic_error("cannot assign %s to %s '%s'",
                 type_name(expr_type), type_name(declared_type), name->value);
         }
@@ -378,7 +428,7 @@ static void typecheck_simple_statement(
     if (var == NULL) {
         semantic_error("assignment to undeclared variable '%s'", name->value);
     }
-    if (var->type != expr_type) {
+    if (!is_assignable(var->type, expr_type)) {
         semantic_error("cannot assign %s to %s '%s'",
             type_name(expr_type), type_name(var->type), name->value);
     }
@@ -476,7 +526,9 @@ static void typecheck_function(
     if (!(parameters->child_count == 1 && is_epsilon_node(parameters->children[0]))) {
         for (size_t i = 0; i < parameters->child_count; i++) {
             const ParseNode *param = expect_child(parameters, i, NODE_PARAMETER);
-            bind_variable(&local_scope, param->value, TYPE_INT);
+            ValueType param_type = parse_type_name(expect_child(param, 0, NODE_PRIMARY)->value);
+
+            bind_variable(&local_scope, param->value, param_type);
         }
     }
 
