@@ -14,7 +14,12 @@ static const char *KEYWORDS[] = {
     "return",
     "int",
     "float",
+    "bool",
+    "char",
+    "string",
     "None",
+    "True",
+    "False",
     NULL
 };
 
@@ -122,6 +127,44 @@ static void push_buffered_token(TokenStream *ts, TokenType type, const char *sta
     append_token(ts, type, buffer);
 }
 
+static void push_quoted_token(TokenStream *ts, TokenType type, const char **cursor, char quote)
+{
+    char buffer[64];
+    size_t len = 0;
+
+    buffer[len++] = **cursor;
+    (*cursor)++;
+
+    while (**cursor != '\0' && **cursor != '\r' && **cursor != '\n') {
+        if (len + 2 >= sizeof(buffer)) {
+            fprintf(stderr, "Lexer error: string literal too long\n");
+            exit(1);
+        }
+
+        buffer[len++] = **cursor;
+        if (**cursor == '\\') {
+            (*cursor)++;
+            if (**cursor == '\0' || **cursor == '\r' || **cursor == '\n') {
+                fprintf(stderr, "Lexer error: unterminated escape sequence\n");
+                exit(1);
+            }
+            buffer[len++] = **cursor;
+            (*cursor)++;
+            continue;
+        }
+        if (**cursor == quote) {
+            buffer[len] = '\0';
+            (*cursor)++;
+            append_token(ts, type, buffer);
+            return;
+        }
+        (*cursor)++;
+    }
+
+    fprintf(stderr, "Lexer error: unterminated quoted literal\n");
+    exit(1);
+}
+
 static void tokenize_line(TokenStream *ts, const char *cursor)
 {
     while (*cursor != '\0' && *cursor != '\r' && *cursor != '\n') {
@@ -167,6 +210,16 @@ static void tokenize_line(TokenStream *ts, const char *cursor)
                 cursor++;
             }
             push_buffered_token(ts, TOKEN_NUMBER, start, (size_t)(cursor - start));
+            continue;
+        }
+
+        if (*cursor == '"') {
+            push_quoted_token(ts, TOKEN_STRING, &cursor, '"');
+            continue;
+        }
+
+        if (*cursor == '\'') {
+            push_quoted_token(ts, TOKEN_CHAR, &cursor, '\'');
             continue;
         }
 

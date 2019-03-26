@@ -7,6 +7,7 @@
 
 typedef struct {
     FILE *out;
+    const SemanticInfo *semantic;
     int indent_level;
     int has_user_main;
     int has_top_level_simple_statements;
@@ -86,6 +87,15 @@ static const char *map_type_name(const ParseNode *type_node)
     if (strcmp(type_node->value, "float") == 0) {
         return "double";
     }
+    if (strcmp(type_node->value, "bool") == 0) {
+        return "bool";
+    }
+    if (strcmp(type_node->value, "char") == 0) {
+        return "char";
+    }
+    if (strcmp(type_node->value, "string") == 0) {
+        return "const char *";
+    }
     if (strcmp(type_node->value, "None") == 0) {
         return "void";
     }
@@ -164,6 +174,17 @@ static void emit_primary(CodegenContext *ctx, const ParseNode *primary)
         codegen_error("unsupported primary node");
     }
 
+    if (primary->token_type == TOKEN_KEYWORD) {
+        if (strcmp(primary->value, "True") == 0) {
+            fputs("true", ctx->out);
+            return;
+        }
+        if (strcmp(primary->value, "False") == 0) {
+            fputs("false", ctx->out);
+            return;
+        }
+    }
+
     fputs(primary->value, ctx->out);
 }
 
@@ -195,6 +216,7 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
 {
     const ParseNode *call = expr->children[0];
     const ParseNode *arguments = expect_child(call, 1, NODE_ARGUMENTS);
+    ValueType arg_type;
 
     emit_indent(ctx);
     if (arguments->child_count == 1 && is_epsilon_node(arguments->children[0])) {
@@ -206,10 +228,37 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         codegen_error("print currently supports exactly one argument");
     }
 
-    fputs("printf(\"%g\\n\", (double)(", ctx->out);
-    emit_expression(ctx, arguments->children[0]);
-    fputc(')', ctx->out);
-    fputs(");\n", ctx->out);
+    arg_type = semantic_type_of(ctx->semantic, arguments->children[0]);
+    switch (arg_type) {
+        case TYPE_INT:
+            fputs("printf(\"%d\\n\", ", ctx->out);
+            emit_expression(ctx, arguments->children[0]);
+            fputs(");\n", ctx->out);
+            return;
+        case TYPE_FLOAT:
+            fputs("printf(\"%g\\n\", (double)(", ctx->out);
+            emit_expression(ctx, arguments->children[0]);
+            fputc(')', ctx->out);
+            fputs(");\n", ctx->out);
+            return;
+        case TYPE_BOOL:
+            fputs("printf(\"%s\\n\", (", ctx->out);
+            emit_expression(ctx, arguments->children[0]);
+            fputs(") ? \"True\" : \"False\");\n", ctx->out);
+            return;
+        case TYPE_CHAR:
+            fputs("printf(\"%c\\n\", ", ctx->out);
+            emit_expression(ctx, arguments->children[0]);
+            fputs(");\n", ctx->out);
+            return;
+        case TYPE_STRING:
+            fputs("printf(\"%s\\n\", ", ctx->out);
+            emit_expression(ctx, arguments->children[0]);
+            fputs(");\n", ctx->out);
+            return;
+        case TYPE_NONE:
+            codegen_error("cannot print None");
+    }
 }
 
 static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr_stmt)
@@ -563,7 +612,7 @@ static void emit_auto_main(CodegenContext *ctx)
     fputs("}\n", ctx->out);
 }
 
-void emit_c_program(FILE *out, const ParseNode *root)
+void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
 {
     CodegenContext ctx = {0};
 
@@ -572,9 +621,10 @@ void emit_c_program(FILE *out, const ParseNode *root)
     }
 
     ctx.out = out;
+    ctx.semantic = info;
     collect_program_state(&ctx, root);
 
-    fputs("#include <stdio.h>\n\n", out);
+    fputs("#include <stdbool.h>\n#include <stdio.h>\n\n", out);
     emit_global_declarations(&ctx, root);
     emit_function_prototypes(&ctx, root);
     emit_module_init(&ctx, root);

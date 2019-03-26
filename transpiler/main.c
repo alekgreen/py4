@@ -12,6 +12,7 @@ int main(int argc, char **argv)
     int show_tokens = 0;
     int show_tree = 0;
     FILE *fp;
+    SemanticInfo *semantic;
     TokenStream *ts;
     ParseNode *root;
 
@@ -44,9 +45,10 @@ int main(int argc, char **argv)
         print_tree(root, 0);
     }
 
-    typecheck_program(root);
-    emit_c_program(stdout, root);
+    semantic = analyze_program(root);
+    emit_c_program(stdout, root, semantic);
 
+    free_semantic_info(semantic);
     free_tree(root);
     free_token_stream(ts);
 

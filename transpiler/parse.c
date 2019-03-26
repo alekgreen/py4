@@ -39,6 +39,11 @@ static int is_keyword_token(Token tok, const char *value)
     return tok.type == TOKEN_KEYWORD && strcmp(tok.value, value) == 0;
 }
 
+static int is_bool_literal(Token tok)
+{
+    return is_keyword_token(tok, "True") || is_keyword_token(tok, "False");
+}
+
 static int is_operator_token(Token tok)
 {
     return tok.type == TOKEN_PLUS || tok.type == TOKEN_MINUS || tok.type == TOKEN_OPERATOR;
@@ -376,7 +381,8 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
 {
     Token tok = peek_ts(ts);
 
-    if (tok.type == TOKEN_NUMBER) {
+    if (tok.type == TOKEN_NUMBER || tok.type == TOKEN_STRING || tok.type == TOKEN_CHAR ||
+        is_bool_literal(tok)) {
         tok = get_from_ts(ts);
         return create_node(NODE_PRIMARY, tok.type, tok.value);
     }

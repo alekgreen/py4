@@ -92,6 +92,8 @@ const char *token_type_to_str(TokenType type)
         case TOKEN_IDENTIFIER: return "IDENTIFIER";
         case TOKEN_SYMBOL:     return "SYMBOL";
         case TOKEN_NUMBER:     return "NUMBER";
+        case TOKEN_STRING:     return "STRING";
+        case TOKEN_CHAR:       return "CHAR";
         case TOKEN_OPERATOR:   return "OPERATOR";
         case TOKEN_ASSIGN:     return "ASSIGN";
         case TOKEN_PLUS:       return "PLUS";
