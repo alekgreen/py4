@@ -7,7 +7,7 @@ INPUT ?= examples/functions.p4
 OUTPUT ?= out.c
 RUN_TARGET ?= out
 
-.PHONY: all transpile run clean
+.PHONY: all transpile run test clean
 
 all: $(TARGET)
 
@@ -20,6 +20,9 @@ transpile: $(TARGET)
 run: transpile
 	$(CC) -std=c11 $(OUTPUT) -o $(RUN_TARGET)
 	$(if $(filter /%,$(RUN_TARGET)),$(RUN_TARGET),./$(RUN_TARGET))
+
+test: $(TARGET)
+	bash tests/run_tests.sh
 
 clean:
 	rm -f $(TARGET) $(OUTPUT) $(RUN_TARGET)
