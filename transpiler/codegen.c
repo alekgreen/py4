@@ -10,7 +10,7 @@ typedef struct {
     const SemanticInfo *semantic;
     int indent_level;
     int has_user_main;
-    int has_top_level_simple_statements;
+    int has_top_level_executable_statements;
     int current_function_is_main;
     const char *current_function_return_type;
 } CodegenContext;
@@ -332,6 +332,56 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
 }
 
 static void emit_statement(CodegenContext *ctx, const ParseNode *statement, int allow_function_defs);
+static void emit_suite(CodegenContext *ctx, const ParseNode *suite);
+
+static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
+{
+    emit_indent(ctx);
+    fputs("if (", ctx->out);
+    emit_expression(ctx, if_stmt->children[0]);
+    fputs(")\n", ctx->out);
+    emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+    emit_suite(ctx, if_stmt->children[2]);
+    ctx->indent_level--;
+    emit_indent(ctx);
+    fputs("}", ctx->out);
+
+    for (size_t i = 3; i < if_stmt->child_count; i++) {
+        const ParseNode *branch = if_stmt->children[i];
+
+        if (branch->kind == NODE_ELIF_CLAUSE) {
+            fputs(" else if (", ctx->out);
+            emit_expression(ctx, branch->children[0]);
+            fputs(")\n", ctx->out);
+            emit_indent(ctx);
+            fputs("{\n", ctx->out);
+            ctx->indent_level++;
+            emit_suite(ctx, branch->children[2]);
+            ctx->indent_level--;
+            emit_indent(ctx);
+            fputs("}", ctx->out);
+            continue;
+        }
+
+        if (branch->kind == NODE_ELSE_CLAUSE) {
+            fputs(" else\n", ctx->out);
+            emit_indent(ctx);
+            fputs("{\n", ctx->out);
+            ctx->indent_level++;
+            emit_suite(ctx, branch->children[1]);
+            ctx->indent_level--;
+            emit_indent(ctx);
+            fputs("}", ctx->out);
+            continue;
+        }
+
+        codegen_error("malformed if statement");
+    }
+
+    fputc('\n', ctx->out);
+}
 
 static void emit_suite(CodegenContext *ctx, const ParseNode *suite)
 {
@@ -427,7 +477,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     ctx->current_function_is_main = is_c_main;
     ctx->current_function_return_type = return_type;
 
-    if (is_c_main && ctx->has_top_level_simple_statements) {
+    if (is_c_main && ctx->has_top_level_executable_statements) {
         emit_indent(ctx);
         fputs("py4_module_init();\n", ctx->out);
     }
@@ -457,6 +507,11 @@ static void emit_statement(CodegenContext *ctx, const ParseNode *statement, int 
         return;
     }
 
+    if (payload->kind == NODE_IF_STATEMENT) {
+        emit_if_statement(ctx, payload);
+        return;
+    }
+
     if (payload->kind != NODE_SIMPLE_STATEMENT) {
         codegen_error("unsupported statement node");
     }
@@ -473,8 +528,8 @@ static void collect_program_state(CodegenContext *ctx, const ParseNode *root)
             if (is_main_function(payload)) {
                 ctx->has_user_main = 1;
             }
-        } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
-            ctx->has_top_level_simple_statements = 1;
+        } else {
+            ctx->has_top_level_executable_statements = 1;
         }
     }
 }
@@ -519,7 +574,7 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 {
     int wrote_any = 0;
 
-    if (ctx->has_top_level_simple_statements) {
+    if (ctx->has_top_level_executable_statements) {
         fputs("static void py4_module_init(void);\n", ctx->out);
         wrote_any = 1;
     }
@@ -533,7 +588,7 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
         }
     }
 
-    if (!ctx->has_user_main && ctx->has_top_level_simple_statements) {
+    if (!ctx->has_user_main && ctx->has_top_level_executable_statements) {
         fputs("int main(void);\n", ctx->out);
         wrote_any = 1;
     }
@@ -545,7 +600,7 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 
 static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 {
-    if (!ctx->has_top_level_simple_statements) {
+    if (!ctx->has_top_level_executable_statements) {
         return;
     }
 
@@ -576,6 +631,11 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             fprintf(ctx->out, "%s = ", name->value);
             emit_expression(ctx, expr);
             fputs(";\n", ctx->out);
+            continue;
+        }
+
+        if (payload->kind == NODE_IF_STATEMENT) {
+            emit_if_statement(ctx, payload);
         }
     }
     ctx->indent_level--;
@@ -602,7 +662,7 @@ static void emit_auto_main(CodegenContext *ctx)
 
     fputs("int main(void)\n{\n", ctx->out);
     ctx->indent_level++;
-    if (ctx->has_top_level_simple_statements) {
+    if (ctx->has_top_level_executable_statements) {
         emit_indent(ctx);
         fputs("py4_module_init();\n", ctx->out);
     }

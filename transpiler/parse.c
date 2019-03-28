@@ -44,6 +44,11 @@ static int is_bool_literal(Token tok)
     return is_keyword_token(tok, "True") || is_keyword_token(tok, "False");
 }
 
+static int is_block_continuation(Token tok)
+{
+    return is_keyword_token(tok, "elif") || is_keyword_token(tok, "else");
+}
+
 static int is_operator_token(Token tok)
 {
     return tok.type == TOKEN_PLUS || tok.type == TOKEN_MINUS || tok.type == TOKEN_OPERATOR;
@@ -75,6 +80,7 @@ static void skip_newlines(TokenStream *ts)
 
 static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts);
+static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
@@ -135,6 +141,9 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_STATEMENT:            return "STATEMENT";
         case NODE_SIMPLE_STATEMENT:     return "SIMPLE_STATEMENT";
         case NODE_RETURN_STATEMENT:     return "RETURN_STATEMENT";
+        case NODE_IF_STATEMENT:         return "IF_STATEMENT";
+        case NODE_ELIF_CLAUSE:          return "ELIF_CLAUSE";
+        case NODE_ELSE_CLAUSE:          return "ELSE_CLAUSE";
         case NODE_STATEMENT_TAIL:       return "STATEMENT_TAIL";
         case NODE_FUNCTION_DEF:         return "FUNCTION_DEF";
         case NODE_PARAMETERS:           return "PARAMETERS";
@@ -180,7 +189,9 @@ static ParseNode *parse_statement_list(TokenStream *ts, TokenType terminator, No
     ParseNode *root = create_node(kind, TOKEN_NULL, NULL);
 
     skip_newlines(ts);
-    while (peek_ts(ts).type != terminator && peek_ts(ts).type != TOKEN_EOF) {
+    while (peek_ts(ts).type != terminator &&
+        peek_ts(ts).type != TOKEN_EOF &&
+        !is_block_continuation(peek_ts(ts))) {
         add_child(root, parse_STATEMENT(ts));
         skip_newlines(ts);
     }
@@ -203,6 +214,8 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
 
     if (is_keyword_token(peek_ts(ts), "def")) {
         add_child(node, parse_FUNCTION_DEF(ts));
+    } else if (is_keyword_token(peek_ts(ts), "if")) {
+        add_child(node, parse_IF_STATEMENT(ts));
     } else {
         add_child(node, parse_SIMPLE_STATEMENT(ts));
     }
@@ -281,6 +294,51 @@ static ParseNode *parse_FUNCTION_DEF(TokenStream *ts)
     expect(ts, TOKEN_INDENT);
     add_child(node, parse_SUITE(ts));
     expect(ts, TOKEN_DEDENT);
+
+    return node;
+}
+
+static ParseNode *parse_IF_STATEMENT(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_IF_STATEMENT, TOKEN_NULL, NULL);
+
+    expect_keyword(ts, "if");
+    add_child(node, parse_EXPRESSION(ts));
+    expect(ts, TOKEN_COLON);
+    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    add_child(node, parse_SUITE(ts));
+    expect(ts, TOKEN_DEDENT);
+
+    while (is_keyword_token(peek_ts(ts), "elif")) {
+        ParseNode *elif_node = create_node(NODE_ELIF_CLAUSE, TOKEN_NULL, NULL);
+
+        expect_keyword(ts, "elif");
+        add_child(elif_node, parse_EXPRESSION(ts));
+        expect(ts, TOKEN_COLON);
+        add_child(elif_node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+        expect(ts, TOKEN_NEWLINE);
+        expect(ts, TOKEN_INDENT);
+        add_child(elif_node, parse_SUITE(ts));
+        expect(ts, TOKEN_DEDENT);
+
+        add_child(node, elif_node);
+    }
+
+    if (is_keyword_token(peek_ts(ts), "else")) {
+        ParseNode *else_node = create_node(NODE_ELSE_CLAUSE, TOKEN_NULL, NULL);
+
+        expect_keyword(ts, "else");
+        expect(ts, TOKEN_COLON);
+        add_child(else_node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+        expect(ts, TOKEN_NEWLINE);
+        expect(ts, TOKEN_INDENT);
+        add_child(else_node, parse_SUITE(ts));
+        expect(ts, TOKEN_DEDENT);
+
+        add_child(node, else_node);
+    }
 
     return node;
 }

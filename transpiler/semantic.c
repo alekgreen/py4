@@ -70,6 +70,11 @@ static const ParseNode *statement_payload(const ParseNode *statement)
     return statement->children[0];
 }
 
+static int is_if_statement(const ParseNode *node)
+{
+    return node->kind == NODE_IF_STATEMENT;
+}
+
 static int is_epsilon_node(const ParseNode *node)
 {
     return node->kind == NODE_EPSILON;
@@ -481,6 +486,24 @@ static void typecheck_statement(
     FunctionContext *current_function,
     int allow_function_defs);
 
+static void typecheck_branch_suite(
+    SemanticInfo *info,
+    const ParseNode *suite,
+    Scope *parent_scope,
+    FunctionContext *current_function)
+{
+    Scope branch_scope = {0};
+
+    branch_scope.parent = parent_scope;
+    if (!(suite->child_count == 1 && is_epsilon_node(suite->children[0]))) {
+        for (size_t i = 0; i < suite->child_count; i++) {
+            typecheck_statement(info, suite->children[i], &branch_scope, current_function, 0);
+        }
+    }
+
+    free_scope_bindings(branch_scope.vars);
+}
+
 static void typecheck_return_statement(
     SemanticInfo *info,
     const ParseNode *return_stmt,
@@ -581,6 +604,41 @@ static void typecheck_suite(
     }
 }
 
+static void typecheck_if_statement(
+    SemanticInfo *info,
+    const ParseNode *if_stmt,
+    Scope *scope,
+    FunctionContext *current_function)
+{
+    ValueType condition_type = infer_expression_type(info, if_stmt->children[0], scope);
+
+    if (condition_type != TYPE_BOOL) {
+        semantic_error("if condition must be bool");
+    }
+
+    typecheck_branch_suite(info, if_stmt->children[2], scope, current_function);
+
+    for (size_t i = 3; i < if_stmt->child_count; i++) {
+        const ParseNode *branch = if_stmt->children[i];
+
+        if (branch->kind == NODE_ELIF_CLAUSE) {
+            ValueType elif_type = infer_expression_type(info, branch->children[0], scope);
+            if (elif_type != TYPE_BOOL) {
+                semantic_error("elif condition must be bool");
+            }
+            typecheck_branch_suite(info, branch->children[2], scope, current_function);
+            continue;
+        }
+
+        if (branch->kind == NODE_ELSE_CLAUSE) {
+            typecheck_branch_suite(info, branch->children[1], scope, current_function);
+            continue;
+        }
+
+        semantic_error("malformed if statement");
+    }
+}
+
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -668,6 +726,11 @@ static void typecheck_statement(
         return;
     }
 
+    if (is_if_statement(payload)) {
+        typecheck_if_statement(info, payload, scope, current_function);
+        return;
+    }
+
     if (payload->kind != NODE_SIMPLE_STATEMENT) {
         semantic_error("unsupported statement node");
     }
@@ -698,7 +761,7 @@ SemanticInfo *analyze_program(const ParseNode *root)
         if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
         } else {
-            typecheck_simple_statement(info, payload, &global_scope, NULL);
+            typecheck_statement(info, root->children[i], &global_scope, NULL, 0);
         }
     }
 
