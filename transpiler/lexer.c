@@ -19,6 +19,7 @@ static const char *KEYWORDS[] = {
     "float",
     "bool",
     "char",
+    "str",
     "string",
     "None",
     "True",
@@ -286,6 +287,9 @@ static void tokenize_line(TokenStream *ts, const char *cursor)
             case ',':
                 append_token(ts, TOKEN_COMMA, ",");
                 break;
+            case '|':
+                append_token(ts, TOKEN_OPERATOR, "|");
+                break;
             default: {
                 char value[2] = { *cursor, '\0' };
                 append_token(ts, TOKEN_SYMBOL, value);
@@ -383,6 +387,7 @@ Token next_token(FILE *fp)
         case ')': return make_token(TOKEN_RPAREN, buffer);
         case ':': return make_token(TOKEN_COLON, buffer);
         case ',': return make_token(TOKEN_COMMA, buffer);
+        case '|': return make_token(TOKEN_OPERATOR, buffer);
         default: return make_token(TOKEN_SYMBOL, buffer);
     }
 }

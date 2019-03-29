@@ -80,17 +80,82 @@ static int is_epsilon_node(const ParseNode *node)
     return node->kind == NODE_EPSILON;
 }
 
-const char *semantic_type_name(ValueType type)
+static int count_type_bits(ValueType type)
+{
+    int count = 0;
+
+    while (type != 0) {
+        count += (type & 1u) != 0;
+        type >>= 1u;
+    }
+
+    return count;
+}
+
+int semantic_type_contains(ValueType type, ValueType member)
+{
+    return member != 0 && (type & member) == member;
+}
+
+int semantic_type_is_union(ValueType type)
+{
+    return count_type_bits(type) > 1;
+}
+
+static const char *type_member_name(ValueType type)
 {
     switch (type) {
         case TYPE_INT: return "int";
         case TYPE_FLOAT: return "float";
         case TYPE_BOOL: return "bool";
         case TYPE_CHAR: return "char";
-        case TYPE_STRING: return "string";
+        case TYPE_STR: return "str";
         case TYPE_NONE: return "None";
         default: return "unknown";
     }
+}
+
+const char *semantic_type_name(ValueType type)
+{
+    static char buffers[8][96];
+    static int next_buffer = 0;
+    char *buffer;
+    size_t used = 0;
+    int first = 1;
+    const ValueType ordered_types[] = {
+        TYPE_INT,
+        TYPE_FLOAT,
+        TYPE_BOOL,
+        TYPE_CHAR,
+        TYPE_STR,
+        TYPE_NONE
+    };
+
+    if (type == TYPE_INT || type == TYPE_FLOAT || type == TYPE_BOOL ||
+        type == TYPE_CHAR || type == TYPE_STR || type == TYPE_NONE) {
+        return type_member_name(type);
+    }
+
+    buffer = buffers[next_buffer];
+    next_buffer = (next_buffer + 1) % 8;
+    buffer[0] = '\0';
+
+    for (size_t i = 0; i < sizeof(ordered_types) / sizeof(ordered_types[0]); i++) {
+        if (!semantic_type_contains(type, ordered_types[i])) {
+            continue;
+        }
+
+        used += snprintf(buffer + used, sizeof(buffers[0]) - used, "%s%s",
+            first ? "" : " | ",
+            type_member_name(ordered_types[i]));
+        first = 0;
+    }
+
+    if (first) {
+        snprintf(buffer, sizeof(buffers[0]), "unknown");
+    }
+
+    return buffer;
 }
 
 static int is_numeric_type(ValueType type)
@@ -100,13 +165,38 @@ static int is_numeric_type(ValueType type)
 
 static int is_assignable(ValueType target, ValueType value)
 {
-    if (target == value) {
-        return 1;
+    const ValueType source_members[] = {
+        TYPE_INT,
+        TYPE_FLOAT,
+        TYPE_BOOL,
+        TYPE_CHAR,
+        TYPE_STR,
+        TYPE_NONE
+    };
+
+    if (target == 0 || value == 0) {
+        return 0;
     }
-    return target == TYPE_FLOAT && value == TYPE_INT;
+
+    for (size_t i = 0; i < sizeof(source_members) / sizeof(source_members[0]); i++) {
+        ValueType member = source_members[i];
+
+        if (!semantic_type_contains(value, member)) {
+            continue;
+        }
+        if (semantic_type_contains(target, member)) {
+            continue;
+        }
+        if (member == TYPE_INT && semantic_type_contains(target, TYPE_FLOAT)) {
+            continue;
+        }
+        return 0;
+    }
+
+    return 1;
 }
 
-static ValueType parse_type_name(const char *name)
+static ValueType parse_type_atom_name(const char *name)
 {
     if (strcmp(name, "int") == 0) {
         return TYPE_INT;
@@ -120,14 +210,15 @@ static ValueType parse_type_name(const char *name)
     if (strcmp(name, "char") == 0) {
         return TYPE_CHAR;
     }
-    if (strcmp(name, "string") == 0) {
-        return TYPE_STRING;
+    if (strcmp(name, "str") == 0 || strcmp(name, "string") == 0) {
+        return TYPE_STR;
     }
     if (strcmp(name, "None") == 0) {
         return TYPE_NONE;
     }
+
     semantic_error("unsupported type '%s'", name);
-    return TYPE_NONE;
+    return 0;
 }
 
 static void record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type)
@@ -144,6 +235,7 @@ static void record_node_type(SemanticInfo *info, const ParseNode *node, ValueTyp
         perror("malloc");
         exit(1);
     }
+
     entry->node = node;
     entry->type = type;
     entry->next = info->node_types;
@@ -157,8 +249,33 @@ ValueType semantic_type_of(const SemanticInfo *info, const ParseNode *node)
             return curr->type;
         }
     }
+
     semantic_error("missing semantic type information");
-    return TYPE_NONE;
+    return 0;
+}
+
+static ValueType parse_type_node(SemanticInfo *info, const ParseNode *type_node)
+{
+    ValueType type = 0;
+
+    if (type_node == NULL || type_node->kind != NODE_TYPE || type_node->child_count == 0) {
+        semantic_error("malformed type annotation");
+    }
+
+    for (size_t i = 0; i < type_node->child_count; i++) {
+        const ParseNode *member = expect_child(type_node, i, NODE_PRIMARY);
+        ValueType atom = parse_type_atom_name(member->value);
+
+        if (semantic_type_contains(type, atom)) {
+            semantic_error("duplicate type '%s' in union", member->value);
+        }
+
+        record_node_type(info, member, atom);
+        type |= atom;
+    }
+
+    record_node_type(info, type_node, type);
+    return type;
 }
 
 static FunctionInfo *find_function(FunctionInfo *functions, const char *name)
@@ -226,12 +343,13 @@ static const ParseNode *function_parameters(const ParseNode *function_def)
     return expect_child(function_def, 1, NODE_PARAMETERS);
 }
 
-static ValueType function_return_type(const ParseNode *function_def)
+static ValueType function_return_type(SemanticInfo *info, const ParseNode *function_def)
 {
     if (function_def->child_count >= 3 && function_def->children[2]->kind == NODE_RETURN_TYPE) {
-        const ParseNode *type_node = expect_child(function_def->children[2], 0, NODE_PRIMARY);
-        return parse_type_name(type_node->value);
+        const ParseNode *type_node = expect_child(function_def->children[2], 0, NODE_TYPE);
+        return parse_type_node(info, type_node);
     }
+
     return TYPE_NONE;
 }
 
@@ -243,9 +361,9 @@ static size_t parameter_count(const ParseNode *parameters)
     return parameters->child_count;
 }
 
-static ValueType parameter_type(const ParseNode *parameter)
+static ValueType parameter_type(SemanticInfo *info, const ParseNode *parameter)
 {
-    return parse_type_name(expect_child(parameter, 0, NODE_PRIMARY)->value);
+    return parse_type_node(info, expect_child(parameter, 0, NODE_TYPE));
 }
 
 static int is_print_call(const ParseNode *call)
@@ -340,7 +458,7 @@ static ValueType infer_primary_type(
             type = strchr(node->value, '.') != NULL ? TYPE_FLOAT : TYPE_INT;
             break;
         case TOKEN_STRING:
-            type = TYPE_STRING;
+            type = TYPE_STR;
             break;
         case TOKEN_CHAR:
             type = TYPE_CHAR;
@@ -417,6 +535,10 @@ static ValueType infer_expression_type(
             semantic_error("missing operator in expression");
         }
 
+        if (semantic_type_is_union(type) || semantic_type_is_union(rhs)) {
+            semantic_error("operator '%s' does not support union operands yet", op);
+        }
+
         if (is_arithmetic_operator(op)) {
             if (!is_numeric_type(type) || !is_numeric_type(rhs)) {
                 semantic_error("operator '%s' requires numeric operands", op);
@@ -438,8 +560,8 @@ static ValueType infer_expression_type(
         }
 
         if (is_equality_operator(op)) {
-            if (type == TYPE_STRING || rhs == TYPE_STRING) {
-                semantic_error("string equality is not supported yet");
+            if (type == TYPE_STR || rhs == TYPE_STR) {
+                semantic_error("str equality is not supported yet");
             }
             if (!(is_assignable(type, rhs) || is_assignable(rhs, type))) {
                 semantic_error("operator '%s' requires comparable operands", op);
@@ -477,6 +599,11 @@ static const ParseNode *statement_tail_expression(const ParseNode *statement_tai
         return expect_child(statement_tail, 3, NODE_EXPRESSION);
     }
     return expect_child(statement_tail, 1, NODE_EXPRESSION);
+}
+
+static const ParseNode *statement_tail_type_node(const ParseNode *statement_tail)
+{
+    return expect_child(statement_tail, 1, NODE_TYPE);
 }
 
 static void typecheck_statement(
@@ -521,7 +648,7 @@ static void typecheck_return_statement(
     }
 
     if (is_epsilon_node(return_stmt->children[0])) {
-        if (current_function->return_type != TYPE_NONE) {
+        if (!semantic_type_contains(current_function->return_type, TYPE_NONE)) {
             semantic_error("function '%s' must return %s",
                 current_function->name,
                 semantic_type_name(current_function->return_type));
@@ -566,7 +693,7 @@ static void typecheck_simple_statement(
     ValueType expr_type = infer_expression_type(info, expr, scope);
 
     if (is_type_assignment(statement_tail)) {
-        ValueType declared = parse_type_name(expect_child(statement_tail, 1, NODE_PRIMARY)->value);
+        ValueType declared = parse_type_node(info, statement_tail_type_node(statement_tail));
         if (!is_assignable(declared, expr_type)) {
             semantic_error("cannot assign %s to %s '%s'",
                 semantic_type_name(expr_type),
@@ -574,6 +701,7 @@ static void typecheck_simple_statement(
                 name->value);
         }
         bind_variable(scope, name->value, declared);
+        record_node_type(info, name, declared);
         return;
     }
 
@@ -587,6 +715,8 @@ static void typecheck_simple_statement(
             semantic_type_name(var->type),
             name->value);
     }
+
+    record_node_type(info, name, var->type);
 }
 
 static void typecheck_suite(
@@ -663,7 +793,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         fn->name = name;
-        fn->return_type = function_return_type(payload);
+        fn->return_type = function_return_type(info, payload);
         fn->param_count = count;
         fn->param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
         fn->node = payload;
@@ -676,7 +806,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         for (size_t j = 0; j < count; j++) {
-            fn->param_types[j] = parameter_type(expect_child(parameters, j, NODE_PARAMETER));
+            fn->param_types[j] = parameter_type(info, expect_child(parameters, j, NODE_PARAMETER));
         }
     }
 }
@@ -690,12 +820,12 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
 
     local_scope.parent = global_scope;
     current.name = expect_child(function_def, 0, NODE_PRIMARY)->value;
-    current.return_type = function_return_type(function_def);
+    current.return_type = function_return_type(info, function_def);
 
     if (!(parameters->child_count == 1 && is_epsilon_node(parameters->children[0]))) {
         for (size_t i = 0; i < parameters->child_count; i++) {
             const ParseNode *param = expect_child(parameters, i, NODE_PARAMETER);
-            bind_variable(&local_scope, param->value, parameter_type(param));
+            bind_variable(&local_scope, param->value, parameter_type(info, param));
         }
     }
 

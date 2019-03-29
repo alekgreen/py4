@@ -4,7 +4,7 @@ def echo_bool(flag: bool) -> bool:
 def first_letter() -> char:
     return 'A'
 
-def greet(name: string) -> string:
+def greet(name: str) -> str:
     return name
 
 def main() -> None:

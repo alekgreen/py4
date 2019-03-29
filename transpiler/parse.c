@@ -54,6 +54,16 @@ static int is_operator_token(Token tok)
     return tok.type == TOKEN_PLUS || tok.type == TOKEN_MINUS || tok.type == TOKEN_OPERATOR;
 }
 
+static int is_type_token(Token tok)
+{
+    return tok.type == TOKEN_KEYWORD || tok.type == TOKEN_IDENTIFIER;
+}
+
+static int is_pipe_token(Token tok)
+{
+    return tok.type == TOKEN_OPERATOR && strcmp(tok.value, "|") == 0;
+}
+
 static void parse_error(Token tok, const char *message)
 {
     fprintf(stderr, "Parse error: %s near '%s'\n", message, tok.value);
@@ -86,6 +96,7 @@ static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
+static ParseNode *parse_TYPE(TokenStream *ts);
 static ParseNode *parse_PRIMARY(TokenStream *ts);
 
 ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value)
@@ -149,6 +160,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_PARAMETERS:           return "PARAMETERS";
         case NODE_PARAMETER:            return "PARAMETER";
         case NODE_RETURN_TYPE:          return "RETURN_TYPE";
+        case NODE_TYPE:                 return "TYPE";
         case NODE_SUITE:                return "SUITE";
         case NODE_EXPRESSION_STATEMENT: return "EXPRESSION_STATEMENT";
         case NODE_EXPRESSION:           return "EXPRESSION";
@@ -276,14 +288,9 @@ static ParseNode *parse_FUNCTION_DEF(TokenStream *ts)
 
     if (peek_ts(ts).type == TOKEN_RARROW) {
         ParseNode *return_type = create_node(NODE_RETURN_TYPE, TOKEN_NULL, NULL);
-        Token type_tok;
 
         expect(ts, TOKEN_RARROW);
-        type_tok = get_from_ts(ts);
-        if (type_tok.type != TOKEN_KEYWORD && type_tok.type != TOKEN_IDENTIFIER) {
-            parse_error(type_tok, "expected return type");
-        }
-        add_child(return_type, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+        add_child(return_type, parse_TYPE(ts));
         add_child(node, return_type);
     }
 
@@ -355,14 +362,9 @@ static ParseNode *parse_PARAMETERS(TokenStream *ts)
     while (1) {
         Token param = expect(ts, TOKEN_IDENTIFIER);
         ParseNode *param_node = create_node(NODE_PARAMETER, param.type, param.value);
-        Token type_tok;
 
         expect(ts, TOKEN_COLON);
-        type_tok = get_from_ts(ts);
-        if (type_tok.type != TOKEN_KEYWORD && type_tok.type != TOKEN_IDENTIFIER) {
-            parse_error(type_tok, "expected parameter type");
-        }
-        add_child(param_node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+        add_child(param_node, parse_TYPE(ts));
         add_child(node, param_node);
 
         if (peek_ts(ts).type != TOKEN_COMMA) {
@@ -380,16 +382,9 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
     Token look = peek_ts(ts);
 
     if (look.type == TOKEN_COLON) {
-        Token type_tok;
-
         expect(ts, TOKEN_COLON);
         add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
-
-        type_tok = get_from_ts(ts);
-        if (type_tok.type != TOKEN_KEYWORD && type_tok.type != TOKEN_IDENTIFIER) {
-            parse_error(type_tok, "expected type name");
-        }
-        add_child(node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+        add_child(node, parse_TYPE(ts));
 
         expect(ts, TOKEN_ASSIGN);
         add_child(node, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
@@ -406,6 +401,30 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
 
     parse_error(look, "unexpected token in statement tail");
     return NULL;
+}
+
+static ParseNode *parse_TYPE(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_TYPE, TOKEN_NULL, NULL);
+    Token type_tok;
+
+    type_tok = get_from_ts(ts);
+    if (!is_type_token(type_tok)) {
+        parse_error(type_tok, "expected type name");
+    }
+    add_child(node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+
+    while (is_pipe_token(peek_ts(ts))) {
+        type_tok = get_from_ts(ts);
+        (void)type_tok;
+        type_tok = get_from_ts(ts);
+        if (!is_type_token(type_tok)) {
+            parse_error(type_tok, "expected type name after '|'");
+        }
+        add_child(node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+    }
+
+    return node;
 }
 
 static ParseNode *parse_SUITE(TokenStream *ts)

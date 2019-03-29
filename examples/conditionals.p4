@@ -1,4 +1,4 @@
-def classify(x: int) -> string:
+def classify(x: int) -> str:
     if x > 5:
         return "big"
     elif x == 5:
