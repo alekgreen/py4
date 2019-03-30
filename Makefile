@@ -1,7 +1,7 @@
 CC := gcc
 CFLAGS := -Wall -Wextra -Wpedantic -std=c11
 TARGET := py4
-PY4_SRC := transpiler/main.c transpiler/lexer.c transpiler/parse.c transpiler/token.c transpiler/codegen.c transpiler/semantic.c
+PY4_SRC := transpiler/main.c transpiler/lexer.c transpiler/parse.c transpiler/token.c transpiler/codegen_types.c transpiler/codegen_emit.c transpiler/semantic_types.c transpiler/semantic_analysis.c
 
 INPUT ?= examples/functions.p4
 OUTPUT ?= out.c

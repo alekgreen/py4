@@ -1,337 +1,8 @@
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "semantic.h"
-
-typedef struct VariableBinding {
-    const char *name;
-    ValueType type;
-    struct VariableBinding *next;
-} VariableBinding;
-
-typedef struct Scope {
-    VariableBinding *vars;
-    struct Scope *parent;
-} Scope;
-
-typedef struct FunctionInfo {
-    const char *name;
-    ValueType return_type;
-    size_t param_count;
-    ValueType *param_types;
-    const ParseNode *node;
-    struct FunctionInfo *next;
-} FunctionInfo;
-
-typedef struct {
-    const char *name;
-    ValueType return_type;
-    int saw_return;
-} FunctionContext;
-
-typedef struct NodeTypeInfo {
-    const ParseNode *node;
-    ValueType type;
-    struct NodeTypeInfo *next;
-} NodeTypeInfo;
-
-struct SemanticInfo {
-    FunctionInfo *functions;
-    NodeTypeInfo *node_types;
-};
-
-static void semantic_error(const char *message, ...)
-{
-    va_list args;
-
-    fprintf(stderr, "Type error: ");
-    va_start(args, message);
-    vfprintf(stderr, message, args);
-    va_end(args);
-    fprintf(stderr, "\n");
-    exit(1);
-}
-
-static const ParseNode *expect_child(const ParseNode *node, size_t index, NodeKind kind)
-{
-    if (node == NULL || index >= node->child_count || node->children[index]->kind != kind) {
-        semantic_error("malformed AST");
-    }
-    return node->children[index];
-}
-
-static const ParseNode *statement_payload(const ParseNode *statement)
-{
-    if (statement == NULL || statement->kind != NODE_STATEMENT || statement->child_count != 1) {
-        semantic_error("malformed statement node");
-    }
-    return statement->children[0];
-}
-
-static int is_if_statement(const ParseNode *node)
-{
-    return node->kind == NODE_IF_STATEMENT;
-}
-
-static int is_epsilon_node(const ParseNode *node)
-{
-    return node->kind == NODE_EPSILON;
-}
-
-static int count_type_bits(ValueType type)
-{
-    int count = 0;
-
-    while (type != 0) {
-        count += (type & 1u) != 0;
-        type >>= 1u;
-    }
-
-    return count;
-}
-
-int semantic_type_contains(ValueType type, ValueType member)
-{
-    return member != 0 && (type & member) == member;
-}
-
-int semantic_type_is_union(ValueType type)
-{
-    return count_type_bits(type) > 1;
-}
-
-static const char *type_member_name(ValueType type)
-{
-    switch (type) {
-        case TYPE_INT: return "int";
-        case TYPE_FLOAT: return "float";
-        case TYPE_BOOL: return "bool";
-        case TYPE_CHAR: return "char";
-        case TYPE_STR: return "str";
-        case TYPE_NONE: return "None";
-        default: return "unknown";
-    }
-}
-
-const char *semantic_type_name(ValueType type)
-{
-    static char buffers[8][96];
-    static int next_buffer = 0;
-    char *buffer;
-    size_t used = 0;
-    int first = 1;
-    const ValueType ordered_types[] = {
-        TYPE_INT,
-        TYPE_FLOAT,
-        TYPE_BOOL,
-        TYPE_CHAR,
-        TYPE_STR,
-        TYPE_NONE
-    };
-
-    if (type == TYPE_INT || type == TYPE_FLOAT || type == TYPE_BOOL ||
-        type == TYPE_CHAR || type == TYPE_STR || type == TYPE_NONE) {
-        return type_member_name(type);
-    }
-
-    buffer = buffers[next_buffer];
-    next_buffer = (next_buffer + 1) % 8;
-    buffer[0] = '\0';
-
-    for (size_t i = 0; i < sizeof(ordered_types) / sizeof(ordered_types[0]); i++) {
-        if (!semantic_type_contains(type, ordered_types[i])) {
-            continue;
-        }
-
-        used += snprintf(buffer + used, sizeof(buffers[0]) - used, "%s%s",
-            first ? "" : " | ",
-            type_member_name(ordered_types[i]));
-        first = 0;
-    }
-
-    if (first) {
-        snprintf(buffer, sizeof(buffers[0]), "unknown");
-    }
-
-    return buffer;
-}
-
-static int is_numeric_type(ValueType type)
-{
-    return type == TYPE_INT || type == TYPE_FLOAT;
-}
-
-static int is_assignable(ValueType target, ValueType value)
-{
-    const ValueType source_members[] = {
-        TYPE_INT,
-        TYPE_FLOAT,
-        TYPE_BOOL,
-        TYPE_CHAR,
-        TYPE_STR,
-        TYPE_NONE
-    };
-
-    if (target == 0 || value == 0) {
-        return 0;
-    }
-
-    for (size_t i = 0; i < sizeof(source_members) / sizeof(source_members[0]); i++) {
-        ValueType member = source_members[i];
-
-        if (!semantic_type_contains(value, member)) {
-            continue;
-        }
-        if (semantic_type_contains(target, member)) {
-            continue;
-        }
-        if (member == TYPE_INT && semantic_type_contains(target, TYPE_FLOAT)) {
-            continue;
-        }
-        return 0;
-    }
-
-    return 1;
-}
-
-static ValueType parse_type_atom_name(const char *name)
-{
-    if (strcmp(name, "int") == 0) {
-        return TYPE_INT;
-    }
-    if (strcmp(name, "float") == 0) {
-        return TYPE_FLOAT;
-    }
-    if (strcmp(name, "bool") == 0) {
-        return TYPE_BOOL;
-    }
-    if (strcmp(name, "char") == 0) {
-        return TYPE_CHAR;
-    }
-    if (strcmp(name, "str") == 0 || strcmp(name, "string") == 0) {
-        return TYPE_STR;
-    }
-    if (strcmp(name, "None") == 0) {
-        return TYPE_NONE;
-    }
-
-    semantic_error("unsupported type '%s'", name);
-    return 0;
-}
-
-static void record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type)
-{
-    for (NodeTypeInfo *curr = info->node_types; curr != NULL; curr = curr->next) {
-        if (curr->node == node) {
-            curr->type = type;
-            return;
-        }
-    }
-
-    NodeTypeInfo *entry = malloc(sizeof(NodeTypeInfo));
-    if (entry == NULL) {
-        perror("malloc");
-        exit(1);
-    }
-
-    entry->node = node;
-    entry->type = type;
-    entry->next = info->node_types;
-    info->node_types = entry;
-}
-
-ValueType semantic_type_of(const SemanticInfo *info, const ParseNode *node)
-{
-    for (NodeTypeInfo *curr = info->node_types; curr != NULL; curr = curr->next) {
-        if (curr->node == node) {
-            return curr->type;
-        }
-    }
-
-    semantic_error("missing semantic type information");
-    return 0;
-}
-
-static ValueType parse_type_node(SemanticInfo *info, const ParseNode *type_node)
-{
-    ValueType type = 0;
-
-    if (type_node == NULL || type_node->kind != NODE_TYPE || type_node->child_count == 0) {
-        semantic_error("malformed type annotation");
-    }
-
-    for (size_t i = 0; i < type_node->child_count; i++) {
-        const ParseNode *member = expect_child(type_node, i, NODE_PRIMARY);
-        ValueType atom = parse_type_atom_name(member->value);
-
-        if (semantic_type_contains(type, atom)) {
-            semantic_error("duplicate type '%s' in union", member->value);
-        }
-
-        record_node_type(info, member, atom);
-        type |= atom;
-    }
-
-    record_node_type(info, type_node, type);
-    return type;
-}
-
-static FunctionInfo *find_function(FunctionInfo *functions, const char *name)
-{
-    for (FunctionInfo *fn = functions; fn != NULL; fn = fn->next) {
-        if (strcmp(fn->name, name) == 0) {
-            return fn;
-        }
-    }
-    return NULL;
-}
-
-static VariableBinding *find_variable(Scope *scope, const char *name)
-{
-    for (Scope *curr = scope; curr != NULL; curr = curr->parent) {
-        for (VariableBinding *var = curr->vars; var != NULL; var = var->next) {
-            if (strcmp(var->name, name) == 0) {
-                return var;
-            }
-        }
-    }
-    return NULL;
-}
-
-static void bind_variable(Scope *scope, const char *name, ValueType type)
-{
-    for (VariableBinding *var = scope->vars; var != NULL; var = var->next) {
-        if (strcmp(var->name, name) == 0) {
-            if (var->type != type) {
-                semantic_error("cannot redefine '%s' from %s to %s",
-                    name, semantic_type_name(var->type), semantic_type_name(type));
-            }
-            return;
-        }
-    }
-
-    VariableBinding *binding = malloc(sizeof(VariableBinding));
-    if (binding == NULL) {
-        perror("malloc");
-        exit(1);
-    }
-
-    binding->name = name;
-    binding->type = type;
-    binding->next = scope->vars;
-    scope->vars = binding;
-}
-
-static void free_scope_bindings(VariableBinding *vars)
-{
-    while (vars != NULL) {
-        VariableBinding *next = vars->next;
-        free(vars);
-        vars = next;
-    }
-}
+#include "semantic_internal.h"
 
 static ValueType infer_expression_type(
     SemanticInfo *info,
@@ -340,14 +11,14 @@ static ValueType infer_expression_type(
 
 static const ParseNode *function_parameters(const ParseNode *function_def)
 {
-    return expect_child(function_def, 1, NODE_PARAMETERS);
+    return semantic_expect_child(function_def, 1, NODE_PARAMETERS);
 }
 
 static ValueType function_return_type(SemanticInfo *info, const ParseNode *function_def)
 {
     if (function_def->child_count >= 3 && function_def->children[2]->kind == NODE_RETURN_TYPE) {
-        const ParseNode *type_node = expect_child(function_def->children[2], 0, NODE_TYPE);
-        return parse_type_node(info, type_node);
+        const ParseNode *type_node = semantic_expect_child(function_def->children[2], 0, NODE_TYPE);
+        return semantic_parse_type_node(info, type_node);
     }
 
     return TYPE_NONE;
@@ -355,7 +26,7 @@ static ValueType function_return_type(SemanticInfo *info, const ParseNode *funct
 
 static size_t parameter_count(const ParseNode *parameters)
 {
-    if (parameters->child_count == 1 && is_epsilon_node(parameters->children[0])) {
+    if (parameters->child_count == 1 && semantic_is_epsilon_node(parameters->children[0])) {
         return 0;
     }
     return parameters->child_count;
@@ -363,12 +34,12 @@ static size_t parameter_count(const ParseNode *parameters)
 
 static ValueType parameter_type(SemanticInfo *info, const ParseNode *parameter)
 {
-    return parse_type_node(info, expect_child(parameter, 0, NODE_TYPE));
+    return semantic_parse_type_node(info, semantic_expect_child(parameter, 0, NODE_TYPE));
 }
 
 static int is_print_call(const ParseNode *call)
 {
-    const ParseNode *callee = expect_child(call, 0, NODE_PRIMARY);
+    const ParseNode *callee = semantic_expect_child(call, 0, NODE_PRIMARY);
 
     return callee->value != NULL && strcmp(callee->value, "print") == 0;
 }
@@ -378,12 +49,12 @@ static ValueType infer_call_type(
     const ParseNode *call,
     Scope *scope)
 {
-    const ParseNode *callee = expect_child(call, 0, NODE_PRIMARY);
-    const ParseNode *arguments = expect_child(call, 1, NODE_ARGUMENTS);
+    const ParseNode *callee = semantic_expect_child(call, 0, NODE_PRIMARY);
+    const ParseNode *arguments = semantic_expect_child(call, 1, NODE_ARGUMENTS);
 
     if (is_print_call(call)) {
-        if (arguments->child_count == 1 && is_epsilon_node(arguments->children[0])) {
-            record_node_type(info, call, TYPE_NONE);
+        if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+            semantic_record_node_type(info, call, TYPE_NONE);
             return TYPE_NONE;
         }
         if (arguments->child_count != 1) {
@@ -395,20 +66,20 @@ static ValueType infer_call_type(
             semantic_error("print cannot print None");
         }
 
-        record_node_type(info, call, TYPE_NONE);
+        semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
     }
 
-    FunctionInfo *fn = find_function(info->functions, callee->value);
+    FunctionInfo *fn = semantic_find_function(info->functions, callee->value);
     if (fn == NULL) {
         semantic_error("unknown function '%s'", callee->value);
     }
 
-    if (arguments->child_count == 1 && is_epsilon_node(arguments->children[0])) {
+    if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
         if (fn->param_count != 0) {
             semantic_error("function '%s' expects %zu arguments", fn->name, fn->param_count);
         }
-        record_node_type(info, call, fn->return_type);
+        semantic_record_node_type(info, call, fn->return_type);
         return fn->return_type;
     }
 
@@ -418,7 +89,7 @@ static ValueType infer_call_type(
 
     for (size_t i = 0; i < arguments->child_count; i++) {
         ValueType actual = infer_expression_type(info, arguments->children[i], scope);
-        if (!is_assignable(fn->param_types[i], actual)) {
+        if (!semantic_is_assignable(fn->param_types[i], actual)) {
             semantic_error("function '%s' argument %zu expects %s but got %s",
                 fn->name, i + 1,
                 semantic_type_name(fn->param_types[i]),
@@ -426,7 +97,7 @@ static ValueType infer_call_type(
         }
     }
 
-    record_node_type(info, call, fn->return_type);
+    semantic_record_node_type(info, call, fn->return_type);
     return fn->return_type;
 }
 
@@ -439,13 +110,13 @@ static ValueType infer_primary_type(
 
     if (node->kind == NODE_CALL) {
         type = infer_call_type(info, node, scope);
-        record_node_type(info, node, type);
+        semantic_record_node_type(info, node, type);
         return type;
     }
 
     if (node->kind == NODE_EXPRESSION) {
         type = infer_expression_type(info, node, scope);
-        record_node_type(info, node, type);
+        semantic_record_node_type(info, node, type);
         return type;
     }
 
@@ -471,7 +142,7 @@ static ValueType infer_primary_type(
             semantic_error("unexpected keyword '%s' in expression", node->value);
             break;
         case TOKEN_IDENTIFIER: {
-            VariableBinding *var = find_variable(scope, node->value);
+            VariableBinding *var = semantic_find_variable(scope, node->value);
             if (var == NULL) {
                 semantic_error("unknown variable '%s'", node->value);
             }
@@ -482,7 +153,7 @@ static ValueType infer_primary_type(
             semantic_error("unsupported primary token");
     }
 
-    record_node_type(info, node, type);
+    semantic_record_node_type(info, node, type);
     return type;
 }
 
@@ -517,7 +188,7 @@ static ValueType infer_expression_type(
 
     type = infer_primary_type(info, expr->children[0], scope);
     if (expr->child_count == 1) {
-        record_node_type(info, expr, type);
+        semantic_record_node_type(info, expr, type);
         return type;
     }
 
@@ -540,7 +211,7 @@ static ValueType infer_expression_type(
         }
 
         if (is_arithmetic_operator(op)) {
-            if (!is_numeric_type(type) || !is_numeric_type(rhs)) {
+            if (!semantic_is_numeric_type(type) || !semantic_is_numeric_type(rhs)) {
                 semantic_error("operator '%s' requires numeric operands", op);
             }
             if (strcmp(op, "/") == 0 || type == TYPE_FLOAT || rhs == TYPE_FLOAT) {
@@ -552,7 +223,7 @@ static ValueType infer_expression_type(
         }
 
         if (is_comparison_operator(op)) {
-            if (!is_numeric_type(type) || !is_numeric_type(rhs)) {
+            if (!semantic_is_numeric_type(type) || !semantic_is_numeric_type(rhs)) {
                 semantic_error("comparison '%s' requires numeric operands", op);
             }
             type = TYPE_BOOL;
@@ -563,7 +234,7 @@ static ValueType infer_expression_type(
             if (type == TYPE_STR || rhs == TYPE_STR) {
                 semantic_error("str equality is not supported yet");
             }
-            if (!(is_assignable(type, rhs) || is_assignable(rhs, type))) {
+            if (!(semantic_is_assignable(type, rhs) || semantic_is_assignable(rhs, type))) {
                 semantic_error("operator '%s' requires comparable operands", op);
             }
             type = TYPE_BOOL;
@@ -573,7 +244,7 @@ static ValueType infer_expression_type(
         semantic_error("unsupported operator '%s'", op);
     }
 
-    record_node_type(info, expr, type);
+    semantic_record_node_type(info, expr, type);
     return type;
 }
 
@@ -585,25 +256,25 @@ static int is_type_assignment(const ParseNode *statement_tail)
 
 static const ParseNode *simple_statement_name(const ParseNode *simple_stmt)
 {
-    return expect_child(simple_stmt, 0, NODE_PRIMARY);
+    return semantic_expect_child(simple_stmt, 0, NODE_PRIMARY);
 }
 
 static const ParseNode *simple_statement_tail(const ParseNode *simple_stmt)
 {
-    return expect_child(simple_stmt, 1, NODE_STATEMENT_TAIL);
+    return semantic_expect_child(simple_stmt, 1, NODE_STATEMENT_TAIL);
 }
 
 static const ParseNode *statement_tail_expression(const ParseNode *statement_tail)
 {
     if (is_type_assignment(statement_tail)) {
-        return expect_child(statement_tail, 3, NODE_EXPRESSION);
+        return semantic_expect_child(statement_tail, 3, NODE_EXPRESSION);
     }
-    return expect_child(statement_tail, 1, NODE_EXPRESSION);
+    return semantic_expect_child(statement_tail, 1, NODE_EXPRESSION);
 }
 
 static const ParseNode *statement_tail_type_node(const ParseNode *statement_tail)
 {
-    return expect_child(statement_tail, 1, NODE_TYPE);
+    return semantic_expect_child(statement_tail, 1, NODE_TYPE);
 }
 
 static void typecheck_statement(
@@ -622,13 +293,13 @@ static void typecheck_branch_suite(
     Scope branch_scope = {0};
 
     branch_scope.parent = parent_scope;
-    if (!(suite->child_count == 1 && is_epsilon_node(suite->children[0]))) {
+    if (!(suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0]))) {
         for (size_t i = 0; i < suite->child_count; i++) {
             typecheck_statement(info, suite->children[i], &branch_scope, current_function, 0);
         }
     }
 
-    free_scope_bindings(branch_scope.vars);
+    semantic_free_scope_bindings(branch_scope.vars);
 }
 
 static void typecheck_return_statement(
@@ -647,7 +318,7 @@ static void typecheck_return_statement(
         semantic_error("malformed return statement");
     }
 
-    if (is_epsilon_node(return_stmt->children[0])) {
+    if (semantic_is_epsilon_node(return_stmt->children[0])) {
         if (!semantic_type_contains(current_function->return_type, TYPE_NONE)) {
             semantic_error("function '%s' must return %s",
                 current_function->name,
@@ -657,7 +328,7 @@ static void typecheck_return_statement(
     }
 
     ValueType expr_type = infer_expression_type(info, return_stmt->children[0], scope);
-    if (!is_assignable(current_function->return_type, expr_type)) {
+    if (!semantic_is_assignable(current_function->return_type, expr_type)) {
         semantic_error("function '%s' returns %s but got %s",
             current_function->name,
             semantic_type_name(current_function->return_type),
@@ -679,7 +350,7 @@ static void typecheck_simple_statement(
     }
 
     if (first_child->kind == NODE_EXPRESSION_STATEMENT) {
-        infer_expression_type(info, expect_child(first_child, 0, NODE_EXPRESSION), scope);
+        infer_expression_type(info, semantic_expect_child(first_child, 0, NODE_EXPRESSION), scope);
         return;
     }
 
@@ -693,30 +364,30 @@ static void typecheck_simple_statement(
     ValueType expr_type = infer_expression_type(info, expr, scope);
 
     if (is_type_assignment(statement_tail)) {
-        ValueType declared = parse_type_node(info, statement_tail_type_node(statement_tail));
-        if (!is_assignable(declared, expr_type)) {
+        ValueType declared = semantic_parse_type_node(info, statement_tail_type_node(statement_tail));
+        if (!semantic_is_assignable(declared, expr_type)) {
             semantic_error("cannot assign %s to %s '%s'",
                 semantic_type_name(expr_type),
                 semantic_type_name(declared),
                 name->value);
         }
-        bind_variable(scope, name->value, declared);
-        record_node_type(info, name, declared);
+        semantic_bind_variable(scope, name->value, declared);
+        semantic_record_node_type(info, name, declared);
         return;
     }
 
-    VariableBinding *var = find_variable(scope, name->value);
+    VariableBinding *var = semantic_find_variable(scope, name->value);
     if (var == NULL) {
         semantic_error("assignment to undeclared variable '%s'", name->value);
     }
-    if (!is_assignable(var->type, expr_type)) {
+    if (!semantic_is_assignable(var->type, expr_type)) {
         semantic_error("cannot assign %s to %s '%s'",
             semantic_type_name(expr_type),
             semantic_type_name(var->type),
             name->value);
     }
 
-    record_node_type(info, name, var->type);
+    semantic_record_node_type(info, name, var->type);
 }
 
 static void typecheck_suite(
@@ -725,7 +396,7 @@ static void typecheck_suite(
     Scope *scope,
     FunctionContext *current_function)
 {
-    if (suite->child_count == 1 && is_epsilon_node(suite->children[0])) {
+    if (suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0])) {
         return;
     }
 
@@ -772,14 +443,14 @@ static void typecheck_if_statement(
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
-        const ParseNode *payload = statement_payload(root->children[i]);
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
 
         if (payload->kind != NODE_FUNCTION_DEF) {
             continue;
         }
 
-        const char *name = expect_child(payload, 0, NODE_PRIMARY)->value;
-        if (find_function(info->functions, name) != NULL) {
+        const char *name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
+        if (semantic_find_function(info->functions, name) != NULL) {
             semantic_error("duplicate function '%s'", name);
         }
 
@@ -806,7 +477,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         for (size_t j = 0; j < count; j++) {
-            fn->param_types[j] = parameter_type(info, expect_child(parameters, j, NODE_PARAMETER));
+            fn->param_types[j] = parameter_type(info, semantic_expect_child(parameters, j, NODE_PARAMETER));
         }
     }
 }
@@ -819,13 +490,13 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
     FunctionContext current = {0};
 
     local_scope.parent = global_scope;
-    current.name = expect_child(function_def, 0, NODE_PRIMARY)->value;
+    current.name = semantic_expect_child(function_def, 0, NODE_PRIMARY)->value;
     current.return_type = function_return_type(info, function_def);
 
-    if (!(parameters->child_count == 1 && is_epsilon_node(parameters->children[0]))) {
+    if (!(parameters->child_count == 1 && semantic_is_epsilon_node(parameters->children[0]))) {
         for (size_t i = 0; i < parameters->child_count; i++) {
-            const ParseNode *param = expect_child(parameters, i, NODE_PARAMETER);
-            bind_variable(&local_scope, param->value, parameter_type(info, param));
+            const ParseNode *param = semantic_expect_child(parameters, i, NODE_PARAMETER);
+            semantic_bind_variable(&local_scope, param->value, parameter_type(info, param));
         }
     }
 
@@ -836,7 +507,7 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
             current.name, semantic_type_name(current.return_type));
     }
 
-    free_scope_bindings(local_scope.vars);
+    semantic_free_scope_bindings(local_scope.vars);
 }
 
 static void typecheck_statement(
@@ -846,7 +517,7 @@ static void typecheck_statement(
     FunctionContext *current_function,
     int allow_function_defs)
 {
-    const ParseNode *payload = statement_payload(statement);
+    const ParseNode *payload = semantic_statement_payload(statement);
 
     if (payload->kind == NODE_FUNCTION_DEF) {
         if (!allow_function_defs) {
@@ -856,7 +527,7 @@ static void typecheck_statement(
         return;
     }
 
-    if (is_if_statement(payload)) {
+    if (semantic_is_if_statement(payload)) {
         typecheck_if_statement(info, payload, scope, current_function);
         return;
     }
@@ -886,7 +557,7 @@ SemanticInfo *analyze_program(const ParseNode *root)
     collect_functions(info, root);
 
     for (size_t i = 0; i < root->child_count; i++) {
-        const ParseNode *payload = statement_payload(root->children[i]);
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
 
         if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
@@ -895,7 +566,7 @@ SemanticInfo *analyze_program(const ParseNode *root)
         }
     }
 
-    free_scope_bindings(global_scope.vars);
+    semantic_free_scope_bindings(global_scope.vars);
     return info;
 }
 
