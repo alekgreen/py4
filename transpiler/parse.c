@@ -97,6 +97,13 @@ static ParseNode *parse_PARAMETERS(TokenStream *ts);
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
 static ParseNode *parse_TYPE(TokenStream *ts);
+static ParseNode *parse_OR(TokenStream *ts);
+static ParseNode *parse_AND(TokenStream *ts);
+static ParseNode *parse_NOT(TokenStream *ts);
+static ParseNode *parse_COMPARISON(TokenStream *ts);
+static ParseNode *parse_TERM(TokenStream *ts);
+static ParseNode *parse_FACTOR(TokenStream *ts);
+static ParseNode *parse_UNARY(TokenStream *ts);
 static ParseNode *parse_PRIMARY(TokenStream *ts);
 
 ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value)
@@ -427,6 +434,53 @@ static ParseNode *parse_TYPE(TokenStream *ts)
     return node;
 }
 
+static ParseNode *wrap_expression(ParseNode *node)
+{
+    if (node->kind == NODE_EXPRESSION) {
+        return node;
+    }
+
+    ParseNode *expr = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+    add_child(expr, node);
+    return expr;
+}
+
+static ParseNode *make_unary_expression(Token op, ParseNode *operand)
+{
+    ParseNode *expr = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+
+    add_child(expr, create_node(NODE_OPERATOR, op.type, op.value));
+    add_child(expr, operand);
+    return expr;
+}
+
+static ParseNode *make_binary_expression(ParseNode *lhs, Token op, ParseNode *rhs)
+{
+    ParseNode *expr = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+
+    add_child(expr, lhs);
+    add_child(expr, create_node(NODE_OPERATOR, op.type, op.value));
+    add_child(expr, rhs);
+    return expr;
+}
+
+static int matches_operator(Token tok, const char *value)
+{
+    return is_operator_token(tok) && strcmp(tok.value, value) == 0;
+}
+
+static int matches_keyword_operator(Token tok, const char *value)
+{
+    return tok.type == TOKEN_KEYWORD && strcmp(tok.value, value) == 0;
+}
+
+static int is_comparison_operator_token(Token tok)
+{
+    return matches_operator(tok, "==") || matches_operator(tok, "!=") ||
+        matches_operator(tok, "<") || matches_operator(tok, ">") ||
+        matches_operator(tok, "<=") || matches_operator(tok, ">=");
+}
+
 static ParseNode *parse_SUITE(TokenStream *ts)
 {
     return parse_statement_list(ts, TOKEN_DEDENT, NODE_SUITE);
@@ -442,16 +496,127 @@ static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts)
 
 ParseNode *parse_EXPRESSION(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+    return wrap_expression(parse_OR(ts));
+}
 
-    add_child(node, parse_PRIMARY(ts));
-    while (is_operator_token(peek_ts(ts))) {
+static ParseNode *parse_OR(TokenStream *ts)
+{
+    ParseNode *node = parse_AND(ts);
+
+    while (matches_keyword_operator(peek_ts(ts), "or")) {
         Token op = get_from_ts(ts);
-        add_child(node, create_node(NODE_OPERATOR, op.type, op.value));
-        add_child(node, parse_PRIMARY(ts));
+        ParseNode *rhs = parse_AND(ts);
+
+        node = make_binary_expression(node, op, rhs);
     }
 
     return node;
+}
+
+static ParseNode *parse_AND(TokenStream *ts)
+{
+    ParseNode *node = parse_NOT(ts);
+
+    while (matches_keyword_operator(peek_ts(ts), "and")) {
+        Token op = get_from_ts(ts);
+        ParseNode *rhs = parse_NOT(ts);
+
+        node = make_binary_expression(node, op, rhs);
+    }
+
+    return node;
+}
+
+static ParseNode *parse_NOT(TokenStream *ts)
+{
+    Token tok = peek_ts(ts);
+
+    if (matches_keyword_operator(tok, "not")) {
+        tok = get_from_ts(ts);
+        return make_unary_expression(tok, parse_NOT(ts));
+    }
+
+    return parse_COMPARISON(ts);
+}
+
+static ParseNode *parse_COMPARISON(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+    ParseNode *lhs = parse_TERM(ts);
+
+    add_child(node, lhs);
+
+    while (is_comparison_operator_token(peek_ts(ts))) {
+        Token op = get_from_ts(ts);
+        ParseNode *rhs = parse_TERM(ts);
+
+        add_child(node, create_node(NODE_OPERATOR, op.type, op.value));
+        add_child(node, rhs);
+    }
+
+    if (node->child_count == 1) {
+        ParseNode *only_child = node->children[0];
+        node->children[0] = NULL;
+        free_tree(node);
+        return only_child;
+    }
+
+    if (node->child_count == 3) {
+        ParseNode *lhs_node = node->children[0];
+        ParseNode *op_node = node->children[1];
+        ParseNode *rhs_node = node->children[2];
+        ParseNode *binary = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+
+        add_child(binary, lhs_node);
+        add_child(binary, op_node);
+        add_child(binary, rhs_node);
+        free(node->children);
+        free(node->value);
+        free(node);
+        return binary;
+    }
+
+    return node;
+}
+
+static ParseNode *parse_TERM(TokenStream *ts)
+{
+    ParseNode *node = parse_FACTOR(ts);
+
+    while (peek_ts(ts).type == TOKEN_PLUS || peek_ts(ts).type == TOKEN_MINUS) {
+        Token op = get_from_ts(ts);
+        ParseNode *rhs = parse_FACTOR(ts);
+
+        node = make_binary_expression(node, op, rhs);
+    }
+
+    return node;
+}
+
+static ParseNode *parse_FACTOR(TokenStream *ts)
+{
+    ParseNode *node = parse_UNARY(ts);
+
+    while (matches_operator(peek_ts(ts), "*") || matches_operator(peek_ts(ts), "/")) {
+        Token op = get_from_ts(ts);
+        ParseNode *rhs = parse_UNARY(ts);
+
+        node = make_binary_expression(node, op, rhs);
+    }
+
+    return node;
+}
+
+static ParseNode *parse_UNARY(TokenStream *ts)
+{
+    Token tok = peek_ts(ts);
+
+    if (tok.type == TOKEN_PLUS || tok.type == TOKEN_MINUS) {
+        tok = get_from_ts(ts);
+        return make_unary_expression(tok, parse_UNARY(ts));
+    }
+
+    return parse_PRIMARY(ts);
 }
 
 static ParseNode *parse_PRIMARY(TokenStream *ts)

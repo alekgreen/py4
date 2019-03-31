@@ -174,78 +174,144 @@ static int is_arithmetic_operator(const char *op)
         strcmp(op, "*") == 0 || strcmp(op, "/") == 0;
 }
 
+static int is_boolean_operator(const char *op)
+{
+    return strcmp(op, "and") == 0 || strcmp(op, "or") == 0;
+}
+
+static void typecheck_comparison_operands(ValueType lhs_type, ValueType rhs_type, const char *op)
+{
+    if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
+        semantic_error("operator '%s' does not support union operands yet", op);
+    }
+
+    if (is_comparison_operator(op)) {
+        if (!semantic_is_numeric_type(lhs_type) || !semantic_is_numeric_type(rhs_type)) {
+            semantic_error("comparison '%s' requires numeric operands", op);
+        }
+        return;
+    }
+
+    if (is_equality_operator(op)) {
+        if (lhs_type == TYPE_STR || rhs_type == TYPE_STR) {
+            semantic_error("str equality is not supported yet");
+        }
+        if (!(semantic_is_assignable(lhs_type, rhs_type) || semantic_is_assignable(rhs_type, lhs_type))) {
+            semantic_error("operator '%s' requires comparable operands", op);
+        }
+        return;
+    }
+
+    semantic_error("unsupported operator '%s'", op);
+}
+
 static ValueType infer_expression_type(
     SemanticInfo *info,
     const ParseNode *expr,
     Scope *scope)
 {
-    const char *op = NULL;
-    ValueType type;
+    const ParseNode *operator_node;
+    ValueType lhs_type;
+    ValueType rhs_type;
 
     if (expr->kind != NODE_EXPRESSION || expr->child_count == 0) {
         semantic_error("malformed expression");
     }
 
-    type = infer_primary_type(info, expr->children[0], scope);
     if (expr->child_count == 1) {
+        ValueType type = infer_primary_type(info, expr->children[0], scope);
+
         semantic_record_node_type(info, expr, type);
         return type;
     }
 
-    for (size_t i = 1; i < expr->child_count; i++) {
-        const ParseNode *child = expr->children[i];
+    if (expr->child_count == 2) {
+        operator_node = semantic_expect_child(expr, 0, NODE_OPERATOR);
+        rhs_type = infer_primary_type(info, expr->children[1], scope);
 
-        if (child->kind == NODE_OPERATOR) {
-            op = child->value;
-            continue;
-        }
-
-        ValueType rhs = infer_primary_type(info, child, scope);
-
-        if (op == NULL) {
-            semantic_error("missing operator in expression");
-        }
-
-        if (semantic_type_is_union(type) || semantic_type_is_union(rhs)) {
-            semantic_error("operator '%s' does not support union operands yet", op);
-        }
-
-        if (is_arithmetic_operator(op)) {
-            if (!semantic_is_numeric_type(type) || !semantic_is_numeric_type(rhs)) {
-                semantic_error("operator '%s' requires numeric operands", op);
+        if (strcmp(operator_node->value, "not") == 0) {
+            if (rhs_type != TYPE_BOOL) {
+                semantic_error("operator 'not' requires bool operands");
             }
-            if (strcmp(op, "/") == 0 || type == TYPE_FLOAT || rhs == TYPE_FLOAT) {
-                type = TYPE_FLOAT;
-            } else {
-                type = TYPE_INT;
-            }
-            continue;
+            semantic_record_node_type(info, expr, TYPE_BOOL);
+            return TYPE_BOOL;
         }
 
-        if (is_comparison_operator(op)) {
-            if (!semantic_is_numeric_type(type) || !semantic_is_numeric_type(rhs)) {
-                semantic_error("comparison '%s' requires numeric operands", op);
-            }
-            type = TYPE_BOOL;
-            continue;
+        if (semantic_type_is_union(rhs_type)) {
+            semantic_error("operator '%s' does not support union operands yet", operator_node->value);
         }
 
-        if (is_equality_operator(op)) {
-            if (type == TYPE_STR || rhs == TYPE_STR) {
-                semantic_error("str equality is not supported yet");
-            }
-            if (!(semantic_is_assignable(type, rhs) || semantic_is_assignable(rhs, type))) {
-                semantic_error("operator '%s' requires comparable operands", op);
-            }
-            type = TYPE_BOOL;
-            continue;
+        if (!is_arithmetic_operator(operator_node->value)) {
+            semantic_error("unsupported unary operator '%s'", operator_node->value);
+        }
+        if (!semantic_is_numeric_type(rhs_type)) {
+            semantic_error("operator '%s' requires numeric operands", operator_node->value);
         }
 
-        semantic_error("unsupported operator '%s'", op);
+        semantic_record_node_type(info, expr, rhs_type);
+        return rhs_type;
     }
 
-    semantic_record_node_type(info, expr, type);
-    return type;
+    if (expr->child_count > 3) {
+        for (size_t i = 1; i < expr->child_count; i += 2) {
+            ValueType chain_lhs = infer_primary_type(info, expr->children[i - 1], scope);
+            const ParseNode *chain_op = semantic_expect_child(expr, i, NODE_OPERATOR);
+            ValueType chain_rhs = infer_primary_type(info, expr->children[i + 1], scope);
+
+            if (!(is_comparison_operator(chain_op->value) || is_equality_operator(chain_op->value))) {
+                semantic_error("unsupported operator '%s' in comparison chain", chain_op->value);
+            }
+            typecheck_comparison_operands(chain_lhs, chain_rhs, chain_op->value);
+        }
+
+        semantic_record_node_type(info, expr, TYPE_BOOL);
+        return TYPE_BOOL;
+    }
+
+    if (expr->child_count != 3) {
+        semantic_error("malformed expression");
+    }
+
+    lhs_type = infer_primary_type(info, expr->children[0], scope);
+    operator_node = semantic_expect_child(expr, 1, NODE_OPERATOR);
+    rhs_type = infer_primary_type(info, expr->children[2], scope);
+
+    if (is_arithmetic_operator(operator_node->value)) {
+        ValueType result_type;
+
+        if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
+            semantic_error("operator '%s' does not support union operands yet", operator_node->value);
+        }
+        if (!semantic_is_numeric_type(lhs_type) || !semantic_is_numeric_type(rhs_type)) {
+            semantic_error("operator '%s' requires numeric operands", operator_node->value);
+        }
+        if (strcmp(operator_node->value, "/") == 0 || lhs_type == TYPE_FLOAT || rhs_type == TYPE_FLOAT) {
+            result_type = TYPE_FLOAT;
+        } else {
+            result_type = TYPE_INT;
+        }
+
+        semantic_record_node_type(info, expr, result_type);
+        return result_type;
+    }
+
+    if (is_boolean_operator(operator_node->value)) {
+        if (lhs_type != TYPE_BOOL || rhs_type != TYPE_BOOL) {
+            semantic_error("operator '%s' requires bool operands", operator_node->value);
+        }
+
+        semantic_record_node_type(info, expr, TYPE_BOOL);
+        return TYPE_BOOL;
+    }
+
+    if (is_comparison_operator(operator_node->value) || is_equality_operator(operator_node->value)) {
+        typecheck_comparison_operands(lhs_type, rhs_type, operator_node->value);
+        semantic_record_node_type(info, expr, TYPE_BOOL);
+        return TYPE_BOOL;
+    }
+
+    semantic_error("unsupported operator '%s'", operator_node->value);
+    return TYPE_NONE;
 }
 
 static int is_type_assignment(const ParseNode *statement_tail)

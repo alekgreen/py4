@@ -11,6 +11,20 @@ static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_typ
     fputs(ctor_name, ctx->out);
 }
 
+static const char *map_operator(const char *op)
+{
+    if (strcmp(op, "and") == 0) {
+        return "&&";
+    }
+    if (strcmp(op, "or") == 0) {
+        return "||";
+    }
+    if (strcmp(op, "not") == 0) {
+        return "!";
+    }
+    return op;
+}
+
 void codegen_emit_wrapped_expression(CodegenContext *ctx, const ParseNode *expr, ValueType target_type)
 {
     ValueType expr_type = semantic_type_of(ctx->semantic, expr);
@@ -118,6 +132,8 @@ static void emit_primary(CodegenContext *ctx, const ParseNode *primary)
 
 void codegen_emit_expression(CodegenContext *ctx, const ParseNode *expr)
 {
+    const ParseNode *operator_node;
+
     if (expr->kind != NODE_EXPRESSION || expr->child_count == 0) {
         codegen_error("malformed expression node");
     }
@@ -127,16 +143,42 @@ void codegen_emit_expression(CodegenContext *ctx, const ParseNode *expr)
         return;
     }
 
-    fputc('(', ctx->out);
-    for (size_t i = 0; i < expr->child_count; i++) {
-        const ParseNode *child = expr->children[i];
+    if (expr->child_count == 2) {
+        operator_node = codegen_expect_child(expr, 0, NODE_OPERATOR);
 
-        if (child->kind == NODE_OPERATOR) {
-            fprintf(ctx->out, " %s ", child->value);
-        } else {
-            emit_primary(ctx, child);
-        }
+        fputc('(', ctx->out);
+        fputs(map_operator(operator_node->value), ctx->out);
+        emit_primary(ctx, expr->children[1]);
+        fputc(')', ctx->out);
+        return;
     }
+
+    if (expr->child_count > 3) {
+        fputc('(', ctx->out);
+        for (size_t i = 1; i < expr->child_count; i += 2) {
+            if (i > 1) {
+                fputs(" && ", ctx->out);
+            }
+            fputc('(', ctx->out);
+            emit_primary(ctx, expr->children[i - 1]);
+            operator_node = codegen_expect_child(expr, i, NODE_OPERATOR);
+            fprintf(ctx->out, " %s ", map_operator(operator_node->value));
+            emit_primary(ctx, expr->children[i + 1]);
+            fputc(')', ctx->out);
+        }
+        fputc(')', ctx->out);
+        return;
+    }
+
+    if (expr->child_count != 3) {
+        codegen_error("malformed expression node");
+    }
+
+    fputc('(', ctx->out);
+    emit_primary(ctx, expr->children[0]);
+    operator_node = codegen_expect_child(expr, 1, NODE_OPERATOR);
+    fprintf(ctx->out, " %s ", map_operator(operator_node->value));
+    emit_primary(ctx, expr->children[2]);
     fputc(')', ctx->out);
 }
 
