@@ -20,6 +20,7 @@ typedef struct {
     const ParseNode *root;
     const SemanticInfo *semantic;
     int indent_level;
+    int temp_counter;
     int has_user_main;
     int has_top_level_executable_statements;
     int current_function_is_main;
