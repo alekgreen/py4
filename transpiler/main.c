@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include "codegen.h"
-#include "lexer.h"
+#include "module_loader.h"
 #include "parse.h"
 #include "semantic.h"
 
@@ -11,9 +11,7 @@ int main(int argc, char **argv)
     const char *input_path = "example0.p4";
     int show_tokens = 0;
     int show_tree = 0;
-    FILE *fp;
     SemanticInfo *semantic;
-    TokenStream *ts;
     ParseNode *root;
 
     for (int i = 1; i < argc; i++) {
@@ -26,21 +24,7 @@ int main(int argc, char **argv)
         }
     }
 
-    fp = fopen(input_path, "r");
-
-    if (!fp) {
-        perror("fopen");
-        return 1;
-    }
-
-    ts = lexer(fp);
-
-    if (show_tokens) {
-        debug_print_ts(ts);
-        reset_ts(ts);
-    }
-
-    root = parse(ts);
+    root = load_program_from_entry(input_path, show_tokens);
     if (show_tree) {
         print_tree(root, 0);
     }
@@ -50,8 +34,5 @@ int main(int argc, char **argv)
 
     free_semantic_info(semantic);
     free_tree(root);
-    free_token_stream(ts);
-
-    fclose(fp);
     return 0;
 }

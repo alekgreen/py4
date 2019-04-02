@@ -89,6 +89,7 @@ static void skip_newlines(TokenStream *ts)
 }
 
 static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts);
+static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts);
 static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
@@ -158,6 +159,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_S:                    return "PROGRAM";
         case NODE_STATEMENT:            return "STATEMENT";
         case NODE_SIMPLE_STATEMENT:     return "SIMPLE_STATEMENT";
+        case NODE_IMPORT_STATEMENT:     return "IMPORT_STATEMENT";
         case NODE_RETURN_STATEMENT:     return "RETURN_STATEMENT";
         case NODE_IF_STATEMENT:         return "IF_STATEMENT";
         case NODE_ELIF_CLAUSE:          return "ELIF_CLAUSE";
@@ -233,12 +235,25 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
 
     if (is_keyword_token(peek_ts(ts), "def")) {
         add_child(node, parse_FUNCTION_DEF(ts));
+    } else if (is_keyword_token(peek_ts(ts), "import")) {
+        add_child(node, parse_IMPORT_STATEMENT(ts));
     } else if (is_keyword_token(peek_ts(ts), "if")) {
         add_child(node, parse_IF_STATEMENT(ts));
     } else {
         add_child(node, parse_SIMPLE_STATEMENT(ts));
     }
 
+    return node;
+}
+
+static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_IMPORT_STATEMENT, TOKEN_NULL, NULL);
+    Token module_name;
+
+    expect_keyword(ts, "import");
+    module_name = expect(ts, TOKEN_IDENTIFIER);
+    add_child(node, create_node(NODE_PRIMARY, module_name.type, module_name.value));
     return node;
 }
 

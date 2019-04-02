@@ -612,6 +612,10 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_IMPORT_STATEMENT) {
+        codegen_error("imports should be resolved before C code generation");
+    }
+
     if (payload->kind == NODE_IF_STATEMENT) {
         emit_if_statement(ctx, payload);
         return;
@@ -646,7 +650,9 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = codegen_statement_payload(root->children[i]);
 
-        if (payload->kind == NODE_SIMPLE_STATEMENT) {
+        if (payload->kind == NODE_IMPORT_STATEMENT) {
+            codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
             if (payload->child_count == 2 &&
                 payload->children[0]->kind == NODE_PRIMARY &&
                 codegen_is_type_assignment(payload->children[1])) {
@@ -673,7 +679,9 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = codegen_statement_payload(root->children[i]);
 
-        if (payload->kind == NODE_FUNCTION_DEF) {
+        if (payload->kind == NODE_IMPORT_STATEMENT) {
+            codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_signature(ctx, payload, 1);
             wrote_any = 1;
         }
@@ -700,7 +708,9 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = codegen_statement_payload(root->children[i]);
 
-        if (payload->kind == NODE_SIMPLE_STATEMENT) {
+        if (payload->kind == NODE_IMPORT_STATEMENT) {
+            codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
             const ParseNode *name;
             const ParseNode *statement_tail;
             const ParseNode *expr;
@@ -741,7 +751,9 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = codegen_statement_payload(root->children[i]);
 
-        if (payload->kind == NODE_FUNCTION_DEF) {
+        if (payload->kind == NODE_IMPORT_STATEMENT) {
+            codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_definition(ctx, payload);
             fputc('\n', ctx->out);
         }

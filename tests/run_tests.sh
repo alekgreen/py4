@@ -79,10 +79,12 @@ run_fail_case() {
 }
 
 for case_file in "$OK_DIR"/*.p4; do
+    [[ -f "${case_file%.p4}.out" ]] || continue
     run_ok_case "$case_file"
 done
 
 for case_file in "$FAIL_DIR"/*.p4; do
+    [[ -f "${case_file%.p4}.err" ]] || continue
     run_fail_case "$case_file"
 done
 

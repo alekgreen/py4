@@ -12,6 +12,7 @@
 static const char *KEYWORDS[] = {
     "def",
     "return",
+    "import",
     "if",
     "elif",
     "else",

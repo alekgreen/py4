@@ -593,6 +593,10 @@ static void typecheck_statement(
         return;
     }
 
+    if (payload->kind == NODE_IMPORT_STATEMENT) {
+        semantic_error("imports are only supported at module scope");
+    }
+
     if (semantic_is_if_statement(payload)) {
         typecheck_if_statement(info, payload, scope, current_function);
         return;
@@ -625,7 +629,9 @@ SemanticInfo *analyze_program(const ParseNode *root)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = semantic_statement_payload(root->children[i]);
 
-        if (payload->kind == NODE_FUNCTION_DEF) {
+        if (payload->kind == NODE_IMPORT_STATEMENT) {
+            semantic_error("imports should be resolved before semantic analysis");
+        } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
         } else {
             typecheck_statement(info, root->children[i], &global_scope, NULL, 0);
