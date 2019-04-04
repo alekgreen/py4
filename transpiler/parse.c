@@ -92,6 +92,7 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts);
 static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
+static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
@@ -162,6 +163,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_IMPORT_STATEMENT:     return "IMPORT_STATEMENT";
         case NODE_RETURN_STATEMENT:     return "RETURN_STATEMENT";
         case NODE_IF_STATEMENT:         return "IF_STATEMENT";
+        case NODE_WHILE_STATEMENT:      return "WHILE_STATEMENT";
         case NODE_ELIF_CLAUSE:          return "ELIF_CLAUSE";
         case NODE_ELSE_CLAUSE:          return "ELSE_CLAUSE";
         case NODE_STATEMENT_TAIL:       return "STATEMENT_TAIL";
@@ -239,6 +241,8 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
         add_child(node, parse_IMPORT_STATEMENT(ts));
     } else if (is_keyword_token(peek_ts(ts), "if")) {
         add_child(node, parse_IF_STATEMENT(ts));
+    } else if (is_keyword_token(peek_ts(ts), "while")) {
+        add_child(node, parse_WHILE_STATEMENT(ts));
     } else {
         add_child(node, parse_SIMPLE_STATEMENT(ts));
     }
@@ -254,6 +258,22 @@ static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
     expect_keyword(ts, "import");
     module_name = expect(ts, TOKEN_IDENTIFIER);
     add_child(node, create_node(NODE_PRIMARY, module_name.type, module_name.value));
+    return node;
+}
+
+static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_WHILE_STATEMENT, TOKEN_NULL, NULL);
+
+    expect_keyword(ts, "while");
+    add_child(node, parse_EXPRESSION(ts));
+    expect(ts, TOKEN_COLON);
+    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    add_child(node, parse_SUITE(ts));
+    expect(ts, TOKEN_DEDENT);
+
     return node;
 }
 

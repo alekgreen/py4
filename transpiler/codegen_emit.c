@@ -512,6 +512,22 @@ static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
     fputc('\n', ctx->out);
 }
 
+static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stmt)
+{
+    char *cond = expression_to_c_string(ctx, while_stmt->children[0]);
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "while (%s)\n", cond);
+    free(cond);
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_suite(ctx, while_stmt->children[2]);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+}
+
 void codegen_emit_suite(CodegenContext *ctx, const ParseNode *suite)
 {
     if (suite->child_count == 1 && codegen_is_epsilon_node(suite->children[0])) {
@@ -609,6 +625,11 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
             codegen_error("nested function definitions are not supported in C output");
         }
         emit_function_definition(ctx, payload);
+        return;
+    }
+
+    if (payload->kind == NODE_WHILE_STATEMENT) {
+        emit_while_statement(ctx, payload);
         return;
     }
 

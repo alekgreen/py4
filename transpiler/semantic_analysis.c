@@ -506,6 +506,21 @@ static void typecheck_if_statement(
     }
 }
 
+static void typecheck_while_statement(
+    SemanticInfo *info,
+    const ParseNode *while_stmt,
+    Scope *scope,
+    FunctionContext *current_function)
+{
+    ValueType condition_type = infer_expression_type(info, while_stmt->children[0], scope);
+
+    if (condition_type != TYPE_BOOL) {
+        semantic_error("while condition must be bool");
+    }
+
+    typecheck_branch_suite(info, while_stmt->children[2], scope, current_function);
+}
+
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -595,6 +610,11 @@ static void typecheck_statement(
 
     if (payload->kind == NODE_IMPORT_STATEMENT) {
         semantic_error("imports are only supported at module scope");
+    }
+
+    if (payload->kind == NODE_WHILE_STATEMENT) {
+        typecheck_while_statement(info, payload, scope, current_function);
+        return;
     }
 
     if (semantic_is_if_statement(payload)) {
