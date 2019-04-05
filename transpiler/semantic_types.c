@@ -26,6 +26,7 @@ static const char *type_member_name(ValueType type)
         case TYPE_CHAR: return "char";
         case TYPE_STR: return "str";
         case TYPE_NONE: return "None";
+        case TYPE_LIST_INT: return "list[int]";
         default: return "unknown";
     }
 }
@@ -50,6 +51,9 @@ static ValueType parse_type_atom_name(const char *name)
     if (strcmp(name, "None") == 0) {
         return TYPE_NONE;
     }
+    if (strcmp(name, "list[int]") == 0) {
+        return TYPE_LIST_INT;
+    }
 
     semantic_error("unsupported type '%s'", name);
     return 0;
@@ -65,6 +69,11 @@ int semantic_type_is_union(ValueType type)
     return count_type_bits(type) > 1;
 }
 
+int semantic_type_is_ref(ValueType type)
+{
+    return type == TYPE_LIST_INT;
+}
+
 const char *semantic_type_name(ValueType type)
 {
     static char buffers[8][96];
@@ -78,7 +87,8 @@ const char *semantic_type_name(ValueType type)
         TYPE_BOOL,
         TYPE_CHAR,
         TYPE_STR,
-        TYPE_NONE
+        TYPE_NONE,
+        TYPE_LIST_INT
     };
 
     if (type == TYPE_INT || type == TYPE_FLOAT || type == TYPE_BOOL ||
@@ -159,7 +169,8 @@ int semantic_is_assignable(ValueType target, ValueType value)
         TYPE_BOOL,
         TYPE_CHAR,
         TYPE_STR,
-        TYPE_NONE
+        TYPE_NONE,
+        TYPE_LIST_INT
     };
 
     if (target == 0 || value == 0) {
@@ -237,8 +248,17 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         type |= atom;
     }
 
+    if (semantic_type_contains(type, TYPE_LIST_INT) && semantic_type_is_union(type)) {
+        semantic_error("list[int] cannot be used inside a union yet");
+    }
+
     semantic_record_node_type(info, type_node, type);
     return type;
+}
+
+int semantic_builtin_returns_owned_ref(const char *name)
+{
+    return strcmp(name, "list_int") == 0;
 }
 
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name)

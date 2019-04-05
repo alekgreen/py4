@@ -47,6 +47,7 @@ int semantic_is_if_statement(const ParseNode *node);
 int semantic_is_epsilon_node(const ParseNode *node);
 int semantic_is_numeric_type(ValueType type);
 int semantic_is_assignable(ValueType target, ValueType value);
+int semantic_builtin_returns_owned_ref(const char *name);
 void semantic_record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type);
 ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_node);
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);

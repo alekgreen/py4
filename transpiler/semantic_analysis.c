@@ -44,6 +44,117 @@ static int is_print_call(const ParseNode *call)
     return callee->value != NULL && strcmp(callee->value, "print") == 0;
 }
 
+static int is_builtin_name(const char *name)
+{
+    return strcmp(name, "list_int") == 0 ||
+        strcmp(name, "list_append") == 0 ||
+        strcmp(name, "list_get") == 0 ||
+        strcmp(name, "list_len") == 0 ||
+        strcmp(name, "list_set") == 0;
+}
+
+static int is_ref_variable_expression(const ParseNode *expr)
+{
+    if (expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    return expr->children[0]->kind == NODE_PRIMARY &&
+        expr->children[0]->token_type == TOKEN_IDENTIFIER;
+}
+
+static void expect_argument_count(const char *name, const ParseNode *arguments, size_t expected)
+{
+    size_t actual = arguments->child_count;
+
+    if (actual == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+        actual = 0;
+    }
+
+    if (actual != expected) {
+        semantic_error("function '%s' expects %zu arguments", name, expected);
+    }
+}
+
+static ValueType infer_builtin_call_type(
+    SemanticInfo *info,
+    const char *name,
+    const ParseNode *call,
+    const ParseNode *arguments,
+    Scope *scope)
+{
+    (void)call;
+
+    if (strcmp(name, "list_int") == 0) {
+        expect_argument_count(name, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_LIST_INT);
+        return TYPE_LIST_INT;
+    }
+
+    if (strcmp(name, "list_append") == 0) {
+        expect_argument_count(name, arguments, 2);
+        if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
+            semantic_error("function 'list_append' argument 1 expects list[int]");
+        }
+        if (!is_ref_variable_expression(arguments->children[0])) {
+            semantic_error("function 'list_append' argument 1 must be a variable");
+        }
+        if (infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
+            semantic_error("function 'list_append' argument 2 expects int");
+        }
+        semantic_record_node_type(info, call, TYPE_NONE);
+        return TYPE_NONE;
+    }
+
+    if (strcmp(name, "list_get") == 0) {
+        expect_argument_count(name, arguments, 2);
+        if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
+            semantic_error("function 'list_get' argument 1 expects list[int]");
+        }
+        if (!is_ref_variable_expression(arguments->children[0])) {
+            semantic_error("function 'list_get' argument 1 must be a variable");
+        }
+        if (infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
+            semantic_error("function 'list_get' argument 2 expects int");
+        }
+        semantic_record_node_type(info, call, TYPE_INT);
+        return TYPE_INT;
+    }
+
+    if (strcmp(name, "list_len") == 0) {
+        expect_argument_count(name, arguments, 1);
+        if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
+            semantic_error("function 'list_len' argument 1 expects list[int]");
+        }
+        if (!is_ref_variable_expression(arguments->children[0])) {
+            semantic_error("function 'list_len' argument 1 must be a variable");
+        }
+        semantic_record_node_type(info, call, TYPE_INT);
+        return TYPE_INT;
+    }
+
+    if (strcmp(name, "list_set") == 0) {
+        expect_argument_count(name, arguments, 3);
+        if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
+            semantic_error("function 'list_set' argument 1 expects list[int]");
+        }
+        if (!is_ref_variable_expression(arguments->children[0])) {
+            semantic_error("function 'list_set' argument 1 must be a variable");
+        }
+        if (infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
+            semantic_error("function 'list_set' argument 2 expects int");
+        }
+        if (infer_expression_type(info, arguments->children[2], scope) != TYPE_INT) {
+            semantic_error("function 'list_set' argument 3 expects int");
+        }
+        semantic_record_node_type(info, call, TYPE_NONE);
+        return TYPE_NONE;
+    }
+
+    semantic_error("unknown builtin '%s'", name);
+    return TYPE_NONE;
+}
+
 static ValueType infer_call_type(
     SemanticInfo *info,
     const ParseNode *call,
@@ -65,9 +176,16 @@ static ValueType infer_call_type(
         if (arg_type == TYPE_NONE) {
             semantic_error("print cannot print None");
         }
+        if (semantic_type_is_ref(arg_type)) {
+            semantic_error("print does not support %s yet", semantic_type_name(arg_type));
+        }
 
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
+    }
+
+    if (is_builtin_name(callee->value)) {
+        return infer_builtin_call_type(info, callee->value, call, arguments, scope);
     }
 
     FunctionInfo *fn = semantic_find_function(info->functions, callee->value);
@@ -94,6 +212,12 @@ static ValueType infer_call_type(
                 fn->name, i + 1,
                 semantic_type_name(fn->param_types[i]),
                 semantic_type_name(actual));
+        }
+        if (semantic_type_is_ref(fn->param_types[i]) &&
+            semantic_type_is_ref(actual) &&
+            !is_ref_variable_expression(arguments->children[i])) {
+            semantic_error("function '%s' argument %zu must be a variable for %s values",
+                fn->name, i + 1, semantic_type_name(actual));
         }
     }
 
@@ -183,6 +307,11 @@ static void typecheck_comparison_operands(ValueType lhs_type, ValueType rhs_type
 {
     if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
         semantic_error("operator '%s' does not support union operands yet", op);
+    }
+    if (semantic_type_is_ref(lhs_type) || semantic_type_is_ref(rhs_type)) {
+        semantic_error("operator '%s' does not support %s operands",
+            op,
+            semantic_type_is_ref(lhs_type) ? semantic_type_name(lhs_type) : semantic_type_name(rhs_type));
     }
 
     if (is_comparison_operator(op)) {

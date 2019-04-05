@@ -26,6 +26,7 @@ static const char *KEYWORDS[] = {
     "char",
     "str",
     "string",
+    "list",
     "None",
     "True",
     "False",
@@ -286,6 +287,12 @@ static void tokenize_line(TokenStream *ts, const char *cursor)
             case ')':
                 append_token(ts, TOKEN_RPAREN, ")");
                 break;
+            case '[':
+                append_token(ts, TOKEN_LBRACKET, "[");
+                break;
+            case ']':
+                append_token(ts, TOKEN_RBRACKET, "]");
+                break;
             case ':':
                 append_token(ts, TOKEN_COLON, ":");
                 break;
@@ -390,6 +397,8 @@ Token next_token(FILE *fp)
         case '>': return make_token(TOKEN_OPERATOR, buffer);
         case '(': return make_token(TOKEN_LPAREN, buffer);
         case ')': return make_token(TOKEN_RPAREN, buffer);
+        case '[': return make_token(TOKEN_LBRACKET, buffer);
+        case ']': return make_token(TOKEN_RBRACKET, buffer);
         case ':': return make_token(TOKEN_COLON, buffer);
         case ',': return make_token(TOKEN_COMMA, buffer);
         case '|': return make_token(TOKEN_OPERATOR, buffer);

@@ -70,6 +70,15 @@ static int is_chained_comparison_expr(const ParseNode *expr)
     return 1;
 }
 
+static int is_list_builtin_name(const char *name)
+{
+    return strcmp(name, "list_int") == 0 ||
+        strcmp(name, "list_append") == 0 ||
+        strcmp(name, "list_get") == 0 ||
+        strcmp(name, "list_len") == 0 ||
+        strcmp(name, "list_set") == 0;
+}
+
 static char *type_to_c_string(ValueType type)
 {
     char buffer[MAX_NAME_LEN];
@@ -82,6 +91,7 @@ static char *type_to_c_string(ValueType type)
             case TYPE_CHAR: return dup_printf("char");
             case TYPE_STR: return dup_printf("const char *");
             case TYPE_NONE: return dup_printf("void");
+            case TYPE_LIST_INT: return dup_printf("Py4ListInt *");
         }
     }
 
@@ -92,6 +102,94 @@ static char *type_to_c_string(ValueType type)
 static char *next_temp_name(CodegenContext *ctx)
 {
     return dup_printf("py4_tmp_%d", ctx->temp_counter++);
+}
+
+static void push_cleanup_scope(CodegenContext *ctx)
+{
+    if (ctx->cleanup_scope_count >= MAX_SCOPE_DEPTH) {
+        codegen_error("cleanup scope nesting too deep");
+    }
+    ctx->cleanup_scope_starts[ctx->cleanup_scope_count++] = ctx->ref_local_count;
+}
+
+static void emit_ref_incref(CodegenContext *ctx, ValueType type, const char *name)
+{
+    switch (type) {
+        case TYPE_LIST_INT:
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "py4_list_int_incref(%s);\n", name);
+            return;
+        default:
+            codegen_error("unsupported refcounted type %s", semantic_type_name(type));
+    }
+}
+
+static void emit_ref_decref(CodegenContext *ctx, ValueType type, const char *name)
+{
+    switch (type) {
+        case TYPE_LIST_INT:
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "py4_list_int_decref(%s);\n", name);
+            return;
+        default:
+            codegen_error("unsupported refcounted type %s", semantic_type_name(type));
+    }
+}
+
+static void register_ref_local(CodegenContext *ctx, const char *name, ValueType type)
+{
+    if (!semantic_type_is_ref(type)) {
+        return;
+    }
+
+    if (ctx->ref_local_count >= MAX_REF_LOCALS) {
+        codegen_error("too many live refcounted locals");
+    }
+
+    ctx->ref_locals[ctx->ref_local_count].name = name;
+    ctx->ref_locals[ctx->ref_local_count].type = type;
+    ctx->ref_local_count++;
+}
+
+static void emit_live_ref_cleanup(CodegenContext *ctx)
+{
+    for (size_t i = ctx->ref_local_count; i > 0; i--) {
+        emit_ref_decref(ctx, ctx->ref_locals[i - 1].type, ctx->ref_locals[i - 1].name);
+    }
+}
+
+static void pop_cleanup_scope(CodegenContext *ctx)
+{
+    size_t start;
+
+    if (ctx->cleanup_scope_count == 0) {
+        codegen_error("cleanup scope stack underflow");
+    }
+
+    start = ctx->cleanup_scope_starts[--ctx->cleanup_scope_count];
+    for (size_t i = ctx->ref_local_count; i > start; i--) {
+        emit_ref_decref(ctx, ctx->ref_locals[i - 1].type, ctx->ref_locals[i - 1].name);
+    }
+    ctx->ref_local_count = start;
+}
+
+static int expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
+{
+    const ParseNode *child;
+
+    if (!semantic_type_is_ref(semantic_type_of(ctx->semantic, expr))) {
+        return 0;
+    }
+    if (expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    child = expr->children[0];
+    if (child->kind != NODE_CALL) {
+        return 0;
+    }
+
+    return 1;
 }
 
 static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_type, ValueType stored_type)
@@ -108,7 +206,7 @@ static char *wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNode
 static char *arguments_to_c_string(CodegenContext *ctx, const ParseNode *call, const ParseNode *arguments)
 {
     const ParseNode *callee = codegen_expect_child(call, 0, NODE_PRIMARY);
-    const ParseNode *function_def = codegen_find_function_definition(ctx->root, callee->value);
+    const ParseNode *function_def;
     const ParseNode *parameters;
     char *result;
 
@@ -116,6 +214,20 @@ static char *arguments_to_c_string(CodegenContext *ctx, const ParseNode *call, c
         return dup_printf("");
     }
 
+    if (is_list_builtin_name(callee->value)) {
+        result = dup_printf("");
+        for (size_t i = 0; i < arguments->child_count; i++) {
+            char *arg = expression_to_c_string(ctx, arguments->children[i]);
+            char *joined = i == 0 ? dup_printf("%s", arg) : dup_printf("%s, %s", result, arg);
+
+            free(result);
+            free(arg);
+            result = joined;
+        }
+        return result;
+    }
+
+    function_def = codegen_find_function_definition(ctx->root, callee->value);
     if (function_def == NULL) {
         codegen_error("unknown function '%s' during code generation", callee->value);
     }
@@ -141,9 +253,33 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 {
     const ParseNode *callee = codegen_expect_child(call, 0, NODE_PRIMARY);
     const ParseNode *arguments = codegen_expect_child(call, 1, NODE_ARGUMENTS);
-    char *args = arguments_to_c_string(ctx, call, arguments);
-    char *result = dup_printf("%s(%s)", callee->value, args);
+    char *args;
+    char *result;
 
+    if (is_list_builtin_name(callee->value)) {
+        if (strcmp(callee->value, "list_int") == 0) {
+            return dup_printf("py4_list_int_new()");
+        }
+
+        args = arguments_to_c_string(ctx, call, arguments);
+        if (strcmp(callee->value, "list_append") == 0) {
+            result = dup_printf("py4_list_int_append(%s)", args);
+        } else if (strcmp(callee->value, "list_get") == 0) {
+            result = dup_printf("py4_list_int_get(%s)", args);
+        } else if (strcmp(callee->value, "list_len") == 0) {
+            result = dup_printf("py4_list_int_len(%s)", args);
+        } else if (strcmp(callee->value, "list_set") == 0) {
+            result = dup_printf("py4_list_int_set(%s)", args);
+        } else {
+            free(args);
+            codegen_error("unknown builtin '%s' during code generation", callee->value);
+        }
+        free(args);
+        return result;
+    }
+
+    args = arguments_to_c_string(ctx, call, arguments);
+    result = dup_printf("%s(%s)", callee->value, args);
     free(args);
     return result;
 }
@@ -369,6 +505,11 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         case TYPE_NONE:
             free(arg_text);
             codegen_error("cannot print None");
+            return;
+        case TYPE_LIST_INT:
+            free(arg_text);
+            codegen_error("print does not support %s yet", semantic_type_name(arg_type));
+            return;
     }
 
     free(arg_text);
@@ -377,6 +518,7 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
 static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr_stmt)
 {
     const ParseNode *expr = codegen_expect_child(expr_stmt, 0, NODE_EXPRESSION);
+    ValueType expr_type = semantic_type_of(ctx->semantic, expr);
     char *expr_text;
 
     if (codegen_is_print_call_expr(expr)) {
@@ -385,6 +527,19 @@ static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr
     }
 
     expr_text = expression_to_c_string(ctx, expr);
+    if (semantic_type_is_ref(expr_type) && expression_is_owned_ref(ctx, expr)) {
+        char *temp_name = next_temp_name(ctx);
+        char *type_name = type_to_c_string(expr_type);
+
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
+        free(type_name);
+        free(expr_text);
+        emit_ref_decref(ctx, expr_type, temp_name);
+        free(temp_name);
+        return;
+    }
+
     codegen_emit_indent(ctx);
     fprintf(ctx->out, "%s;\n", expr_text);
     free(expr_text);
@@ -397,6 +552,7 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
     }
 
     if (codegen_is_epsilon_node(return_stmt->children[0])) {
+        emit_live_ref_cleanup(ctx);
         codegen_emit_indent(ctx);
         if (ctx->current_function_is_main) {
             fputs("return 0;\n", ctx->out);
@@ -411,7 +567,30 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
     }
 
     {
-        char *expr_text = wrapped_expression_to_c_string(ctx, return_stmt->children[0], ctx->current_function_return_type);
+        const ParseNode *expr = return_stmt->children[0];
+        ValueType return_type = ctx->current_function_return_type;
+        char *expr_text;
+
+        if (semantic_type_is_ref(return_type)) {
+            char *temp_name = next_temp_name(ctx);
+            char *type_name = type_to_c_string(return_type);
+
+            expr_text = wrapped_expression_to_c_string(ctx, expr, return_type);
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
+            if (!expression_is_owned_ref(ctx, expr)) {
+                emit_ref_incref(ctx, return_type, temp_name);
+            }
+            free(type_name);
+            free(expr_text);
+            emit_live_ref_cleanup(ctx);
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "return %s;\n", temp_name);
+            free(temp_name);
+            return;
+        }
+
+        expr_text = wrapped_expression_to_c_string(ctx, expr, return_type);
         codegen_emit_indent(ctx);
         fprintf(ctx->out, "return %s;\n", expr_text);
         free(expr_text);
@@ -449,6 +628,34 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             target_type = semantic_type_of(ctx->semantic, name);
         }
 
+        if (semantic_type_is_ref(target_type)) {
+            char *temp_name = next_temp_name(ctx);
+            char *type_name = type_to_c_string(target_type);
+            int is_owned = expression_is_owned_ref(ctx, expr);
+
+            expr_text = wrapped_expression_to_c_string(ctx, expr, target_type);
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
+            if (!is_owned) {
+                emit_ref_incref(ctx, target_type, temp_name);
+            }
+
+            if (codegen_is_type_assignment(statement_tail)) {
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, name->value, temp_name);
+                register_ref_local(ctx, name->value, target_type);
+            } else {
+                emit_ref_decref(ctx, target_type, name->value);
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s = %s;\n", name->value, temp_name);
+            }
+
+            free(type_name);
+            free(temp_name);
+            free(expr_text);
+            return;
+        }
+
         expr_text = wrapped_expression_to_c_string(ctx, expr, target_type);
         codegen_emit_indent(ctx);
         if (codegen_is_type_assignment(statement_tail)) {
@@ -471,7 +678,9 @@ static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
     codegen_emit_indent(ctx);
     fputs("{\n", ctx->out);
     ctx->indent_level++;
+    push_cleanup_scope(ctx);
     codegen_emit_suite(ctx, if_stmt->children[2]);
+    pop_cleanup_scope(ctx);
     ctx->indent_level--;
     codegen_emit_indent(ctx);
     fputs("}", ctx->out);
@@ -487,7 +696,9 @@ static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
             codegen_emit_indent(ctx);
             fputs("{\n", ctx->out);
             ctx->indent_level++;
+            push_cleanup_scope(ctx);
             codegen_emit_suite(ctx, branch->children[2]);
+            pop_cleanup_scope(ctx);
             ctx->indent_level--;
             codegen_emit_indent(ctx);
             fputs("}", ctx->out);
@@ -499,7 +710,9 @@ static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
             codegen_emit_indent(ctx);
             fputs("{\n", ctx->out);
             ctx->indent_level++;
+            push_cleanup_scope(ctx);
             codegen_emit_suite(ctx, branch->children[1]);
+            pop_cleanup_scope(ctx);
             ctx->indent_level--;
             codegen_emit_indent(ctx);
             fputs("}", ctx->out);
@@ -522,7 +735,9 @@ static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stm
     codegen_emit_indent(ctx);
     fputs("{\n", ctx->out);
     ctx->indent_level++;
+    push_cleanup_scope(ctx);
     codegen_emit_suite(ctx, while_stmt->children[2]);
+    pop_cleanup_scope(ctx);
     ctx->indent_level--;
     codegen_emit_indent(ctx);
     fputs("}\n", ctx->out);
@@ -597,6 +812,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     ctx->indent_level++;
     ctx->current_function_is_main = is_c_main;
     ctx->current_function_return_type = return_type;
+    push_cleanup_scope(ctx);
 
     if (is_c_main && ctx->has_top_level_executable_statements) {
         codegen_emit_indent(ctx);
@@ -604,6 +820,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     }
 
     codegen_emit_suite(ctx, codegen_function_suite(function_def));
+    pop_cleanup_scope(ctx);
 
     if (is_c_main) {
         codegen_emit_indent(ctx);
@@ -753,6 +970,27 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             target_type = semantic_type_of(ctx->semantic, name);
             expr_text = wrapped_expression_to_c_string(ctx, expr, target_type);
 
+            if (semantic_type_is_ref(target_type)) {
+                char *temp_name = next_temp_name(ctx);
+                char *type_name = type_to_c_string(target_type);
+                int is_owned = expression_is_owned_ref(ctx, expr);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
+                if (!is_owned) {
+                    emit_ref_incref(ctx, target_type, temp_name);
+                }
+                if (!codegen_is_type_assignment(statement_tail)) {
+                    emit_ref_decref(ctx, target_type, name->value);
+                }
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s = %s;\n", name->value, temp_name);
+                free(type_name);
+                free(temp_name);
+                free(expr_text);
+                continue;
+            }
+
             codegen_emit_indent(ctx);
             fprintf(ctx->out, "%s = %s;\n", name->value, expr_text);
             free(expr_text);
@@ -799,6 +1037,100 @@ static void emit_auto_main(CodegenContext *ctx)
     fputs("}\n", ctx->out);
 }
 
+static void emit_list_int_runtime(CodegenContext *ctx)
+{
+    fputs("typedef struct {\n", ctx->out);
+    fputs("    int refcount;\n", ctx->out);
+    fputs("    size_t len;\n", ctx->out);
+    fputs("    size_t cap;\n", ctx->out);
+    fputs("    int *items;\n", ctx->out);
+    fputs("} Py4ListInt;\n\n", ctx->out);
+
+    fputs("static void py4_list_int_bounds_check(Py4ListInt *list, int index)\n{\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    if (index < 0 || (size_t)index >= list->len) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] index out of bounds\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static Py4ListInt *py4_list_int_new(void)\n{\n", ctx->out);
+    fputs("    Py4ListInt *list = calloc(1, sizeof(Py4ListInt));\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        perror(\"calloc\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    list->refcount = 1;\n", ctx->out);
+    fputs("    return list;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_list_int_incref(Py4ListInt *list)\n{\n", ctx->out);
+    fputs("    if (list != NULL) {\n", ctx->out);
+    fputs("        list->refcount++;\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_list_int_decref(Py4ListInt *list)\n{\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        return;\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    list->refcount--;\n", ctx->out);
+    fputs("    if (list->refcount == 0) {\n", ctx->out);
+    fputs("        free(list->items);\n", ctx->out);
+    fputs("        free(list);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_list_int_ensure_capacity(Py4ListInt *list, size_t needed)\n{\n", ctx->out);
+    fputs("    size_t new_cap;\n", ctx->out);
+    fputs("    int *items;\n\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    if (list->cap >= needed) {\n", ctx->out);
+    fputs("        return;\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    new_cap = list->cap == 0 ? 4 : list->cap * 2;\n", ctx->out);
+    fputs("    while (new_cap < needed) {\n", ctx->out);
+    fputs("        new_cap *= 2;\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    items = realloc(list->items, sizeof(int) * new_cap);\n", ctx->out);
+    fputs("    if (items == NULL) {\n", ctx->out);
+    fputs("        perror(\"realloc\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    list->items = items;\n", ctx->out);
+    fputs("    list->cap = new_cap;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_list_int_append(Py4ListInt *list, int value)\n{\n", ctx->out);
+    fputs("    py4_list_int_ensure_capacity(list, list->len + 1);\n", ctx->out);
+    fputs("    list->items[list->len++] = value;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static int py4_list_int_get(Py4ListInt *list, int index)\n{\n", ctx->out);
+    fputs("    py4_list_int_bounds_check(list, index);\n", ctx->out);
+    fputs("    return list->items[index];\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_list_int_set(Py4ListInt *list, int index, int value)\n{\n", ctx->out);
+    fputs("    py4_list_int_bounds_check(list, index);\n", ctx->out);
+    fputs("    list->items[index] = value;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static int py4_list_int_len(Py4ListInt *list)\n{\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    return (int)list->len;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+}
+
 void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
 {
     CodegenContext ctx = {0};
@@ -812,7 +1144,8 @@ void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
     ctx.semantic = info;
     codegen_collect_program_state(&ctx, root);
 
-    fputs("#include <stdbool.h>\n#include <stdio.h>\n\n", out);
+    fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n\n", out);
+    emit_list_int_runtime(&ctx);
     codegen_emit_union_runtime(&ctx);
     emit_global_declarations(&ctx, root);
     emit_function_prototypes(&ctx, root);

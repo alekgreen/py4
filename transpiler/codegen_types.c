@@ -11,7 +11,8 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
     TYPE_BOOL,
     TYPE_CHAR,
     TYPE_STR,
-    TYPE_NONE
+    TYPE_NONE,
+    TYPE_LIST_INT
 };
 
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
@@ -162,6 +163,7 @@ const char *codegen_type_suffix(ValueType type)
         case TYPE_CHAR: return "char";
         case TYPE_STR: return "str";
         case TYPE_NONE: return "none";
+        case TYPE_LIST_INT: return "list_int";
         default: return "unknown";
     }
 }
@@ -174,6 +176,7 @@ const char *codegen_type_field(ValueType type)
         case TYPE_BOOL: return "as_bool";
         case TYPE_CHAR: return "as_char";
         case TYPE_STR: return "as_str";
+        case TYPE_LIST_INT: return "as_list_int";
         default: return "";
     }
 }
@@ -184,6 +187,15 @@ static void append_name(char *buffer, size_t size, const char *suffix)
         codegen_error("generated identifier is too long");
     }
     strcat(buffer, suffix);
+}
+
+static int is_codegen_builtin_name(const char *name)
+{
+    return strcmp(name, "list_int") == 0 ||
+        strcmp(name, "list_append") == 0 ||
+        strcmp(name, "list_get") == 0 ||
+        strcmp(name, "list_len") == 0 ||
+        strcmp(name, "list_set") == 0;
 }
 
 void codegen_build_union_base_name(char *buffer, size_t size, ValueType type)
@@ -257,6 +269,9 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
             return;
         case TYPE_NONE:
             fputs("void", out);
+            return;
+        case TYPE_LIST_INT:
+            fputs("Py4ListInt *", out);
             return;
         default:
             codegen_error("unsupported scalar type %s", semantic_type_name(type));
@@ -414,6 +429,8 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
             if (arguments->child_count == 1 && !codegen_is_epsilon_node(arguments->children[0])) {
                 codegen_add_printable_union_type(ctx, semantic_type_of(ctx->semantic, arguments->children[0]));
             }
+        } else if (is_codegen_builtin_name(callee->value)) {
+            /* Builtins lower directly to runtime helpers and do not need union conversions. */
         } else {
             function_def = codegen_find_function_definition(ctx->root, callee->value);
             if (function_def == NULL) {

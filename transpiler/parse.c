@@ -24,6 +24,20 @@ static char *dup_string(const char *value)
     return copy;
 }
 
+static char *join_type_name(const char *container, const char *member)
+{
+    size_t len = strlen(container) + strlen(member) + 3;
+    char *name = malloc(len);
+
+    if (name == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    snprintf(name, len, "%s[%s]", container, member);
+    return name;
+}
+
 static Token peek_n(TokenStream *ts, int offset)
 {
     int index = ts->pos + offset;
@@ -99,6 +113,7 @@ static ParseNode *parse_PARAMETERS(TokenStream *ts);
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
 static ParseNode *parse_TYPE(TokenStream *ts);
+static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
 static ParseNode *parse_OR(TokenStream *ts);
 static ParseNode *parse_AND(TokenStream *ts);
 static ParseNode *parse_NOT(TokenStream *ts);
@@ -448,25 +463,45 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
 static ParseNode *parse_TYPE(TokenStream *ts)
 {
     ParseNode *node = create_node(NODE_TYPE, TOKEN_NULL, NULL);
-    Token type_tok;
-
-    type_tok = get_from_ts(ts);
-    if (!is_type_token(type_tok)) {
-        parse_error(type_tok, "expected type name");
-    }
-    add_child(node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+    add_child(node, parse_TYPE_ATOM(ts));
 
     while (is_pipe_token(peek_ts(ts))) {
-        type_tok = get_from_ts(ts);
-        (void)type_tok;
-        type_tok = get_from_ts(ts);
-        if (!is_type_token(type_tok)) {
-            parse_error(type_tok, "expected type name after '|'");
-        }
-        add_child(node, create_node(NODE_PRIMARY, type_tok.type, type_tok.value));
+        get_from_ts(ts);
+        add_child(node, parse_TYPE_ATOM(ts));
     }
 
     return node;
+}
+
+static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
+{
+    Token type_tok = get_from_ts(ts);
+
+    if (!is_type_token(type_tok)) {
+        parse_error(type_tok, "expected type name");
+    }
+
+    if (is_keyword_token(type_tok, "list")) {
+        Token member_tok;
+        char *type_name;
+
+        expect(ts, TOKEN_LBRACKET);
+        member_tok = get_from_ts(ts);
+        if (!is_type_token(member_tok)) {
+            parse_error(member_tok, "expected type name inside list[...]");
+        }
+        if (strcmp(member_tok.value, "int") != 0) {
+            parse_error(member_tok, "only list[int] is supported right now");
+        }
+        expect(ts, TOKEN_RBRACKET);
+
+        type_name = join_type_name("list", member_tok.value);
+        ParseNode *node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
+        free(type_name);
+        return node;
+    }
+
+    return create_node(NODE_PRIMARY, type_tok.type, type_tok.value);
 }
 
 static ParseNode *wrap_expression(ParseNode *node)

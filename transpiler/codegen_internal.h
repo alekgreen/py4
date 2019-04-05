@@ -9,11 +9,18 @@
 #define MAX_UNION_TYPES 64
 #define MAX_UNION_CONVERSIONS 128
 #define MAX_NAME_LEN 128
+#define MAX_REF_LOCALS 256
+#define MAX_SCOPE_DEPTH 128
 
 typedef struct {
     ValueType from_type;
     ValueType to_type;
 } UnionConversion;
+
+typedef struct {
+    const char *name;
+    ValueType type;
+} RefLocal;
 
 typedef struct {
     FILE *out;
@@ -31,6 +38,10 @@ typedef struct {
     size_t printable_union_type_count;
     UnionConversion conversions[MAX_UNION_CONVERSIONS];
     size_t conversion_count;
+    RefLocal ref_locals[MAX_REF_LOCALS];
+    size_t ref_local_count;
+    size_t cleanup_scope_starts[MAX_SCOPE_DEPTH];
+    size_t cleanup_scope_count;
 } CodegenContext;
 
 extern const ValueType CODEGEN_ORDERED_TYPES[];
