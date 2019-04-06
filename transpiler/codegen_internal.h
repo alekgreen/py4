@@ -54,7 +54,7 @@ int codegen_is_type_assignment(const ParseNode *statement_tail);
 int codegen_is_epsilon_node(const ParseNode *node);
 int codegen_is_print_call_expr(const ParseNode *expr);
 const ParseNode *codegen_statement_payload(const ParseNode *statement);
-const ParseNode *codegen_simple_statement_name(const ParseNode *simple_stmt);
+const ParseNode *codegen_simple_statement_target(const ParseNode *simple_stmt);
 const ParseNode *codegen_simple_statement_tail(const ParseNode *simple_stmt);
 const ParseNode *codegen_statement_tail_expression(const ParseNode *statement_tail);
 const ParseNode *codegen_statement_tail_type_node(const ParseNode *statement_tail);

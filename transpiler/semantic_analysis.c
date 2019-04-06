@@ -63,6 +63,21 @@ static int is_ref_variable_expression(const ParseNode *expr)
         expr->children[0]->token_type == TOKEN_IDENTIFIER;
 }
 
+static int is_ref_variable_node(const ParseNode *node)
+{
+    return node != NULL &&
+        node->kind == NODE_PRIMARY &&
+        node->token_type == TOKEN_IDENTIFIER;
+}
+
+static const ParseNode *simple_statement_target(const ParseNode *simple_stmt)
+{
+    if (simple_stmt == NULL || simple_stmt->child_count == 0) {
+        semantic_error("malformed simple statement");
+    }
+    return simple_stmt->children[0];
+}
+
 static void expect_argument_count(const char *name, const ParseNode *arguments, size_t expected)
 {
     size_t actual = arguments->child_count;
@@ -231,6 +246,25 @@ static ValueType infer_primary_type(
     Scope *scope)
 {
     ValueType type;
+
+    if (node->kind == NODE_INDEX) {
+        ValueType container_type = infer_primary_type(info, node->children[0], scope);
+        ValueType index_type = infer_expression_type(info, node->children[1], scope);
+
+        if (container_type != TYPE_LIST_INT) {
+            semantic_error("indexing requires list[int] but got %s",
+                semantic_type_name(container_type));
+        }
+        if (!is_ref_variable_node(node->children[0])) {
+            semantic_error("indexed list access must use a variable base");
+        }
+        if (index_type != TYPE_INT) {
+            semantic_error("list[int] index must be int");
+        }
+
+        semantic_record_node_type(info, node, TYPE_INT);
+        return TYPE_INT;
+    }
 
     if (node->kind == NODE_CALL) {
         type = infer_call_type(info, node, scope);
@@ -449,11 +483,6 @@ static int is_type_assignment(const ParseNode *statement_tail)
         statement_tail->children[0]->kind == NODE_COLON;
 }
 
-static const ParseNode *simple_statement_name(const ParseNode *simple_stmt)
-{
-    return semantic_expect_child(simple_stmt, 0, NODE_PRIMARY);
-}
-
 static const ParseNode *simple_statement_tail(const ParseNode *simple_stmt)
 {
     return semantic_expect_child(simple_stmt, 1, NODE_STATEMENT_TAIL);
@@ -553,10 +582,36 @@ static void typecheck_simple_statement(
         semantic_error("malformed simple statement");
     }
 
-    const ParseNode *name = simple_statement_name(simple_stmt);
+    const ParseNode *target = simple_statement_target(simple_stmt);
     const ParseNode *statement_tail = simple_statement_tail(simple_stmt);
     const ParseNode *expr = statement_tail_expression(statement_tail);
     ValueType expr_type = infer_expression_type(info, expr, scope);
+
+    if (target->kind == NODE_INDEX) {
+        ValueType container_type = infer_primary_type(info, target->children[0], scope);
+        ValueType index_type = infer_expression_type(info, target->children[1], scope);
+
+        if (is_type_assignment(statement_tail)) {
+            semantic_error("indexed assignment cannot use a type annotation");
+        }
+        if (container_type != TYPE_LIST_INT) {
+            semantic_error("indexed assignment requires list[int] but got %s",
+                semantic_type_name(container_type));
+        }
+        if (!is_ref_variable_node(target->children[0])) {
+            semantic_error("indexed assignment must use a variable base");
+        }
+        if (index_type != TYPE_INT) {
+            semantic_error("list[int] index must be int");
+        }
+        if (expr_type != TYPE_INT) {
+            semantic_error("cannot assign %s to list[int] element",
+                semantic_type_name(expr_type));
+        }
+
+        semantic_record_node_type(info, target, TYPE_INT);
+        return;
+    }
 
     if (is_type_assignment(statement_tail)) {
         ValueType declared = semantic_parse_type_node(info, statement_tail_type_node(statement_tail));
@@ -564,25 +619,25 @@ static void typecheck_simple_statement(
             semantic_error("cannot assign %s to %s '%s'",
                 semantic_type_name(expr_type),
                 semantic_type_name(declared),
-                name->value);
+                target->value);
         }
-        semantic_bind_variable(scope, name->value, declared);
-        semantic_record_node_type(info, name, declared);
+        semantic_bind_variable(scope, target->value, declared);
+        semantic_record_node_type(info, target, declared);
         return;
     }
 
-    VariableBinding *var = semantic_find_variable(scope, name->value);
+    VariableBinding *var = semantic_find_variable(scope, target->value);
     if (var == NULL) {
-        semantic_error("assignment to undeclared variable '%s'", name->value);
+        semantic_error("assignment to undeclared variable '%s'", target->value);
     }
     if (!semantic_is_assignable(var->type, expr_type)) {
         semantic_error("cannot assign %s to %s '%s'",
             semantic_type_name(expr_type),
             semantic_type_name(var->type),
-            name->value);
+            target->value);
     }
 
-    semantic_record_node_type(info, name, var->type);
+    semantic_record_node_type(info, target, var->type);
 }
 
 static void typecheck_suite(

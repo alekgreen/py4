@@ -87,9 +87,12 @@ const ParseNode *codegen_statement_payload(const ParseNode *statement)
     return statement->children[0];
 }
 
-const ParseNode *codegen_simple_statement_name(const ParseNode *simple_stmt)
+const ParseNode *codegen_simple_statement_target(const ParseNode *simple_stmt)
 {
-    return codegen_expect_child(simple_stmt, 0, NODE_PRIMARY);
+    if (simple_stmt == NULL || simple_stmt->child_count == 0) {
+        codegen_error("malformed simple statement");
+    }
+    return simple_stmt->children[0];
 }
 
 const ParseNode *codegen_simple_statement_tail(const ParseNode *simple_stmt)
@@ -404,13 +407,19 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
     }
 
     if (node->kind == NODE_SIMPLE_STATEMENT && node->child_count == 2) {
-        const ParseNode *name = codegen_simple_statement_name(node);
+        const ParseNode *target = codegen_simple_statement_target(node);
         const ParseNode *statement_tail = codegen_simple_statement_tail(node);
         const ParseNode *expr = codegen_statement_tail_expression(statement_tail);
         ValueType expr_type = semantic_type_of(ctx->semantic, expr);
-        ValueType target_type = codegen_is_type_assignment(statement_tail)
-            ? semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail))
-            : semantic_type_of(ctx->semantic, name);
+        ValueType target_type;
+
+        if (target->kind == NODE_INDEX) {
+            target_type = TYPE_INT;
+        } else {
+            target_type = codegen_is_type_assignment(statement_tail)
+                ? semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail))
+                : semantic_type_of(ctx->semantic, target);
+        }
 
         if (semantic_type_is_union(target_type) &&
             semantic_type_is_union(expr_type) &&

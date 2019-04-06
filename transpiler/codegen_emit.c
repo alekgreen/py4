@@ -290,6 +290,16 @@ static char *primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         return call_to_c_string(ctx, primary);
     }
 
+    if (primary->kind == NODE_INDEX) {
+        char *base = primary_to_c_string(ctx, primary->children[0]);
+        char *index = expression_to_c_string(ctx, primary->children[1]);
+        char *result = dup_printf("py4_list_int_get(%s, %s)", base, index);
+
+        free(base);
+        free(index);
+        return result;
+    }
+
     if (primary->kind == NODE_EXPRESSION) {
         return expression_to_c_string(ctx, primary);
     }
@@ -616,16 +626,29 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
     }
 
     {
-        const ParseNode *name = codegen_simple_statement_name(simple_stmt);
+        const ParseNode *target = codegen_simple_statement_target(simple_stmt);
         const ParseNode *statement_tail = codegen_simple_statement_tail(simple_stmt);
         const ParseNode *expr = codegen_statement_tail_expression(statement_tail);
         ValueType target_type;
         char *expr_text;
 
+        if (target->kind == NODE_INDEX) {
+            char *base = primary_to_c_string(ctx, target->children[0]);
+            char *index = expression_to_c_string(ctx, target->children[1]);
+            char *value = expression_to_c_string(ctx, expr);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "py4_list_int_set(%s, %s, %s);\n", base, index, value);
+            free(base);
+            free(index);
+            free(value);
+            return;
+        }
+
         if (codegen_is_type_assignment(statement_tail)) {
             target_type = semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail));
         } else {
-            target_type = semantic_type_of(ctx->semantic, name);
+            target_type = semantic_type_of(ctx->semantic, target);
         }
 
         if (semantic_type_is_ref(target_type)) {
@@ -642,12 +665,12 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
 
             if (codegen_is_type_assignment(statement_tail)) {
                 codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s %s = %s;\n", type_name, name->value, temp_name);
-                register_ref_local(ctx, name->value, target_type);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, target->value, temp_name);
+                register_ref_local(ctx, target->value, target_type);
             } else {
-                emit_ref_decref(ctx, target_type, name->value);
+                emit_ref_decref(ctx, target_type, target->value);
                 codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s = %s;\n", name->value, temp_name);
+                fprintf(ctx->out, "%s = %s;\n", target->value, temp_name);
             }
 
             free(type_name);
@@ -660,9 +683,9 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
         codegen_emit_indent(ctx);
         if (codegen_is_type_assignment(statement_tail)) {
             codegen_emit_type_name(ctx, target_type);
-            fprintf(ctx->out, " %s = %s;\n", name->value, expr_text);
+            fprintf(ctx->out, " %s = %s;\n", target->value, expr_text);
         } else {
-            fprintf(ctx->out, "%s = %s;\n", name->value, expr_text);
+            fprintf(ctx->out, "%s = %s;\n", target->value, expr_text);
         }
         free(expr_text);
     }
@@ -875,7 +898,7 @@ static void emit_global_declaration(CodegenContext *ctx, const ParseNode *simple
         return;
     }
 
-    const ParseNode *name = codegen_simple_statement_name(simple_stmt);
+    const ParseNode *name = codegen_simple_statement_target(simple_stmt);
     type = semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail));
     codegen_emit_type_name(ctx, type);
     fprintf(ctx->out, " %s;\n", name->value);
@@ -964,9 +987,22 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
                 codegen_error("return is not valid at module scope");
             }
 
-            name = codegen_simple_statement_name(payload);
+            name = codegen_simple_statement_target(payload);
             statement_tail = codegen_simple_statement_tail(payload);
             expr = codegen_statement_tail_expression(statement_tail);
+            if (name->kind == NODE_INDEX) {
+                char *base = primary_to_c_string(ctx, name->children[0]);
+                char *index = expression_to_c_string(ctx, name->children[1]);
+                char *value = expression_to_c_string(ctx, expr);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "py4_list_int_set(%s, %s, %s);\n", base, index, value);
+                free(base);
+                free(index);
+                free(value);
+                continue;
+            }
+
             target_type = semantic_type_of(ctx->semantic, name);
             expr_text = wrapped_expression_to_c_string(ctx, expr, target_type);
 

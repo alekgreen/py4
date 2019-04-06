@@ -27,6 +27,7 @@ typedef enum {
     NODE_EXPRESSION,
     NODE_PRIMARY,
     NODE_CALL,
+    NODE_INDEX,
     NODE_ARGUMENTS,
     NODE_COLON,
     NODE_ASSIGN,

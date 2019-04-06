@@ -38,16 +38,6 @@ static char *join_type_name(const char *container, const char *member)
     return name;
 }
 
-static Token peek_n(TokenStream *ts, int offset)
-{
-    int index = ts->pos + offset;
-
-    if (index >= 0 && index < ts->count) {
-        return ts->data[index];
-    }
-    return make_token(TOKEN_EOF, "");
-}
-
 static int is_keyword_token(Token tok, const char *value)
 {
     return tok.type == TOKEN_KEYWORD && strcmp(tok.value, value) == 0;
@@ -114,6 +104,7 @@ static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
 static ParseNode *parse_TYPE(TokenStream *ts);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
+static ParseNode *parse_ASSIGN_TARGET(TokenStream *ts);
 static ParseNode *parse_OR(TokenStream *ts);
 static ParseNode *parse_AND(TokenStream *ts);
 static ParseNode *parse_NOT(TokenStream *ts);
@@ -192,6 +183,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_EXPRESSION:           return "EXPRESSION";
         case NODE_PRIMARY:              return "PRIMARY";
         case NODE_CALL:                 return "CALL";
+        case NODE_INDEX:                return "INDEX";
         case NODE_ARGUMENTS:            return "ARGUMENTS";
         case NODE_COLON:                return "COLON";
         case NODE_ASSIGN:               return "ASSIGN";
@@ -296,19 +288,26 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
 {
     ParseNode *node = create_node(NODE_SIMPLE_STATEMENT, TOKEN_NULL, NULL);
     Token first = peek_ts(ts);
-    Token second = peek_n(ts, 1);
+    int start_pos = ts->pos;
 
     if (is_keyword_token(first, "return")) {
         add_child(node, parse_RETURN_STATEMENT(ts));
         return node;
     }
 
-    if (first.type == TOKEN_IDENTIFIER &&
-        (second.type == TOKEN_COLON || second.type == TOKEN_ASSIGN)) {
-        Token identifier = expect(ts, TOKEN_IDENTIFIER);
-        add_child(node, create_node(NODE_PRIMARY, identifier.type, identifier.value));
-        add_child(node, parse_STATEMENT_TAIL(ts));
-        return node;
+    if (first.type == TOKEN_IDENTIFIER) {
+        ParseNode *target = parse_ASSIGN_TARGET(ts);
+        Token look = peek_ts(ts);
+
+        if ((target->kind == NODE_PRIMARY && (look.type == TOKEN_COLON || look.type == TOKEN_ASSIGN)) ||
+            (target->kind == NODE_INDEX && look.type == TOKEN_ASSIGN)) {
+            add_child(node, target);
+            add_child(node, parse_STATEMENT_TAIL(ts));
+            return node;
+        }
+
+        free_tree(target);
+        ts->pos = start_pos;
     }
 
     add_child(node, parse_EXPRESSION_STATEMENT(ts));
@@ -504,6 +503,25 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
     return create_node(NODE_PRIMARY, type_tok.type, type_tok.value);
 }
 
+static ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
+{
+    Token tok = expect(ts, TOKEN_IDENTIFIER);
+    ParseNode *node = create_node(NODE_PRIMARY, tok.type, tok.value);
+
+    while (peek_ts(ts).type == TOKEN_LBRACKET) {
+        ParseNode *index_node;
+
+        expect(ts, TOKEN_LBRACKET);
+        index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
+        add_child(index_node, node);
+        add_child(index_node, parse_EXPRESSION(ts));
+        expect(ts, TOKEN_RBRACKET);
+        node = index_node;
+    }
+
+    return node;
+}
+
 static ParseNode *wrap_expression(ParseNode *node)
 {
     if (node->kind == NODE_EXPRESSION) {
@@ -692,6 +710,7 @@ static ParseNode *parse_UNARY(TokenStream *ts)
 static ParseNode *parse_PRIMARY(TokenStream *ts)
 {
     Token tok = peek_ts(ts);
+    ParseNode *base;
 
     if (tok.type == TOKEN_NUMBER || tok.type == TOKEN_STRING || tok.type == TOKEN_CHAR ||
         is_bool_literal(tok)) {
@@ -700,33 +719,49 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     }
 
     if (tok.type == TOKEN_IDENTIFIER) {
-        ParseNode *base;
-
         tok = get_from_ts(ts);
         base = create_node(NODE_PRIMARY, tok.type, tok.value);
+    } else if (tok.type == TOKEN_LPAREN) {
+        expect(ts, TOKEN_LPAREN);
+        base = parse_EXPRESSION(ts);
+        expect(ts, TOKEN_RPAREN);
+    } else {
+        parse_error(tok, "expected expression");
+        return NULL;
+    }
 
+    while (1) {
         if (peek_ts(ts).type == TOKEN_LPAREN) {
-            ParseNode *call = create_node(NODE_CALL, TOKEN_NULL, NULL);
+            ParseNode *call;
 
+            if (base->kind != NODE_PRIMARY || base->token_type != TOKEN_IDENTIFIER) {
+                parse_error(peek_ts(ts), "call target must be an identifier");
+            }
+
+            call = create_node(NODE_CALL, TOKEN_NULL, NULL);
             add_child(call, base);
             expect(ts, TOKEN_LPAREN);
             add_child(call, parse_ARGUMENTS(ts));
             expect(ts, TOKEN_RPAREN);
-            return call;
+            base = call;
+            continue;
         }
 
-        return base;
+        if (peek_ts(ts).type == TOKEN_LBRACKET) {
+            ParseNode *index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
+
+            expect(ts, TOKEN_LBRACKET);
+            add_child(index_node, base);
+            add_child(index_node, parse_EXPRESSION(ts));
+            expect(ts, TOKEN_RBRACKET);
+            base = index_node;
+            continue;
+        }
+
+        break;
     }
 
-    if (tok.type == TOKEN_LPAREN) {
-        expect(ts, TOKEN_LPAREN);
-        ParseNode *expr = parse_EXPRESSION(ts);
-        expect(ts, TOKEN_RPAREN);
-        return expr;
-    }
-
-    parse_error(tok, "expected expression");
-    return NULL;
+    return base;
 }
 
 static ParseNode *parse_ARGUMENTS(TokenStream *ts)
