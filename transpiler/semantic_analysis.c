@@ -247,6 +247,19 @@ static ValueType infer_primary_type(
 {
     ValueType type;
 
+    if (node->kind == NODE_LIST_LITERAL) {
+        for (size_t i = 0; i < node->child_count; i++) {
+            ValueType item_type = infer_expression_type(info, node->children[i], scope);
+
+            if (item_type != TYPE_INT) {
+                semantic_error("list[int] literal elements must be int");
+            }
+        }
+
+        semantic_record_node_type(info, node, TYPE_LIST_INT);
+        return TYPE_LIST_INT;
+    }
+
     if (node->kind == NODE_INDEX) {
         ValueType container_type = infer_primary_type(info, node->children[0], scope);
         ValueType index_type = infer_expression_type(info, node->children[1], scope);

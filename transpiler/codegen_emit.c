@@ -185,11 +185,7 @@ static int expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
     }
 
     child = expr->children[0];
-    if (child->kind != NODE_CALL) {
-        return 0;
-    }
-
-    return 1;
+    return child->kind == NODE_CALL || child->kind == NODE_LIST_LITERAL;
 }
 
 static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_type, ValueType stored_type)
@@ -288,6 +284,30 @@ static char *primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 {
     if (primary->kind == NODE_CALL) {
         return call_to_c_string(ctx, primary);
+    }
+
+    if (primary->kind == NODE_LIST_LITERAL) {
+        if (primary->child_count == 0) {
+            return dup_printf("py4_list_int_new()");
+        }
+
+        {
+            char *values = dup_printf("");
+            char *result;
+
+            for (size_t i = 0; i < primary->child_count; i++) {
+                char *item = expression_to_c_string(ctx, primary->children[i]);
+                char *joined = i == 0 ? dup_printf("%s", item) : dup_printf("%s, %s", values, item);
+
+                free(values);
+                free(item);
+                values = joined;
+            }
+
+            result = dup_printf("py4_list_int_from_values(%zu, (int[]){%s})", primary->child_count, values);
+            free(values);
+            return result;
+        }
     }
 
     if (primary->kind == NODE_INDEX) {
@@ -1146,6 +1166,16 @@ static void emit_list_int_runtime(CodegenContext *ctx)
     fputs("static void py4_list_int_append(Py4ListInt *list, int value)\n{\n", ctx->out);
     fputs("    py4_list_int_ensure_capacity(list, list->len + 1);\n", ctx->out);
     fputs("    list->items[list->len++] = value;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static Py4ListInt *py4_list_int_from_values(size_t count, const int *values)\n{\n", ctx->out);
+    fputs("    Py4ListInt *list = py4_list_int_new();\n", ctx->out);
+    fputs("    py4_list_int_ensure_capacity(list, count);\n", ctx->out);
+    fputs("    for (size_t i = 0; i < count; i++) {\n", ctx->out);
+    fputs("        list->items[i] = values[i];\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    list->len = count;\n", ctx->out);
+    fputs("    return list;\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
     fputs("static int py4_list_int_get(Py4ListInt *list, int index)\n{\n", ctx->out);

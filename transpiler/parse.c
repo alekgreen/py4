@@ -101,6 +101,7 @@ static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
+static ParseNode *parse_LIST_LITERAL(TokenStream *ts);
 static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
 static ParseNode *parse_TYPE(TokenStream *ts);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
@@ -182,6 +183,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_EXPRESSION_STATEMENT: return "EXPRESSION_STATEMENT";
         case NODE_EXPRESSION:           return "EXPRESSION";
         case NODE_PRIMARY:              return "PRIMARY";
+        case NODE_LIST_LITERAL:         return "LIST_LITERAL";
         case NODE_CALL:                 return "CALL";
         case NODE_INDEX:                return "INDEX";
         case NODE_ARGUMENTS:            return "ARGUMENTS";
@@ -725,6 +727,8 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
         expect(ts, TOKEN_LPAREN);
         base = parse_EXPRESSION(ts);
         expect(ts, TOKEN_RPAREN);
+    } else if (tok.type == TOKEN_LBRACKET) {
+        base = parse_LIST_LITERAL(ts);
     } else {
         parse_error(tok, "expected expression");
         return NULL;
@@ -762,6 +766,28 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     }
 
     return base;
+}
+
+static ParseNode *parse_LIST_LITERAL(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_LIST_LITERAL, TOKEN_NULL, NULL);
+
+    expect(ts, TOKEN_LBRACKET);
+    if (peek_ts(ts).type == TOKEN_RBRACKET) {
+        expect(ts, TOKEN_RBRACKET);
+        return node;
+    }
+
+    while (1) {
+        add_child(node, parse_EXPRESSION(ts));
+        if (peek_ts(ts).type != TOKEN_COMMA) {
+            break;
+        }
+        get_from_ts(ts);
+    }
+
+    expect(ts, TOKEN_RBRACKET);
+    return node;
 }
 
 static ParseNode *parse_ARGUMENTS(TokenStream *ts)
