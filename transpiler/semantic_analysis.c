@@ -46,28 +46,12 @@ static int is_print_call(const ParseNode *call)
 
 static int is_builtin_name(const char *name)
 {
-    return strcmp(name, "list_int") == 0 ||
+    return strcmp(name, "len") == 0 ||
+        strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
         strcmp(name, "list_set") == 0;
-}
-
-static int is_ref_variable_expression(const ParseNode *expr)
-{
-    if (expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
-        return 0;
-    }
-
-    return expr->children[0]->kind == NODE_PRIMARY &&
-        expr->children[0]->token_type == TOKEN_IDENTIFIER;
-}
-
-static int is_ref_variable_node(const ParseNode *node)
-{
-    return node != NULL &&
-        node->kind == NODE_PRIMARY &&
-        node->token_type == TOKEN_IDENTIFIER;
 }
 
 static const ParseNode *simple_statement_target(const ParseNode *simple_stmt)
@@ -111,9 +95,6 @@ static ValueType infer_builtin_call_type(
         if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
             semantic_error("function 'list_append' argument 1 expects list[int]");
         }
-        if (!is_ref_variable_expression(arguments->children[0])) {
-            semantic_error("function 'list_append' argument 1 must be a variable");
-        }
         if (infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
             semantic_error("function 'list_append' argument 2 expects int");
         }
@@ -126,9 +107,6 @@ static ValueType infer_builtin_call_type(
         if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
             semantic_error("function 'list_get' argument 1 expects list[int]");
         }
-        if (!is_ref_variable_expression(arguments->children[0])) {
-            semantic_error("function 'list_get' argument 1 must be a variable");
-        }
         if (infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
             semantic_error("function 'list_get' argument 2 expects int");
         }
@@ -136,13 +114,10 @@ static ValueType infer_builtin_call_type(
         return TYPE_INT;
     }
 
-    if (strcmp(name, "list_len") == 0) {
+    if (strcmp(name, "list_len") == 0 || strcmp(name, "len") == 0) {
         expect_argument_count(name, arguments, 1);
         if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
-            semantic_error("function 'list_len' argument 1 expects list[int]");
-        }
-        if (!is_ref_variable_expression(arguments->children[0])) {
-            semantic_error("function 'list_len' argument 1 must be a variable");
+            semantic_error("function '%s' argument 1 expects list[int]", name);
         }
         semantic_record_node_type(info, call, TYPE_INT);
         return TYPE_INT;
@@ -152,9 +127,6 @@ static ValueType infer_builtin_call_type(
         expect_argument_count(name, arguments, 3);
         if (infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
             semantic_error("function 'list_set' argument 1 expects list[int]");
-        }
-        if (!is_ref_variable_expression(arguments->children[0])) {
-            semantic_error("function 'list_set' argument 1 must be a variable");
         }
         if (infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
             semantic_error("function 'list_set' argument 2 expects int");
@@ -228,12 +200,6 @@ static ValueType infer_call_type(
                 semantic_type_name(fn->param_types[i]),
                 semantic_type_name(actual));
         }
-        if (semantic_type_is_ref(fn->param_types[i]) &&
-            semantic_type_is_ref(actual) &&
-            !is_ref_variable_expression(arguments->children[i])) {
-            semantic_error("function '%s' argument %zu must be a variable for %s values",
-                fn->name, i + 1, semantic_type_name(actual));
-        }
     }
 
     semantic_record_node_type(info, call, fn->return_type);
@@ -267,9 +233,6 @@ static ValueType infer_primary_type(
         if (container_type != TYPE_LIST_INT) {
             semantic_error("indexing requires list[int] but got %s",
                 semantic_type_name(container_type));
-        }
-        if (!is_ref_variable_node(node->children[0])) {
-            semantic_error("indexed list access must use a variable base");
         }
         if (index_type != TYPE_INT) {
             semantic_error("list[int] index must be int");
@@ -610,9 +573,6 @@ static void typecheck_simple_statement(
         if (container_type != TYPE_LIST_INT) {
             semantic_error("indexed assignment requires list[int] but got %s",
                 semantic_type_name(container_type));
-        }
-        if (!is_ref_variable_node(target->children[0])) {
-            semantic_error("indexed assignment must use a variable base");
         }
         if (index_type != TYPE_INT) {
             semantic_error("list[int] index must be int");

@@ -72,7 +72,8 @@ static int is_chained_comparison_expr(const ParseNode *expr)
 
 static int is_list_builtin_name(const char *name)
 {
-    return strcmp(name, "list_int") == 0 ||
+    return strcmp(name, "len") == 0 ||
+        strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -188,6 +189,34 @@ static int expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
     return child->kind == NODE_CALL || child->kind == NODE_LIST_LITERAL;
 }
 
+static int node_is_borrowed_ref_value(const ParseNode *node)
+{
+    if (node == NULL) {
+        return 0;
+    }
+    if (node->kind == NODE_PRIMARY && node->token_type == TOKEN_IDENTIFIER) {
+        return 1;
+    }
+    if (node->kind == NODE_EXPRESSION && node->child_count == 1) {
+        return node_is_borrowed_ref_value(node->children[0]);
+    }
+    return 0;
+}
+
+static int node_is_owned_ref_value(const ParseNode *node)
+{
+    if (node == NULL) {
+        return 0;
+    }
+    if (node->kind == NODE_CALL || node->kind == NODE_LIST_LITERAL) {
+        return 1;
+    }
+    if (node->kind == NODE_EXPRESSION && node->child_count == 1) {
+        return node_is_owned_ref_value(node->children[0]);
+    }
+    return 0;
+}
+
 static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_type, ValueType stored_type)
 {
     char ctor_name[MAX_NAME_LEN];
@@ -198,57 +227,56 @@ static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_typ
 
 static char *expression_to_c_string(CodegenContext *ctx, const ParseNode *expr);
 static char *wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr, ValueType target_type);
+static char *primary_to_c_string(CodegenContext *ctx, const ParseNode *primary);
 
-static char *arguments_to_c_string(CodegenContext *ctx, const ParseNode *call, const ParseNode *arguments)
+static char *materialize_ref_node(
+    CodegenContext *ctx,
+    const ParseNode *node,
+    ValueType type,
+    int use_primary_emitter,
+    int *needs_cleanup)
 {
-    const ParseNode *callee = codegen_expect_child(call, 0, NODE_PRIMARY);
-    const ParseNode *function_def;
-    const ParseNode *parameters;
-    char *result;
+    char *expr_text = use_primary_emitter ? NULL : NULL;
+    char *temp_name;
+    char *type_name;
 
-    if (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0])) {
-        return dup_printf("");
+    if (use_primary_emitter) {
+        expr_text = primary_to_c_string(ctx, node);
+    } else {
+        expr_text = expression_to_c_string(ctx, node);
     }
 
-    if (is_list_builtin_name(callee->value)) {
-        result = dup_printf("");
-        for (size_t i = 0; i < arguments->child_count; i++) {
-            char *arg = expression_to_c_string(ctx, arguments->children[i]);
-            char *joined = i == 0 ? dup_printf("%s", arg) : dup_printf("%s, %s", result, arg);
-
-            free(result);
-            free(arg);
-            result = joined;
-        }
-        return result;
+    if (node_is_borrowed_ref_value(node)) {
+        *needs_cleanup = 0;
+        return expr_text;
     }
 
-    function_def = codegen_find_function_definition(ctx->root, callee->value);
-    if (function_def == NULL) {
-        codegen_error("unknown function '%s' during code generation", callee->value);
+    temp_name = next_temp_name(ctx);
+    type_name = type_to_c_string(type);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
+    if (!node_is_owned_ref_value(node)) {
+        emit_ref_incref(ctx, type, temp_name);
     }
 
-    parameters = codegen_function_parameters(function_def);
-    result = dup_printf("");
-    for (size_t i = 0; i < arguments->child_count; i++) {
-        const ParseNode *parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
-        const ParseNode *type_node = codegen_expect_child(parameter, 0, NODE_TYPE);
-        ValueType target_type = semantic_type_of(ctx->semantic, type_node);
-        char *arg = wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
-        char *joined = i == 0 ? dup_printf("%s", arg) : dup_printf("%s, %s", result, arg);
-
-        free(result);
-        free(arg);
-        result = joined;
-    }
-
-    return result;
+    free(type_name);
+    free(expr_text);
+    *needs_cleanup = 1;
+    return temp_name;
 }
 
 static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 {
     const ParseNode *callee = codegen_expect_child(call, 0, NODE_PRIMARY);
     const ParseNode *arguments = codegen_expect_child(call, 1, NODE_ARGUMENTS);
+    const ParseNode *function_def = NULL;
+    const ParseNode *parameters = NULL;
+    ValueType return_type = semantic_type_of(ctx->semantic, call);
+    char *arg_parts[32];
+    ValueType cleanup_types[32];
+    char *cleanup_names[32];
+    size_t arg_count = 0;
+    size_t cleanup_count = 0;
     char *args;
     char *result;
 
@@ -256,28 +284,108 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         if (strcmp(callee->value, "list_int") == 0) {
             return dup_printf("py4_list_int_new()");
         }
-
-        args = arguments_to_c_string(ctx, call, arguments);
-        if (strcmp(callee->value, "list_append") == 0) {
-            result = dup_printf("py4_list_int_append(%s)", args);
-        } else if (strcmp(callee->value, "list_get") == 0) {
-            result = dup_printf("py4_list_int_get(%s)", args);
-        } else if (strcmp(callee->value, "list_len") == 0) {
-            result = dup_printf("py4_list_int_len(%s)", args);
-        } else if (strcmp(callee->value, "list_set") == 0) {
-            result = dup_printf("py4_list_int_set(%s)", args);
-        } else {
-            free(args);
-            codegen_error("unknown builtin '%s' during code generation", callee->value);
+    } else {
+        function_def = codegen_find_function_definition(ctx->root, callee->value);
+        if (function_def == NULL) {
+            codegen_error("unknown function '%s' during code generation", callee->value);
         }
+        parameters = codegen_function_parameters(function_def);
+    }
+
+    if (!(arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))) {
+        arg_count = arguments->child_count;
+    }
+
+    for (size_t i = 0; i < arg_count; i++) {
+        const ParseNode *arg_node = arguments->children[i];
+        ValueType arg_type = semantic_type_of(ctx->semantic, arg_node);
+        ValueType target_type = arg_type;
+
+        if (is_list_builtin_name(callee->value)) {
+            if ((strcmp(callee->value, "list_append") == 0 ||
+                 strcmp(callee->value, "list_get") == 0 ||
+                 strcmp(callee->value, "list_len") == 0 ||
+                 strcmp(callee->value, "len") == 0 ||
+                 strcmp(callee->value, "list_set") == 0) && i == 0) {
+                target_type = TYPE_LIST_INT;
+            }
+        } else {
+            const ParseNode *parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
+            const ParseNode *type_node = codegen_expect_child(parameter, 0, NODE_TYPE);
+            target_type = semantic_type_of(ctx->semantic, type_node);
+        }
+
+        if (semantic_type_is_ref(target_type) && semantic_type_is_ref(arg_type)) {
+            int needs_cleanup = 0;
+            char *part = materialize_ref_node(ctx, arg_node, target_type, 0, &needs_cleanup);
+
+            arg_parts[i] = part;
+            if (needs_cleanup) {
+                cleanup_names[cleanup_count] = dup_printf("%s", part);
+                cleanup_types[cleanup_count] = target_type;
+                cleanup_count++;
+            }
+            continue;
+        }
+
+        arg_parts[i] = is_list_builtin_name(callee->value)
+            ? expression_to_c_string(ctx, arg_node)
+            : wrapped_expression_to_c_string(ctx, arg_node, target_type);
+    }
+
+    args = dup_printf("");
+    for (size_t i = 0; i < arg_count; i++) {
+        char *joined = i == 0 ? dup_printf("%s", arg_parts[i]) : dup_printf("%s, %s", args, arg_parts[i]);
         free(args);
+        args = joined;
+    }
+
+    if (strcmp(callee->value, "list_append") == 0) {
+        result = dup_printf("py4_list_int_append(%s)", args);
+    } else if (strcmp(callee->value, "list_get") == 0) {
+        result = dup_printf("py4_list_int_get(%s)", args);
+    } else if (strcmp(callee->value, "list_len") == 0 || strcmp(callee->value, "len") == 0) {
+        result = dup_printf("py4_list_int_len(%s)", args);
+    } else if (strcmp(callee->value, "list_set") == 0) {
+        result = dup_printf("py4_list_int_set(%s)", args);
+    } else {
+        result = dup_printf("%s(%s)", callee->value, args);
+    }
+
+    free(args);
+    for (size_t i = 0; i < arg_count; i++) {
+        free(arg_parts[i]);
+    }
+
+    if (cleanup_count == 0) {
         return result;
     }
 
-    args = arguments_to_c_string(ctx, call, arguments);
-    result = dup_printf("%s(%s)", callee->value, args);
-    free(args);
-    return result;
+    if (return_type == TYPE_NONE) {
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s;\n", result);
+        free(result);
+        for (size_t i = cleanup_count; i > 0; i--) {
+            emit_ref_decref(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+            free(cleanup_names[i - 1]);
+        }
+        return dup_printf("(void)0");
+    }
+
+    {
+        char *result_name = next_temp_name(ctx);
+        char *type_name = type_to_c_string(return_type);
+
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, result);
+        free(type_name);
+        free(result);
+        for (size_t i = cleanup_count; i > 0; i--) {
+            emit_ref_decref(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+            free(cleanup_names[i - 1]);
+        }
+        return result_name;
+    }
 }
 
 static char *primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
@@ -311,12 +419,27 @@ static char *primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
     }
 
     if (primary->kind == NODE_INDEX) {
-        char *base = primary_to_c_string(ctx, primary->children[0]);
+        ValueType base_type = semantic_type_of(ctx->semantic, primary->children[0]);
+        int needs_cleanup = 0;
+        char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
         char *index = expression_to_c_string(ctx, primary->children[1]);
-        char *result = dup_printf("py4_list_int_get(%s, %s)", base, index);
+        char *call_text = dup_printf("py4_list_int_get(%s, %s)", base, index);
+        char *result;
+
+        if (needs_cleanup) {
+            char *result_name = next_temp_name(ctx);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "int %s = %s;\n", result_name, call_text);
+            emit_ref_decref(ctx, base_type, base);
+            result = result_name;
+        } else {
+            result = dup_printf("%s", call_text);
+        }
 
         free(base);
         free(index);
+        free(call_text);
         return result;
     }
 

@@ -10,10 +10,12 @@ def make_numbers() -> list[int]:
 
 def main() -> None:
     empty: list[int] = []
-    print(list_len(empty))
+    print(len(empty))
     xs: list[int] = make_numbers()
-    print(list_len(xs))
+    print(len(xs))
     print(xs[0])
     print(xs[2])
     xs[1] = 99
     print(xs[1])
+    print(len([7, 8, 9]))
+    print(make_numbers()[0])
