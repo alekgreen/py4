@@ -1,11 +1,11 @@
 def seed(xs: list[int], base: int) -> None:
-    list_append(xs, base)
-    list_append(xs, base + 1)
+    xs.append(base)
+    xs.append(base + 1)
 
 def make_numbers() -> list[int]:
     xs: list[int] = [10]
     seed(xs, 10)
-    list_append(xs, 20)
+    xs.append(20)
     return xs
 
 def main() -> None:
@@ -15,6 +15,10 @@ def main() -> None:
     print(len(xs))
     print(xs[0])
     print(xs[2])
+    ys: list[int] = xs.copy()
+    print(ys.pop())
+    ys.clear()
+    print(len(ys))
     xs[1] = 99
     print(xs[1])
     print(len([7, 8, 9]))

@@ -9,6 +9,13 @@ static ValueType infer_expression_type(
     const ParseNode *expr,
     Scope *scope);
 
+static void expect_argument_count(const char *name, const ParseNode *arguments, size_t expected);
+
+static ValueType infer_primary_type(
+    SemanticInfo *info,
+    const ParseNode *node,
+    Scope *scope);
+
 static const ParseNode *function_parameters(const ParseNode *function_def)
 {
     return semantic_expect_child(function_def, 1, NODE_PARAMETERS);
@@ -52,6 +59,58 @@ static int is_builtin_name(const char *name)
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
         strcmp(name, "list_set") == 0;
+}
+
+static ValueType infer_method_call_type(
+    SemanticInfo *info,
+    const ParseNode *call,
+    Scope *scope)
+{
+    const ParseNode *receiver;
+    const ParseNode *method = semantic_expect_child(call, 1, NODE_PRIMARY);
+    const ParseNode *arguments = semantic_expect_child(call, 2, NODE_ARGUMENTS);
+    ValueType receiver_type;
+
+    if (call == NULL || call->child_count != 3) {
+        semantic_error("malformed method call");
+    }
+
+    receiver = call->children[0];
+    receiver_type = infer_primary_type(info, receiver, scope);
+
+    if (receiver_type != TYPE_LIST_INT) {
+        semantic_error("method '%s' requires list[int] receiver", method->value);
+    }
+
+    if (strcmp(method->value, "append") == 0) {
+        expect_argument_count(method->value, arguments, 1);
+        if (infer_expression_type(info, arguments->children[0], scope) != TYPE_INT) {
+            semantic_error("method 'append' expects int argument");
+        }
+        semantic_record_node_type(info, call, TYPE_NONE);
+        return TYPE_NONE;
+    }
+
+    if (strcmp(method->value, "pop") == 0) {
+        expect_argument_count(method->value, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_INT);
+        return TYPE_INT;
+    }
+
+    if (strcmp(method->value, "clear") == 0) {
+        expect_argument_count(method->value, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_NONE);
+        return TYPE_NONE;
+    }
+
+    if (strcmp(method->value, "copy") == 0) {
+        expect_argument_count(method->value, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_LIST_INT);
+        return TYPE_LIST_INT;
+    }
+
+    semantic_error("unknown list[int] method '%s'", method->value);
+    return TYPE_NONE;
 }
 
 static const ParseNode *simple_statement_target(const ParseNode *simple_stmt)
@@ -224,6 +283,12 @@ static ValueType infer_primary_type(
 
         semantic_record_node_type(info, node, TYPE_LIST_INT);
         return TYPE_LIST_INT;
+    }
+
+    if (node->kind == NODE_METHOD_CALL) {
+        type = infer_method_call_type(info, node, scope);
+        semantic_record_node_type(info, node, type);
+        return type;
     }
 
     if (node->kind == NODE_INDEX) {

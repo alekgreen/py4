@@ -28,6 +28,7 @@ typedef enum {
     NODE_PRIMARY,
     NODE_LIST_LITERAL,
     NODE_CALL,
+    NODE_METHOD_CALL,
     NODE_INDEX,
     NODE_ARGUMENTS,
     NODE_COLON,

@@ -80,6 +80,14 @@ static int is_list_builtin_name(const char *name)
         strcmp(name, "list_set") == 0;
 }
 
+static int is_list_method_name(const char *name)
+{
+    return strcmp(name, "append") == 0 ||
+        strcmp(name, "pop") == 0 ||
+        strcmp(name, "clear") == 0 ||
+        strcmp(name, "copy") == 0;
+}
+
 static char *type_to_c_string(ValueType type)
 {
     char buffer[MAX_NAME_LEN];
@@ -186,7 +194,7 @@ static int expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
     }
 
     child = expr->children[0];
-    return child->kind == NODE_CALL || child->kind == NODE_LIST_LITERAL;
+    return child->kind == NODE_CALL || child->kind == NODE_LIST_LITERAL || child->kind == NODE_METHOD_CALL;
 }
 
 static int node_is_borrowed_ref_value(const ParseNode *node)
@@ -208,7 +216,7 @@ static int node_is_owned_ref_value(const ParseNode *node)
     if (node == NULL) {
         return 0;
     }
-    if (node->kind == NODE_CALL || node->kind == NODE_LIST_LITERAL) {
+    if (node->kind == NODE_CALL || node->kind == NODE_LIST_LITERAL || node->kind == NODE_METHOD_CALL) {
         return 1;
     }
     if (node->kind == NODE_EXPRESSION && node->child_count == 1) {
@@ -388,10 +396,82 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 }
 
+static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
+{
+    const ParseNode *receiver;
+    const ParseNode *method = codegen_expect_child(call, 1, NODE_PRIMARY);
+    const ParseNode *arguments = codegen_expect_child(call, 2, NODE_ARGUMENTS);
+    ValueType receiver_type;
+    int needs_cleanup = 0;
+    char *receiver_name;
+    char *result;
+
+    if (call == NULL || call->child_count != 3) {
+        codegen_error("malformed method call");
+    }
+
+    receiver = call->children[0];
+    receiver_type = semantic_type_of(ctx->semantic, receiver);
+    receiver_name = materialize_ref_node(ctx, receiver, receiver_type, 1, &needs_cleanup);
+
+    if (!is_list_method_name(method->value)) {
+        free(receiver_name);
+        codegen_error("unknown method '%s' during code generation", method->value);
+    }
+
+    if (strcmp(method->value, "append") == 0) {
+        char *value = expression_to_c_string(ctx, arguments->children[0]);
+        result = dup_printf("py4_list_int_append(%s, %s)", receiver_name, value);
+        free(value);
+    } else if (strcmp(method->value, "pop") == 0) {
+        result = dup_printf("py4_list_int_pop(%s)", receiver_name);
+    } else if (strcmp(method->value, "clear") == 0) {
+        result = dup_printf("py4_list_int_clear(%s)", receiver_name);
+    } else if (strcmp(method->value, "copy") == 0) {
+        result = dup_printf("py4_list_int_copy(%s)", receiver_name);
+    } else {
+        free(receiver_name);
+        codegen_error("unknown method '%s' during code generation", method->value);
+    }
+
+    if (needs_cleanup) {
+        ValueType return_type = semantic_type_of(ctx->semantic, call);
+
+        if (return_type == TYPE_NONE) {
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s;\n", result);
+            free(result);
+            emit_ref_decref(ctx, receiver_type, receiver_name);
+            free(receiver_name);
+            return dup_printf("(void)0");
+        }
+
+        {
+            char *result_name = next_temp_name(ctx);
+            char *type_name = type_to_c_string(return_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, result);
+            free(type_name);
+            free(result);
+            emit_ref_decref(ctx, receiver_type, receiver_name);
+            free(receiver_name);
+            return result_name;
+        }
+    }
+
+    free(receiver_name);
+    return result;
+}
+
 static char *primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 {
     if (primary->kind == NODE_CALL) {
         return call_to_c_string(ctx, primary);
+    }
+
+    if (primary->kind == NODE_METHOD_CALL) {
+        return method_call_to_c_string(ctx, primary);
     }
 
     if (primary->kind == NODE_LIST_LITERAL) {
@@ -1309,6 +1389,35 @@ static void emit_list_int_runtime(CodegenContext *ctx)
     fputs("static void py4_list_int_set(Py4ListInt *list, int index, int value)\n{\n", ctx->out);
     fputs("    py4_list_int_bounds_check(list, index);\n", ctx->out);
     fputs("    list->items[index] = value;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static int py4_list_int_pop(Py4ListInt *list)\n{\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    if (list->len == 0) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: pop from empty list[int]\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    list->len--;\n", ctx->out);
+    fputs("    return list->items[list->len];\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_list_int_clear(Py4ListInt *list)\n{\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    list->len = 0;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static Py4ListInt *py4_list_int_copy(Py4ListInt *list)\n{\n", ctx->out);
+    fputs("    if (list == NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
+    fputs("        exit(1);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    return py4_list_int_from_values(list->len, list->items);\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
     fputs("static int py4_list_int_len(Py4ListInt *list)\n{\n", ctx->out);

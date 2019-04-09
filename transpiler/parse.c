@@ -185,6 +185,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_PRIMARY:              return "PRIMARY";
         case NODE_LIST_LITERAL:         return "LIST_LITERAL";
         case NODE_CALL:                 return "CALL";
+        case NODE_METHOD_CALL:          return "METHOD_CALL";
         case NODE_INDEX:                return "INDEX";
         case NODE_ARGUMENTS:            return "ARGUMENTS";
         case NODE_COLON:                return "COLON";
@@ -748,6 +749,22 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
             add_child(call, parse_ARGUMENTS(ts));
             expect(ts, TOKEN_RPAREN);
             base = call;
+            continue;
+        }
+
+        if (peek_ts(ts).type == TOKEN_DOT) {
+            ParseNode *method_call;
+            Token method_name;
+
+            expect(ts, TOKEN_DOT);
+            method_name = expect(ts, TOKEN_IDENTIFIER);
+            method_call = create_node(NODE_METHOD_CALL, TOKEN_NULL, NULL);
+            add_child(method_call, base);
+            add_child(method_call, create_node(NODE_PRIMARY, method_name.type, method_name.value));
+            expect(ts, TOKEN_LPAREN);
+            add_child(method_call, parse_ARGUMENTS(ts));
+            expect(ts, TOKEN_RPAREN);
+            base = method_call;
             continue;
         }
 

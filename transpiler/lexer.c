@@ -299,6 +299,9 @@ static void tokenize_line(TokenStream *ts, const char *cursor)
             case ',':
                 append_token(ts, TOKEN_COMMA, ",");
                 break;
+            case '.':
+                append_token(ts, TOKEN_DOT, ".");
+                break;
             case '|':
                 append_token(ts, TOKEN_OPERATOR, "|");
                 break;
@@ -401,6 +404,7 @@ Token next_token(FILE *fp)
         case ']': return make_token(TOKEN_RBRACKET, buffer);
         case ':': return make_token(TOKEN_COLON, buffer);
         case ',': return make_token(TOKEN_COMMA, buffer);
+        case '.': return make_token(TOKEN_DOT, buffer);
         case '|': return make_token(TOKEN_OPERATOR, buffer);
         default: return make_token(TOKEN_SYMBOL, buffer);
     }
