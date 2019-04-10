@@ -54,5 +54,16 @@ FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);
 VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);
 void semantic_free_scope_bindings(VariableBinding *vars);
+ValueType semantic_infer_expression_type(SemanticInfo *info, const ParseNode *expr, Scope *scope);
+ValueType semantic_infer_primary_type(SemanticInfo *info, const ParseNode *node, Scope *scope);
+const ParseNode *semantic_function_parameters(const ParseNode *function_def);
+ValueType semantic_function_return_type(SemanticInfo *info, const ParseNode *function_def);
+size_t semantic_parameter_count(const ParseNode *parameters);
+ValueType semantic_parameter_type(SemanticInfo *info, const ParseNode *parameter);
+const ParseNode *semantic_simple_statement_target(const ParseNode *simple_stmt);
+int semantic_is_type_assignment(const ParseNode *statement_tail);
+const ParseNode *semantic_simple_statement_tail(const ParseNode *simple_stmt);
+const ParseNode *semantic_statement_tail_expression(const ParseNode *statement_tail);
+const ParseNode *semantic_statement_tail_type_node(const ParseNode *statement_tail);
 
 #endif

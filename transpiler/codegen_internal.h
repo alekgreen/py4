@@ -81,6 +81,18 @@ void codegen_collect_union_types_from_node(CodegenContext *ctx, const ParseNode 
 void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *node);
 void codegen_emit_union_runtime(CodegenContext *ctx);
 void codegen_collect_program_state(CodegenContext *ctx, const ParseNode *root);
+char *codegen_type_to_c_string(ValueType type);
+char *codegen_next_temp_name(CodegenContext *ctx);
+void codegen_push_cleanup_scope(CodegenContext *ctx);
+void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *name);
+void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *name);
+void codegen_register_ref_local(CodegenContext *ctx, const char *name, ValueType type);
+void codegen_emit_live_ref_cleanup(CodegenContext *ctx);
+void codegen_pop_cleanup_scope(CodegenContext *ctx);
+int codegen_expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr);
+char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary);
+char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr);
+char *codegen_wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr, ValueType target_type);
 void codegen_emit_expression(CodegenContext *ctx, const ParseNode *expr);
 void codegen_emit_wrapped_expression(CodegenContext *ctx, const ParseNode *expr, ValueType target_type);
 void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int allow_function_defs);
