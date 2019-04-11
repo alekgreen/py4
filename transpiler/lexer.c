@@ -15,6 +15,8 @@ static const char *KEYWORDS[] = {
     "import",
     "if",
     "while",
+    "for",
+    "in",
     "elif",
     "else",
     "and",

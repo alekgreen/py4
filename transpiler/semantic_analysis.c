@@ -236,6 +236,31 @@ static void typecheck_while_statement(
     typecheck_branch_suite(info, while_stmt->children[2], scope, current_function);
 }
 
+static void typecheck_for_statement(
+    SemanticInfo *info,
+    const ParseNode *for_stmt,
+    Scope *scope,
+    FunctionContext *current_function)
+{
+    Scope loop_scope = {0};
+    const ParseNode *target;
+    ValueType iterable_type;
+
+    target = semantic_expect_child(for_stmt, 0, NODE_PRIMARY);
+    iterable_type = semantic_infer_expression_type(info, for_stmt->children[1], scope);
+
+    if (iterable_type != TYPE_LIST_INT) {
+        semantic_error("for loop iterable must be list[int] but got %s",
+            semantic_type_name(iterable_type));
+    }
+
+    loop_scope.parent = scope;
+    semantic_bind_variable(&loop_scope, target->value, TYPE_INT);
+    semantic_record_node_type(info, target, TYPE_INT);
+    typecheck_suite(info, for_stmt->children[3], &loop_scope, current_function);
+    semantic_free_scope_bindings(loop_scope.vars);
+}
+
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -329,6 +354,11 @@ static void typecheck_statement(
 
     if (payload->kind == NODE_WHILE_STATEMENT) {
         typecheck_while_statement(info, payload, scope, current_function);
+        return;
+    }
+
+    if (payload->kind == NODE_FOR_STATEMENT) {
+        typecheck_for_statement(info, payload, scope, current_function);
         return;
     }
 

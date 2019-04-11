@@ -310,6 +310,61 @@ static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stm
     fputs("}\n", ctx->out);
 }
 
+static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
+{
+    const ParseNode *target = codegen_expect_child(for_stmt, 0, NODE_PRIMARY);
+    const ParseNode *iterable = codegen_expect_child(for_stmt, 1, NODE_EXPRESSION);
+    const ParseNode *suite = codegen_expect_child(for_stmt, 3, NODE_SUITE);
+    ValueType iterable_type = semantic_type_of(ctx->semantic, iterable);
+    char *iterable_expr;
+    char *iterable_name;
+    char *iterable_type_name;
+    char *index_name;
+    int iterable_owned;
+
+    iterable_expr = codegen_wrapped_expression_to_c_string(ctx, iterable, iterable_type);
+    iterable_name = codegen_next_temp_name(ctx);
+    iterable_type_name = codegen_type_to_c_string(iterable_type);
+    index_name = codegen_next_temp_name(ctx);
+    iterable_owned = codegen_expression_is_owned_ref(ctx, iterable);
+
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", iterable_type_name, iterable_name, iterable_expr);
+    if (!iterable_owned) {
+        codegen_emit_ref_incref(ctx, iterable_type, iterable_name);
+    }
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out,
+        "for (int %s = 0; %s < py4_list_int_len(%s); %s++)\n",
+        index_name, index_name, iterable_name, index_name);
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int %s = py4_list_int_get(%s, %s);\n",
+        target->value, iterable_name, index_name);
+    codegen_push_cleanup_scope(ctx);
+    codegen_emit_suite(ctx, suite);
+    codegen_pop_cleanup_scope(ctx);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+    codegen_emit_ref_decref(ctx, iterable_type, iterable_name);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+
+    free(iterable_expr);
+    free(iterable_name);
+    free(iterable_type_name);
+    free(index_name);
+}
+
 void codegen_emit_suite(CodegenContext *ctx, const ParseNode *suite)
 {
     if (suite->child_count == 1 && codegen_is_epsilon_node(suite->children[0])) {
@@ -414,6 +469,11 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
 
     if (payload->kind == NODE_WHILE_STATEMENT) {
         emit_while_statement(ctx, payload);
+        return;
+    }
+
+    if (payload->kind == NODE_FOR_STATEMENT) {
+        emit_for_statement(ctx, payload);
         return;
     }
 
@@ -582,6 +642,8 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             emit_if_statement(ctx, payload);
         } else if (payload->kind == NODE_WHILE_STATEMENT) {
             emit_while_statement(ctx, payload);
+        } else if (payload->kind == NODE_FOR_STATEMENT) {
+            emit_for_statement(ctx, payload);
         }
     }
     ctx->indent_level--;
