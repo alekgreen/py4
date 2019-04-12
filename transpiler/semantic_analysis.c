@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "semantic_internal.h"
 
@@ -236,6 +237,56 @@ static void typecheck_while_statement(
     typecheck_branch_suite(info, while_stmt->children[2], scope, current_function);
 }
 
+static int range_argument_count(const ParseNode *arguments)
+{
+    if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+        return 0;
+    }
+    return (int)arguments->child_count;
+}
+
+static int is_range_expression(const ParseNode *expr)
+{
+    const ParseNode *call;
+    const ParseNode *callee;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    call = expr->children[0];
+    if (call->kind != NODE_CALL || call->child_count != 2) {
+        return 0;
+    }
+
+    callee = semantic_expect_child(call, 0, NODE_PRIMARY);
+    return callee->token_type == TOKEN_IDENTIFIER &&
+        callee->value != NULL &&
+        strcmp(callee->value, "range") == 0;
+}
+
+static void typecheck_range_expression(
+    SemanticInfo *info,
+    const ParseNode *expr,
+    Scope *scope)
+{
+    const ParseNode *call = expr->children[0];
+    const ParseNode *arguments = semantic_expect_child(call, 1, NODE_ARGUMENTS);
+    int arg_count = range_argument_count(arguments);
+
+    if (arg_count < 1 || arg_count > 3) {
+        semantic_error("function 'range' expects 1 to 3 arguments");
+    }
+
+    for (int i = 0; i < arg_count; i++) {
+        ValueType arg_type = semantic_infer_expression_type(info, arguments->children[i], scope);
+
+        if (arg_type != TYPE_INT) {
+            semantic_error("function 'range' argument %d expects int", i + 1);
+        }
+    }
+}
+
 static void typecheck_for_statement(
     SemanticInfo *info,
     const ParseNode *for_stmt,
@@ -244,14 +295,20 @@ static void typecheck_for_statement(
 {
     Scope loop_scope = {0};
     const ParseNode *target;
+    const ParseNode *iterable;
     ValueType iterable_type;
 
     target = semantic_expect_child(for_stmt, 0, NODE_PRIMARY);
-    iterable_type = semantic_infer_expression_type(info, for_stmt->children[1], scope);
+    iterable = semantic_expect_child(for_stmt, 1, NODE_EXPRESSION);
 
-    if (iterable_type != TYPE_LIST_INT) {
-        semantic_error("for loop iterable must be list[int] but got %s",
-            semantic_type_name(iterable_type));
+    if (is_range_expression(iterable)) {
+        typecheck_range_expression(info, iterable, scope);
+    } else {
+        iterable_type = semantic_infer_expression_type(info, iterable, scope);
+        if (iterable_type != TYPE_LIST_INT) {
+            semantic_error("for loop iterable must be list[int] but got %s",
+                semantic_type_name(iterable_type));
+        }
     }
 
     loop_scope.parent = scope;

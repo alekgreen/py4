@@ -195,6 +195,7 @@ static void append_name(char *buffer, size_t size, const char *suffix)
 static int is_codegen_builtin_name(const char *name)
 {
     return strcmp(name, "len") == 0 ||
+        strcmp(name, "range") == 0 ||
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||

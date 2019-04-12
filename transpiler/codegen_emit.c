@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "codegen_internal.h"
 
@@ -310,18 +311,136 @@ static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stm
     fputs("}\n", ctx->out);
 }
 
+static int argument_count(const ParseNode *arguments)
+{
+    if (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0])) {
+        return 0;
+    }
+    return (int)arguments->child_count;
+}
+
+static int is_range_expression(const ParseNode *expr)
+{
+    const ParseNode *call;
+    const ParseNode *callee;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    call = expr->children[0];
+    if (call->kind != NODE_CALL || call->child_count != 2) {
+        return 0;
+    }
+
+    callee = codegen_expect_child(call, 0, NODE_PRIMARY);
+    return callee->token_type == TOKEN_IDENTIFIER &&
+        callee->value != NULL &&
+        strcmp(callee->value, "range") == 0;
+}
+
+static void emit_range_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
+{
+    const ParseNode *target = codegen_expect_child(for_stmt, 0, NODE_PRIMARY);
+    const ParseNode *iterable = codegen_expect_child(for_stmt, 1, NODE_EXPRESSION);
+    const ParseNode *call = iterable->children[0];
+    const ParseNode *arguments = codegen_expect_child(call, 1, NODE_ARGUMENTS);
+    const ParseNode *suite = codegen_expect_child(for_stmt, 3, NODE_SUITE);
+    int arg_count = argument_count(arguments);
+    char *start_expr;
+    char *stop_expr;
+    char *step_expr;
+    char *start_name;
+    char *stop_name;
+    char *step_name;
+    char *index_name;
+
+    if (arg_count < 1 || arg_count > 3) {
+        codegen_error("function 'range' expects 1 to 3 arguments");
+    }
+
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+
+    start_expr = arg_count >= 2
+        ? codegen_expression_to_c_string(ctx, arguments->children[0])
+        : NULL;
+    stop_expr = arg_count == 1
+        ? codegen_expression_to_c_string(ctx, arguments->children[0])
+        : codegen_expression_to_c_string(ctx, arguments->children[1]);
+    step_expr = arg_count == 3
+        ? codegen_expression_to_c_string(ctx, arguments->children[2])
+        : NULL;
+
+    start_name = codegen_next_temp_name(ctx);
+    stop_name = codegen_next_temp_name(ctx);
+    step_name = codegen_next_temp_name(ctx);
+    index_name = codegen_next_temp_name(ctx);
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int %s = %s;\n", start_name, arg_count >= 2 ? start_expr : "0");
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int %s = %s;\n", stop_name, stop_expr);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int %s = %s;\n", step_name, arg_count == 3 ? step_expr : "1");
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (%s == 0) {\n", step_name);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("fprintf(stderr, \"Runtime error: range() step cannot be zero\\n\");\n", ctx->out);
+    codegen_emit_indent(ctx);
+    fputs("exit(1);\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out,
+        "for (int %s = %s; (%s > 0) ? (%s < %s) : (%s > %s); %s += %s)\n",
+        index_name, start_name, step_name, index_name, stop_name, index_name, stop_name, index_name, step_name);
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int %s = %s;\n", target->value, index_name);
+    codegen_push_cleanup_scope(ctx);
+    codegen_emit_suite(ctx, suite);
+    codegen_pop_cleanup_scope(ctx);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+
+    free(start_expr);
+    free(stop_expr);
+    free(step_expr);
+    free(start_name);
+    free(stop_name);
+    free(step_name);
+    free(index_name);
+}
+
 static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
 {
     const ParseNode *target = codegen_expect_child(for_stmt, 0, NODE_PRIMARY);
     const ParseNode *iterable = codegen_expect_child(for_stmt, 1, NODE_EXPRESSION);
     const ParseNode *suite = codegen_expect_child(for_stmt, 3, NODE_SUITE);
-    ValueType iterable_type = semantic_type_of(ctx->semantic, iterable);
+    ValueType iterable_type;
     char *iterable_expr;
     char *iterable_name;
     char *iterable_type_name;
     char *index_name;
     int iterable_owned;
 
+    if (is_range_expression(iterable)) {
+        emit_range_for_statement(ctx, for_stmt);
+        return;
+    }
+
+    iterable_type = semantic_type_of(ctx->semantic, iterable);
     iterable_expr = codegen_wrapped_expression_to_c_string(ctx, iterable, iterable_type);
     iterable_name = codegen_next_temp_name(ctx);
     iterable_type_name = codegen_type_to_c_string(iterable_type);
