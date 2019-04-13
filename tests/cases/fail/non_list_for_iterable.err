@@ -1,1 +1,1 @@
-for loop iterable must be list[int]
+for loop iterable must be list or range

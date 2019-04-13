@@ -86,7 +86,11 @@ static void typecheck_return_statement(
         return;
     }
 
-    ValueType expr_type = semantic_infer_expression_type(info, return_stmt->children[0], scope);
+    ValueType expr_type = semantic_infer_expression_type_with_hint(
+        info,
+        return_stmt->children[0],
+        scope,
+        current_function->return_type);
     if (!semantic_is_assignable(current_function->return_type, expr_type)) {
         semantic_error("function '%s' returns %s but got %s",
             current_function->name,
@@ -120,33 +124,38 @@ static void typecheck_simple_statement(
     const ParseNode *target = semantic_simple_statement_target(simple_stmt);
     const ParseNode *statement_tail = semantic_simple_statement_tail(simple_stmt);
     const ParseNode *expr = semantic_statement_tail_expression(statement_tail);
-    ValueType expr_type = semantic_infer_expression_type(info, expr, scope);
+    ValueType expr_type;
 
     if (target->kind == NODE_INDEX) {
         ValueType container_type = semantic_infer_primary_type(info, target->children[0], scope);
         ValueType index_type = semantic_infer_expression_type(info, target->children[1], scope);
+        ValueType element_type;
+        expr_type = semantic_infer_expression_type(info, expr, scope);
 
         if (semantic_is_type_assignment(statement_tail)) {
             semantic_error("indexed assignment cannot use a type annotation");
         }
-        if (container_type != TYPE_LIST_INT) {
-            semantic_error("indexed assignment requires list[int] but got %s",
+        if (!semantic_type_is_list(container_type)) {
+            semantic_error("indexed assignment requires list but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {
-            semantic_error("list[int] index must be int");
+            semantic_error("list index must be int");
         }
-        if (expr_type != TYPE_INT) {
-            semantic_error("cannot assign %s to list[int] element",
-                semantic_type_name(expr_type));
+        element_type = semantic_list_element_type(container_type);
+        if (!semantic_is_assignable(element_type, expr_type)) {
+            semantic_error("cannot assign %s to %s element",
+                semantic_type_name(expr_type),
+                semantic_type_name(element_type));
         }
 
-        semantic_record_node_type(info, target, TYPE_INT);
+        semantic_record_node_type(info, target, element_type);
         return;
     }
 
     if (semantic_is_type_assignment(statement_tail)) {
         ValueType declared = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
+        expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, declared);
         if (!semantic_is_assignable(declared, expr_type)) {
             semantic_error("cannot assign %s to %s '%s'",
                 semantic_type_name(expr_type),
@@ -162,6 +171,7 @@ static void typecheck_simple_statement(
     if (var == NULL) {
         semantic_error("assignment to undeclared variable '%s'", target->value);
     }
+    expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, var->type);
     if (!semantic_is_assignable(var->type, expr_type)) {
         semantic_error("cannot assign %s to %s '%s'",
             semantic_type_name(expr_type),
@@ -296,6 +306,7 @@ static void typecheck_for_statement(
     Scope loop_scope = {0};
     const ParseNode *target;
     const ParseNode *iterable;
+    ValueType target_type;
     ValueType iterable_type;
 
     target = semantic_expect_child(for_stmt, 0, NODE_PRIMARY);
@@ -303,17 +314,19 @@ static void typecheck_for_statement(
 
     if (is_range_expression(iterable)) {
         typecheck_range_expression(info, iterable, scope);
+        target_type = TYPE_INT;
     } else {
         iterable_type = semantic_infer_expression_type(info, iterable, scope);
-        if (iterable_type != TYPE_LIST_INT) {
-            semantic_error("for loop iterable must be list[int] but got %s",
+        if (!semantic_type_is_list(iterable_type)) {
+            semantic_error("for loop iterable must be list or range but got %s",
                 semantic_type_name(iterable_type));
         }
+        target_type = semantic_list_element_type(iterable_type);
     }
 
     loop_scope.parent = scope;
-    semantic_bind_variable(&loop_scope, target->value, TYPE_INT);
-    semantic_record_node_type(info, target, TYPE_INT);
+    semantic_bind_variable(&loop_scope, target->value, target_type);
+    semantic_record_node_type(info, target, target_type);
     typecheck_suite(info, for_stmt->children[3], &loop_scope, current_function);
     semantic_free_scope_bindings(loop_scope.vars);
 }

@@ -12,7 +12,8 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
     TYPE_CHAR,
     TYPE_STR,
     TYPE_NONE,
-    TYPE_LIST_INT
+    TYPE_LIST_INT,
+    TYPE_LIST_FLOAT
 };
 
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
@@ -167,6 +168,7 @@ const char *codegen_type_suffix(ValueType type)
         case TYPE_STR: return "str";
         case TYPE_NONE: return "none";
         case TYPE_LIST_INT: return "list_int";
+        case TYPE_LIST_FLOAT: return "list_float";
         default: return "unknown";
     }
 }
@@ -180,6 +182,7 @@ const char *codegen_type_field(ValueType type)
         case TYPE_CHAR: return "as_char";
         case TYPE_STR: return "as_str";
         case TYPE_LIST_INT: return "as_list_int";
+        case TYPE_LIST_FLOAT: return "as_list_float";
         default: return "";
     }
 }
@@ -197,6 +200,7 @@ static int is_codegen_builtin_name(const char *name)
     return strcmp(name, "len") == 0 ||
         strcmp(name, "range") == 0 ||
         strcmp(name, "list_int") == 0 ||
+        strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -277,6 +281,9 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
             return;
         case TYPE_LIST_INT:
             fputs("Py4ListInt *", out);
+            return;
+        case TYPE_LIST_FLOAT:
+            fputs("Py4ListFloat *", out);
             return;
         default:
             codegen_error("unsupported scalar type %s", semantic_type_name(type));

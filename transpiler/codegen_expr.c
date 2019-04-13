@@ -74,6 +74,7 @@ static int is_list_builtin_name(const char *name)
 {
     return strcmp(name, "len") == 0 ||
         strcmp(name, "list_int") == 0 ||
+        strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -86,6 +87,19 @@ static int is_list_method_name(const char *name)
         strcmp(name, "pop") == 0 ||
         strcmp(name, "clear") == 0 ||
         strcmp(name, "copy") == 0;
+}
+
+static const char *list_runtime_prefix(ValueType list_type)
+{
+    switch (list_type) {
+        case TYPE_LIST_INT:
+            return "py4_list_int";
+        case TYPE_LIST_FLOAT:
+            return "py4_list_float";
+        default:
+            codegen_error("%s is not a supported list type", semantic_type_name(list_type));
+            return "";
+    }
 }
 
 char *codegen_type_to_c_string(ValueType type)
@@ -101,6 +115,7 @@ char *codegen_type_to_c_string(ValueType type)
             case TYPE_STR: return dup_printf("const char *");
             case TYPE_NONE: return dup_printf("void");
             case TYPE_LIST_INT: return dup_printf("Py4ListInt *");
+            case TYPE_LIST_FLOAT: return dup_printf("Py4ListFloat *");
         }
     }
 
@@ -128,6 +143,10 @@ void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *na
             codegen_emit_indent(ctx);
             fprintf(ctx->out, "py4_list_int_incref(%s);\n", name);
             return;
+        case TYPE_LIST_FLOAT:
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "py4_list_float_incref(%s);\n", name);
+            return;
         default:
             codegen_error("unsupported refcounted type %s", semantic_type_name(type));
     }
@@ -139,6 +158,10 @@ void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *na
         case TYPE_LIST_INT:
             codegen_emit_indent(ctx);
             fprintf(ctx->out, "py4_list_int_decref(%s);\n", name);
+            return;
+        case TYPE_LIST_FLOAT:
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "py4_list_float_decref(%s);\n", name);
             return;
         default:
             codegen_error("unsupported refcounted type %s", semantic_type_name(type));
@@ -282,6 +305,9 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         if (strcmp(callee->value, "list_int") == 0) {
             return dup_printf("py4_list_int_new()");
         }
+        if (strcmp(callee->value, "list_float") == 0) {
+            return dup_printf("py4_list_float_new()");
+        }
     } else {
         function_def = codegen_find_function_definition(ctx->root, callee->value);
         if (function_def == NULL) {
@@ -305,7 +331,10 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                  strcmp(callee->value, "list_len") == 0 ||
                  strcmp(callee->value, "len") == 0 ||
                  strcmp(callee->value, "list_set") == 0) && i == 0) {
-                target_type = TYPE_LIST_INT;
+                target_type = arg_type;
+            } else if ((strcmp(callee->value, "list_append") == 0 && i == 1) ||
+                (strcmp(callee->value, "list_set") == 0 && i == 2)) {
+                target_type = semantic_list_element_type(semantic_type_of(ctx->semantic, arguments->children[0]));
             }
         } else {
             const ParseNode *parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
@@ -339,13 +368,17 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 
     if (strcmp(callee->value, "list_append") == 0) {
-        result = dup_printf("py4_list_int_append(%s)", args);
+        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
+        result = dup_printf("%s_append(%s)", prefix, args);
     } else if (strcmp(callee->value, "list_get") == 0) {
-        result = dup_printf("py4_list_int_get(%s)", args);
+        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
+        result = dup_printf("%s_get(%s)", prefix, args);
     } else if (strcmp(callee->value, "list_len") == 0 || strcmp(callee->value, "len") == 0) {
-        result = dup_printf("py4_list_int_len(%s)", args);
+        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
+        result = dup_printf("%s_len(%s)", prefix, args);
     } else if (strcmp(callee->value, "list_set") == 0) {
-        result = dup_printf("py4_list_int_set(%s)", args);
+        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
+        result = dup_printf("%s_set(%s)", prefix, args);
     } else {
         result = dup_printf("%s(%s)", callee->value, args);
     }
@@ -410,15 +443,22 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 
     if (strcmp(method->value, "append") == 0) {
-        char *value = codegen_expression_to_c_string(ctx, arguments->children[0]);
-        result = dup_printf("py4_list_int_append(%s, %s)", receiver_name, value);
+        const char *prefix = list_runtime_prefix(receiver_type);
+        char *value = codegen_wrapped_expression_to_c_string(
+            ctx,
+            arguments->children[0],
+            semantic_list_element_type(receiver_type));
+        result = dup_printf("%s_append(%s, %s)", prefix, receiver_name, value);
         free(value);
     } else if (strcmp(method->value, "pop") == 0) {
-        result = dup_printf("py4_list_int_pop(%s)", receiver_name);
+        const char *prefix = list_runtime_prefix(receiver_type);
+        result = dup_printf("%s_pop(%s)", prefix, receiver_name);
     } else if (strcmp(method->value, "clear") == 0) {
-        result = dup_printf("py4_list_int_clear(%s)", receiver_name);
+        const char *prefix = list_runtime_prefix(receiver_type);
+        result = dup_printf("%s_clear(%s)", prefix, receiver_name);
     } else if (strcmp(method->value, "copy") == 0) {
-        result = dup_printf("py4_list_int_copy(%s)", receiver_name);
+        const char *prefix = list_runtime_prefix(receiver_type);
+        result = dup_printf("%s_copy(%s)", prefix, receiver_name);
     } else {
         free(receiver_name);
         codegen_error("unknown method '%s' during code generation", method->value);
@@ -465,8 +505,12 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
     }
 
     if (primary->kind == NODE_LIST_LITERAL) {
+        ValueType list_type = semantic_type_of(ctx->semantic, primary);
+        ValueType element_type = semantic_list_element_type(list_type);
+        const char *prefix = list_runtime_prefix(list_type);
+
         if (primary->child_count == 0) {
-            return dup_printf("py4_list_int_new()");
+            return dup_printf("%s_new()", prefix);
         }
 
         {
@@ -474,7 +518,7 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             char *result;
 
             for (size_t i = 0; i < primary->child_count; i++) {
-                char *item = codegen_expression_to_c_string(ctx, primary->children[i]);
+                char *item = codegen_wrapped_expression_to_c_string(ctx, primary->children[i], element_type);
                 char *joined = i == 0 ? dup_printf("%s", item) : dup_printf("%s, %s", values, item);
 
                 free(values);
@@ -482,7 +526,11 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
                 values = joined;
             }
 
-            result = dup_printf("py4_list_int_from_values(%zu, (int[]){%s})", primary->child_count, values);
+            result = dup_printf("%s_from_values(%zu, (%s[]){%s})",
+                prefix,
+                primary->child_count,
+                element_type == TYPE_FLOAT ? "double" : "int",
+                values);
             free(values);
             return result;
         }
@@ -490,18 +538,22 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 
     if (primary->kind == NODE_INDEX) {
         ValueType base_type = semantic_type_of(ctx->semantic, primary->children[0]);
+        ValueType element_type = semantic_list_element_type(base_type);
+        const char *prefix = list_runtime_prefix(base_type);
         int needs_cleanup = 0;
         char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
         char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
-        char *call_text = dup_printf("py4_list_int_get(%s, %s)", base, index);
+        char *call_text = dup_printf("%s_get(%s, %s)", prefix, base, index);
         char *result;
 
         if (needs_cleanup) {
             char *result_name = codegen_next_temp_name(ctx);
+            char *type_name = codegen_type_to_c_string(element_type);
 
             codegen_emit_indent(ctx);
-            fprintf(ctx->out, "int %s = %s;\n", result_name, call_text);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, call_text);
             codegen_emit_ref_decref(ctx, base_type, base);
+            free(type_name);
             result = result_name;
         } else {
             result = dup_printf("%s", call_text);

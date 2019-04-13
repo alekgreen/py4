@@ -17,6 +17,36 @@ static void expect_argument_count(const char *name, const ParseNode *arguments, 
     }
 }
 
+static int is_direct_list_literal_expression(const ParseNode *expr)
+{
+    return expr != NULL &&
+        expr->kind == NODE_EXPRESSION &&
+        expr->child_count == 1 &&
+        expr->children[0]->kind == NODE_LIST_LITERAL;
+}
+
+static ValueType infer_list_literal_with_hint(
+    SemanticInfo *info,
+    const ParseNode *literal,
+    Scope *scope,
+    ValueType expected_type)
+{
+    ValueType element_type = semantic_list_element_type(expected_type);
+
+    for (size_t i = 0; i < literal->child_count; i++) {
+        ValueType item_type = semantic_infer_expression_type(info, literal->children[i], scope);
+
+        if (!semantic_is_assignable(element_type, item_type)) {
+            semantic_error("cannot assign %s to %s list literal element",
+                semantic_type_name(item_type),
+                semantic_type_name(element_type));
+        }
+    }
+
+    semantic_record_node_type(info, literal, expected_type);
+    return expected_type;
+}
+
 const ParseNode *semantic_function_parameters(const ParseNode *function_def)
 {
     return semantic_expect_child(function_def, 1, NODE_PARAMETERS);
@@ -56,6 +86,7 @@ static int is_builtin_name(const char *name)
 {
     return strcmp(name, "len") == 0 ||
         strcmp(name, "list_int") == 0 ||
+        strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -71,6 +102,7 @@ static ValueType infer_method_call_type(
     const ParseNode *method = semantic_expect_child(call, 1, NODE_PRIMARY);
     const ParseNode *arguments = semantic_expect_child(call, 2, NODE_ARGUMENTS);
     ValueType receiver_type;
+    ValueType element_type;
 
     if (call == NULL || call->child_count != 3) {
         semantic_error("malformed method call");
@@ -78,15 +110,23 @@ static ValueType infer_method_call_type(
 
     receiver = call->children[0];
     receiver_type = semantic_infer_primary_type(info, receiver, scope);
+    element_type = semantic_list_element_type(receiver_type);
 
-    if (receiver_type != TYPE_LIST_INT) {
-        semantic_error("method '%s' requires list[int] receiver", method->value);
+    if (!semantic_type_is_list(receiver_type)) {
+        semantic_error("method '%s' requires list receiver", method->value);
     }
 
     if (strcmp(method->value, "append") == 0) {
+        ValueType arg_type;
+
         expect_argument_count(method->value, arguments, 1);
-        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_INT) {
-            semantic_error("method 'append' expects int argument");
+        arg_type = semantic_infer_expression_type_with_hint(
+            info,
+            arguments->children[0],
+            scope,
+            element_type);
+        if (!semantic_is_assignable(element_type, arg_type)) {
+            semantic_error("method 'append' expects %s argument", semantic_type_name(element_type));
         }
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
@@ -94,8 +134,8 @@ static ValueType infer_method_call_type(
 
     if (strcmp(method->value, "pop") == 0) {
         expect_argument_count(method->value, arguments, 0);
-        semantic_record_node_type(info, call, TYPE_INT);
-        return TYPE_INT;
+        semantic_record_node_type(info, call, element_type);
+        return element_type;
     }
 
     if (strcmp(method->value, "clear") == 0) {
@@ -106,11 +146,11 @@ static ValueType infer_method_call_type(
 
     if (strcmp(method->value, "copy") == 0) {
         expect_argument_count(method->value, arguments, 0);
-        semantic_record_node_type(info, call, TYPE_LIST_INT);
-        return TYPE_LIST_INT;
+        semantic_record_node_type(info, call, receiver_type);
+        return receiver_type;
     }
 
-    semantic_error("unknown list[int] method '%s'", method->value);
+    semantic_error("unknown list method '%s'", method->value);
     return TYPE_NONE;
 }
 
@@ -129,49 +169,78 @@ static ValueType infer_builtin_call_type(
         return TYPE_LIST_INT;
     }
 
+    if (strcmp(name, "list_float") == 0) {
+        expect_argument_count(name, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_LIST_FLOAT);
+        return TYPE_LIST_FLOAT;
+    }
+
     if (strcmp(name, "list_append") == 0) {
+        ValueType list_type;
+        ValueType arg_type;
+
         expect_argument_count(name, arguments, 2);
-        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
-            semantic_error("function 'list_append' argument 1 expects list[int]");
+        list_type = semantic_infer_expression_type(info, arguments->children[0], scope);
+        if (!semantic_type_is_list(list_type)) {
+            semantic_error("function 'list_append' argument 1 expects list");
         }
-        if (semantic_infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
-            semantic_error("function 'list_append' argument 2 expects int");
+        arg_type = semantic_infer_expression_type_with_hint(
+            info,
+            arguments->children[1],
+            scope,
+            semantic_list_element_type(list_type));
+        if (!semantic_is_assignable(semantic_list_element_type(list_type), arg_type)) {
+            semantic_error("function 'list_append' argument 2 expects %s",
+                semantic_type_name(semantic_list_element_type(list_type)));
         }
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
     }
 
     if (strcmp(name, "list_get") == 0) {
+        ValueType list_type;
+
         expect_argument_count(name, arguments, 2);
-        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
-            semantic_error("function 'list_get' argument 1 expects list[int]");
+        list_type = semantic_infer_expression_type(info, arguments->children[0], scope);
+        if (!semantic_type_is_list(list_type)) {
+            semantic_error("function 'list_get' argument 1 expects list");
         }
         if (semantic_infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
             semantic_error("function 'list_get' argument 2 expects int");
         }
-        semantic_record_node_type(info, call, TYPE_INT);
-        return TYPE_INT;
+        semantic_record_node_type(info, call, semantic_list_element_type(list_type));
+        return semantic_list_element_type(list_type);
     }
 
     if (strcmp(name, "list_len") == 0 || strcmp(name, "len") == 0) {
         expect_argument_count(name, arguments, 1);
-        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
-            semantic_error("function '%s' argument 1 expects list[int]", name);
+        if (!semantic_type_is_list(semantic_infer_expression_type(info, arguments->children[0], scope))) {
+            semantic_error("function '%s' argument 1 expects list", name);
         }
         semantic_record_node_type(info, call, TYPE_INT);
         return TYPE_INT;
     }
 
     if (strcmp(name, "list_set") == 0) {
+        ValueType list_type;
+        ValueType value_type;
+
         expect_argument_count(name, arguments, 3);
-        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_LIST_INT) {
-            semantic_error("function 'list_set' argument 1 expects list[int]");
+        list_type = semantic_infer_expression_type(info, arguments->children[0], scope);
+        if (!semantic_type_is_list(list_type)) {
+            semantic_error("function 'list_set' argument 1 expects list");
         }
         if (semantic_infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
             semantic_error("function 'list_set' argument 2 expects int");
         }
-        if (semantic_infer_expression_type(info, arguments->children[2], scope) != TYPE_INT) {
-            semantic_error("function 'list_set' argument 3 expects int");
+        value_type = semantic_infer_expression_type_with_hint(
+            info,
+            arguments->children[2],
+            scope,
+            semantic_list_element_type(list_type));
+        if (!semantic_is_assignable(semantic_list_element_type(list_type), value_type)) {
+            semantic_error("function 'list_set' argument 3 expects %s",
+                semantic_type_name(semantic_list_element_type(list_type)));
         }
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
@@ -232,7 +301,11 @@ static ValueType infer_call_type(
     }
 
     for (size_t i = 0; i < arguments->child_count; i++) {
-        ValueType actual = semantic_infer_expression_type(info, arguments->children[i], scope);
+        ValueType actual = semantic_infer_expression_type_with_hint(
+            info,
+            arguments->children[i],
+            scope,
+            fn->param_types[i]);
         if (!semantic_is_assignable(fn->param_types[i], actual)) {
             semantic_error("function '%s' argument %zu expects %s but got %s",
                 fn->name, i + 1,
@@ -253,16 +326,22 @@ ValueType semantic_infer_primary_type(
     ValueType type;
 
     if (node->kind == NODE_LIST_LITERAL) {
+        int saw_float = 0;
+
         for (size_t i = 0; i < node->child_count; i++) {
             ValueType item_type = semantic_infer_expression_type(info, node->children[i], scope);
 
+            if (item_type == TYPE_FLOAT) {
+                saw_float = 1;
+                continue;
+            }
             if (item_type != TYPE_INT) {
-                semantic_error("list[int] literal elements must be int");
+                semantic_error("list literals currently support only int and float elements");
             }
         }
 
-        semantic_record_node_type(info, node, TYPE_LIST_INT);
-        return TYPE_LIST_INT;
+        semantic_record_node_type(info, node, saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT);
+        return saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT;
     }
 
     if (node->kind == NODE_METHOD_CALL) {
@@ -275,16 +354,16 @@ ValueType semantic_infer_primary_type(
         ValueType container_type = semantic_infer_primary_type(info, node->children[0], scope);
         ValueType index_type = semantic_infer_expression_type(info, node->children[1], scope);
 
-        if (container_type != TYPE_LIST_INT) {
-            semantic_error("indexing requires list[int] but got %s",
+        if (!semantic_type_is_list(container_type)) {
+            semantic_error("indexing requires list but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {
-            semantic_error("list[int] index must be int");
+            semantic_error("list index must be int");
         }
 
-        semantic_record_node_type(info, node, TYPE_INT);
-        return TYPE_INT;
+        semantic_record_node_type(info, node, semantic_list_element_type(container_type));
+        return semantic_list_element_type(container_type);
     }
 
     if (node->kind == NODE_CALL) {
@@ -496,4 +575,21 @@ ValueType semantic_infer_expression_type(
 
     semantic_error("unsupported operator '%s'", operator_node->value);
     return TYPE_NONE;
+}
+
+ValueType semantic_infer_expression_type_with_hint(
+    SemanticInfo *info,
+    const ParseNode *expr,
+    Scope *scope,
+    ValueType expected_type)
+{
+    ValueType type;
+
+    if (semantic_type_is_list(expected_type) && is_direct_list_literal_expression(expr)) {
+        type = infer_list_literal_with_hint(info, expr->children[0], scope, expected_type);
+        semantic_record_node_type(info, expr, type);
+        return type;
+    }
+
+    return semantic_infer_expression_type(info, expr, scope);
 }

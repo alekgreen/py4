@@ -55,6 +55,11 @@ VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);
 void semantic_free_scope_bindings(VariableBinding *vars);
 ValueType semantic_infer_expression_type(SemanticInfo *info, const ParseNode *expr, Scope *scope);
+ValueType semantic_infer_expression_type_with_hint(
+    SemanticInfo *info,
+    const ParseNode *expr,
+    Scope *scope,
+    ValueType expected_type);
 ValueType semantic_infer_primary_type(SemanticInfo *info, const ParseNode *node, Scope *scope);
 const ParseNode *semantic_function_parameters(const ParseNode *function_def);
 ValueType semantic_function_return_type(SemanticInfo *info, const ParseNode *function_def);

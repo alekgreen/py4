@@ -1,1 +1,1 @@
-list[int] literal elements must be int
+cannot assign float to int list literal element

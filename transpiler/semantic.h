@@ -12,7 +12,8 @@ enum {
     TYPE_CHAR = 1u << 3,
     TYPE_STR = 1u << 4,
     TYPE_NONE = 1u << 5,
-    TYPE_LIST_INT = 1u << 6
+    TYPE_LIST_INT = 1u << 6,
+    TYPE_LIST_FLOAT = 1u << 7
 };
 
 typedef struct SemanticInfo SemanticInfo;
@@ -24,5 +25,7 @@ const char *semantic_type_name(ValueType type);
 int semantic_type_contains(ValueType type, ValueType member);
 int semantic_type_is_union(ValueType type);
 int semantic_type_is_ref(ValueType type);
+int semantic_type_is_list(ValueType type);
+ValueType semantic_list_element_type(ValueType type);
 
 #endif
