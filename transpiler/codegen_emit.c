@@ -12,19 +12,6 @@ static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_typ
     fputs(ctor_name, ctx->out);
 }
 
-static const char *list_runtime_prefix(ValueType list_type)
-{
-    switch (list_type) {
-        case TYPE_LIST_INT:
-            return "py4_list_int";
-        case TYPE_LIST_FLOAT:
-            return "py4_list_float";
-        default:
-            codegen_error("%s is not a supported list type", semantic_type_name(list_type));
-            return "";
-    }
-}
-
 static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
 {
     const ParseNode *call = expr->children[0];
@@ -194,7 +181,7 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
         if (target->kind == NODE_INDEX) {
             ValueType list_type = semantic_type_of(ctx->semantic, target->children[0]);
             ValueType element_type = semantic_list_element_type(list_type);
-            const char *prefix = list_runtime_prefix(list_type);
+            const char *prefix = codegen_list_runtime_prefix(list_type);
             char *base = codegen_primary_to_c_string(ctx, target->children[0]);
             char *index = codegen_expression_to_c_string(ctx, target->children[1]);
             char *value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
@@ -461,7 +448,7 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
 
     iterable_type = semantic_type_of(ctx->semantic, iterable);
     element_type = semantic_list_element_type(iterable_type);
-    prefix = list_runtime_prefix(iterable_type);
+    prefix = codegen_list_runtime_prefix(iterable_type);
     iterable_expr = codegen_wrapped_expression_to_c_string(ctx, iterable, iterable_type);
     iterable_name = codegen_next_temp_name(ctx);
     iterable_type_name = codegen_type_to_c_string(iterable_type);
@@ -739,7 +726,7 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             if (name->kind == NODE_INDEX) {
                 ValueType list_type = semantic_type_of(ctx->semantic, name->children[0]);
                 ValueType element_type = semantic_list_element_type(list_type);
-                const char *prefix = list_runtime_prefix(list_type);
+                const char *prefix = codegen_list_runtime_prefix(list_type);
                 char *base = codegen_primary_to_c_string(ctx, name->children[0]);
                 char *index = codegen_expression_to_c_string(ctx, name->children[1]);
                 char *value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
@@ -826,272 +813,6 @@ static void emit_auto_main(CodegenContext *ctx)
     fputs("}\n", ctx->out);
 }
 
-static void emit_list_int_runtime(CodegenContext *ctx)
-{
-    fputs("typedef struct {\n", ctx->out);
-    fputs("    int refcount;\n", ctx->out);
-    fputs("    size_t len;\n", ctx->out);
-    fputs("    size_t cap;\n", ctx->out);
-    fputs("    int *items;\n", ctx->out);
-    fputs("} Py4ListInt;\n\n", ctx->out);
-
-    fputs("static void py4_list_int_bounds_check(Py4ListInt *list, int index)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    if (index < 0 || (size_t)index >= list->len) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] index out of bounds\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static Py4ListInt *py4_list_int_new(void)\n{\n", ctx->out);
-    fputs("    Py4ListInt *list = calloc(1, sizeof(Py4ListInt));\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        perror(\"calloc\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->refcount = 1;\n", ctx->out);
-    fputs("    return list;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_int_incref(Py4ListInt *list)\n{\n", ctx->out);
-    fputs("    if (list != NULL) {\n", ctx->out);
-    fputs("        list->refcount++;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_int_decref(Py4ListInt *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        return;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->refcount--;\n", ctx->out);
-    fputs("    if (list->refcount == 0) {\n", ctx->out);
-    fputs("        free(list->items);\n", ctx->out);
-    fputs("        free(list);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_int_ensure_capacity(Py4ListInt *list, size_t needed)\n{\n", ctx->out);
-    fputs("    size_t new_cap;\n", ctx->out);
-    fputs("    int *items;\n\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    if (list->cap >= needed) {\n", ctx->out);
-    fputs("        return;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    new_cap = list->cap == 0 ? 4 : list->cap * 2;\n", ctx->out);
-    fputs("    while (new_cap < needed) {\n", ctx->out);
-    fputs("        new_cap *= 2;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    items = realloc(list->items, sizeof(int) * new_cap);\n", ctx->out);
-    fputs("    if (items == NULL) {\n", ctx->out);
-    fputs("        perror(\"realloc\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->items = items;\n", ctx->out);
-    fputs("    list->cap = new_cap;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_int_append(Py4ListInt *list, int value)\n{\n", ctx->out);
-    fputs("    py4_list_int_ensure_capacity(list, list->len + 1);\n", ctx->out);
-    fputs("    list->items[list->len++] = value;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static Py4ListInt *py4_list_int_from_values(size_t count, const int *values)\n{\n", ctx->out);
-    fputs("    Py4ListInt *list = py4_list_int_new();\n", ctx->out);
-    fputs("    py4_list_int_ensure_capacity(list, count);\n", ctx->out);
-    fputs("    for (size_t i = 0; i < count; i++) {\n", ctx->out);
-    fputs("        list->items[i] = values[i];\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->len = count;\n", ctx->out);
-    fputs("    return list;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static int py4_list_int_get(Py4ListInt *list, int index)\n{\n", ctx->out);
-    fputs("    py4_list_int_bounds_check(list, index);\n", ctx->out);
-    fputs("    return list->items[index];\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_int_set(Py4ListInt *list, int index, int value)\n{\n", ctx->out);
-    fputs("    py4_list_int_bounds_check(list, index);\n", ctx->out);
-    fputs("    list->items[index] = value;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static int py4_list_int_pop(Py4ListInt *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    if (list->len == 0) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: pop from empty list[int]\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->len--;\n", ctx->out);
-    fputs("    return list->items[list->len];\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_int_clear(Py4ListInt *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->len = 0;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static Py4ListInt *py4_list_int_copy(Py4ListInt *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    return py4_list_int_from_values(list->len, list->items);\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static int py4_list_int_len(Py4ListInt *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[int] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    return (int)list->len;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-}
-
-static void emit_list_float_runtime(CodegenContext *ctx)
-{
-    fputs("typedef struct {\n", ctx->out);
-    fputs("    int refcount;\n", ctx->out);
-    fputs("    size_t len;\n", ctx->out);
-    fputs("    size_t cap;\n", ctx->out);
-    fputs("    double *items;\n", ctx->out);
-    fputs("} Py4ListFloat;\n\n", ctx->out);
-
-    fputs("static void py4_list_float_bounds_check(Py4ListFloat *list, int index)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    if (index < 0 || (size_t)index >= list->len) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] index out of bounds\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static Py4ListFloat *py4_list_float_new(void)\n{\n", ctx->out);
-    fputs("    Py4ListFloat *list = calloc(1, sizeof(Py4ListFloat));\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        perror(\"calloc\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->refcount = 1;\n", ctx->out);
-    fputs("    return list;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_float_incref(Py4ListFloat *list)\n{\n", ctx->out);
-    fputs("    if (list != NULL) {\n", ctx->out);
-    fputs("        list->refcount++;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_float_decref(Py4ListFloat *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        return;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->refcount--;\n", ctx->out);
-    fputs("    if (list->refcount == 0) {\n", ctx->out);
-    fputs("        free(list->items);\n", ctx->out);
-    fputs("        free(list);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_float_ensure_capacity(Py4ListFloat *list, size_t needed)\n{\n", ctx->out);
-    fputs("    size_t new_cap;\n", ctx->out);
-    fputs("    double *items;\n\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    if (list->cap >= needed) {\n", ctx->out);
-    fputs("        return;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    new_cap = list->cap == 0 ? 4 : list->cap * 2;\n", ctx->out);
-    fputs("    while (new_cap < needed) {\n", ctx->out);
-    fputs("        new_cap *= 2;\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    items = realloc(list->items, sizeof(double) * new_cap);\n", ctx->out);
-    fputs("    if (items == NULL) {\n", ctx->out);
-    fputs("        perror(\"realloc\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->items = items;\n", ctx->out);
-    fputs("    list->cap = new_cap;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_float_append(Py4ListFloat *list, double value)\n{\n", ctx->out);
-    fputs("    py4_list_float_ensure_capacity(list, list->len + 1);\n", ctx->out);
-    fputs("    list->items[list->len++] = value;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static Py4ListFloat *py4_list_float_from_values(size_t count, const double *values)\n{\n", ctx->out);
-    fputs("    Py4ListFloat *list = py4_list_float_new();\n", ctx->out);
-    fputs("    py4_list_float_ensure_capacity(list, count);\n", ctx->out);
-    fputs("    for (size_t i = 0; i < count; i++) {\n", ctx->out);
-    fputs("        list->items[i] = values[i];\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->len = count;\n", ctx->out);
-    fputs("    return list;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static double py4_list_float_get(Py4ListFloat *list, int index)\n{\n", ctx->out);
-    fputs("    py4_list_float_bounds_check(list, index);\n", ctx->out);
-    fputs("    return list->items[index];\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_float_set(Py4ListFloat *list, int index, double value)\n{\n", ctx->out);
-    fputs("    py4_list_float_bounds_check(list, index);\n", ctx->out);
-    fputs("    list->items[index] = value;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static double py4_list_float_pop(Py4ListFloat *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    if (list->len == 0) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: pop from empty list[float]\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->len--;\n", ctx->out);
-    fputs("    return list->items[list->len];\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static void py4_list_float_clear(Py4ListFloat *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    list->len = 0;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static Py4ListFloat *py4_list_float_copy(Py4ListFloat *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    return py4_list_float_from_values(list->len, list->items);\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static int py4_list_float_len(Py4ListFloat *list)\n{\n", ctx->out);
-    fputs("    if (list == NULL) {\n", ctx->out);
-    fputs("        fprintf(stderr, \"Runtime error: list[float] is null\\n\");\n", ctx->out);
-    fputs("        exit(1);\n", ctx->out);
-    fputs("    }\n", ctx->out);
-    fputs("    return (int)list->len;\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-}
-
 void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
 {
     CodegenContext ctx = {0};
@@ -1106,8 +827,7 @@ void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
     codegen_collect_program_state(&ctx, root);
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n\n", out);
-    emit_list_int_runtime(&ctx);
-    emit_list_float_runtime(&ctx);
+    codegen_emit_container_runtime(&ctx);
     codegen_emit_union_runtime(&ctx);
     emit_global_declarations(&ctx, root);
     emit_function_prototypes(&ctx, root);

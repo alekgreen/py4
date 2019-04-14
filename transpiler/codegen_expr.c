@@ -89,17 +89,32 @@ static int is_list_method_name(const char *name)
         strcmp(name, "copy") == 0;
 }
 
-static const char *list_runtime_prefix(ValueType list_type)
+static const char *list_array_c_type(ValueType list_type)
 {
-    switch (list_type) {
-        case TYPE_LIST_INT:
-            return "py4_list_int";
-        case TYPE_LIST_FLOAT:
-            return "py4_list_float";
+    switch (semantic_list_element_type(list_type)) {
+        case TYPE_INT:
+            return "int";
+        case TYPE_FLOAT:
+            return "double";
         default:
-            codegen_error("%s is not a supported list type", semantic_type_name(list_type));
+            codegen_error("%s does not have a supported list element C type", semantic_type_name(list_type));
             return "";
     }
+}
+
+static char *list_new_call(ValueType list_type)
+{
+    return dup_printf("%s_new()", codegen_list_runtime_prefix(list_type));
+}
+
+static char *list_unary_call(ValueType list_type, const char *suffix, const char *arg)
+{
+    return dup_printf("%s_%s(%s)", codegen_list_runtime_prefix(list_type), suffix, arg);
+}
+
+static char *list_binary_call(ValueType list_type, const char *suffix, const char *arg0, const char *arg1)
+{
+    return dup_printf("%s_%s(%s, %s)", codegen_list_runtime_prefix(list_type), suffix, arg0, arg1);
 }
 
 char *codegen_type_to_c_string(ValueType type)
@@ -303,10 +318,10 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
     if (is_list_builtin_name(callee->value)) {
         if (strcmp(callee->value, "list_int") == 0) {
-            return dup_printf("py4_list_int_new()");
+            return list_new_call(TYPE_LIST_INT);
         }
         if (strcmp(callee->value, "list_float") == 0) {
-            return dup_printf("py4_list_float_new()");
+            return list_new_call(TYPE_LIST_FLOAT);
         }
     } else {
         function_def = codegen_find_function_definition(ctx->root, callee->value);
@@ -368,17 +383,13 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 
     if (strcmp(callee->value, "list_append") == 0) {
-        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
-        result = dup_printf("%s_append(%s)", prefix, args);
+        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "append", args);
     } else if (strcmp(callee->value, "list_get") == 0) {
-        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
-        result = dup_printf("%s_get(%s)", prefix, args);
+        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "get", args);
     } else if (strcmp(callee->value, "list_len") == 0 || strcmp(callee->value, "len") == 0) {
-        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
-        result = dup_printf("%s_len(%s)", prefix, args);
+        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "len", args);
     } else if (strcmp(callee->value, "list_set") == 0) {
-        const char *prefix = list_runtime_prefix(semantic_type_of(ctx->semantic, arguments->children[0]));
-        result = dup_printf("%s_set(%s)", prefix, args);
+        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
     } else {
         result = dup_printf("%s(%s)", callee->value, args);
     }
@@ -443,22 +454,18 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 
     if (strcmp(method->value, "append") == 0) {
-        const char *prefix = list_runtime_prefix(receiver_type);
         char *value = codegen_wrapped_expression_to_c_string(
             ctx,
             arguments->children[0],
             semantic_list_element_type(receiver_type));
-        result = dup_printf("%s_append(%s, %s)", prefix, receiver_name, value);
+        result = list_binary_call(receiver_type, "append", receiver_name, value);
         free(value);
     } else if (strcmp(method->value, "pop") == 0) {
-        const char *prefix = list_runtime_prefix(receiver_type);
-        result = dup_printf("%s_pop(%s)", prefix, receiver_name);
+        result = list_unary_call(receiver_type, "pop", receiver_name);
     } else if (strcmp(method->value, "clear") == 0) {
-        const char *prefix = list_runtime_prefix(receiver_type);
-        result = dup_printf("%s_clear(%s)", prefix, receiver_name);
+        result = list_unary_call(receiver_type, "clear", receiver_name);
     } else if (strcmp(method->value, "copy") == 0) {
-        const char *prefix = list_runtime_prefix(receiver_type);
-        result = dup_printf("%s_copy(%s)", prefix, receiver_name);
+        result = list_unary_call(receiver_type, "copy", receiver_name);
     } else {
         free(receiver_name);
         codegen_error("unknown method '%s' during code generation", method->value);
@@ -507,10 +514,9 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
     if (primary->kind == NODE_LIST_LITERAL) {
         ValueType list_type = semantic_type_of(ctx->semantic, primary);
         ValueType element_type = semantic_list_element_type(list_type);
-        const char *prefix = list_runtime_prefix(list_type);
 
         if (primary->child_count == 0) {
-            return dup_printf("%s_new()", prefix);
+            return list_new_call(list_type);
         }
 
         {
@@ -527,9 +533,9 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             }
 
             result = dup_printf("%s_from_values(%zu, (%s[]){%s})",
-                prefix,
+                codegen_list_runtime_prefix(list_type),
                 primary->child_count,
-                element_type == TYPE_FLOAT ? "double" : "int",
+                list_array_c_type(list_type),
                 values);
             free(values);
             return result;
@@ -539,11 +545,10 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
     if (primary->kind == NODE_INDEX) {
         ValueType base_type = semantic_type_of(ctx->semantic, primary->children[0]);
         ValueType element_type = semantic_list_element_type(base_type);
-        const char *prefix = list_runtime_prefix(base_type);
         int needs_cleanup = 0;
         char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
         char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
-        char *call_text = dup_printf("%s_get(%s, %s)", prefix, base, index);
+        char *call_text = list_binary_call(base_type, "get", base, index);
         char *result;
 
         if (needs_cleanup) {

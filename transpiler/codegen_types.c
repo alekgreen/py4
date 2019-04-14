@@ -187,6 +187,19 @@ const char *codegen_type_field(ValueType type)
     }
 }
 
+const char *codegen_list_runtime_prefix(ValueType type)
+{
+    switch (type) {
+        case TYPE_LIST_INT:
+            return "py4_list_int";
+        case TYPE_LIST_FLOAT:
+            return "py4_list_float";
+        default:
+            codegen_error("%s is not a supported list type", semantic_type_name(type));
+            return "";
+    }
+}
+
 static void append_name(char *buffer, size_t size, const char *suffix)
 {
     if (strlen(buffer) + strlen(suffix) + 1 >= size) {
