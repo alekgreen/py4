@@ -187,19 +187,6 @@ const char *codegen_type_field(ValueType type)
     }
 }
 
-const char *codegen_list_runtime_prefix(ValueType type)
-{
-    switch (type) {
-        case TYPE_LIST_INT:
-            return "py4_list_int";
-        case TYPE_LIST_FLOAT:
-            return "py4_list_float";
-        default:
-            codegen_error("%s is not a supported list type", semantic_type_name(type));
-            return "";
-    }
-}
-
 static void append_name(char *buffer, size_t size, const char *suffix)
 {
     if (strlen(buffer) + strlen(suffix) + 1 >= size) {
@@ -293,14 +280,34 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
             fputs("void", out);
             return;
         case TYPE_LIST_INT:
-            fputs("Py4ListInt *", out);
-            return;
         case TYPE_LIST_FLOAT:
-            fputs("Py4ListFloat *", out);
+            fprintf(out, "%s *", codegen_list_struct_name(type));
             return;
         default:
             codegen_error("unsupported scalar type %s", semantic_type_name(type));
     }
+}
+
+char *codegen_type_to_c_string(ValueType type)
+{
+    char buffer[MAX_NAME_LEN];
+
+    if (!semantic_type_is_union(type)) {
+        switch (type) {
+            case TYPE_INT: return codegen_dup_printf("int");
+            case TYPE_FLOAT: return codegen_dup_printf("double");
+            case TYPE_BOOL: return codegen_dup_printf("bool");
+            case TYPE_CHAR: return codegen_dup_printf("char");
+            case TYPE_STR: return codegen_dup_printf("const char *");
+            case TYPE_NONE: return codegen_dup_printf("void");
+            case TYPE_LIST_INT:
+            case TYPE_LIST_FLOAT:
+                return codegen_dup_printf("%s *", codegen_list_struct_name(type));
+        }
+    }
+
+    codegen_build_union_base_name(buffer, sizeof(buffer), type);
+    return codegen_dup_printf("%s", buffer);
 }
 
 void codegen_emit_type_name(CodegenContext *ctx, ValueType type)

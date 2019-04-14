@@ -1,37 +1,8 @@
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "codegen_internal.h"
-
-static char *dup_printf(const char *fmt, ...)
-{
-    va_list args;
-    va_list copy;
-    int needed;
-    char *buffer;
-
-    va_start(args, fmt);
-    va_copy(copy, args);
-    needed = vsnprintf(NULL, 0, fmt, copy);
-    va_end(copy);
-    if (needed < 0) {
-        va_end(args);
-        codegen_error("failed to format generated C");
-    }
-
-    buffer = malloc((size_t)needed + 1);
-    if (buffer == NULL) {
-        va_end(args);
-        perror("malloc");
-        exit(1);
-    }
-
-    vsnprintf(buffer, (size_t)needed + 1, fmt, args);
-    va_end(args);
-    return buffer;
-}
 
 static const char *map_operator(const char *op)
 {
@@ -89,58 +60,9 @@ static int is_list_method_name(const char *name)
         strcmp(name, "copy") == 0;
 }
 
-static const char *list_array_c_type(ValueType list_type)
-{
-    switch (semantic_list_element_type(list_type)) {
-        case TYPE_INT:
-            return "int";
-        case TYPE_FLOAT:
-            return "double";
-        default:
-            codegen_error("%s does not have a supported list element C type", semantic_type_name(list_type));
-            return "";
-    }
-}
-
-static char *list_new_call(ValueType list_type)
-{
-    return dup_printf("%s_new()", codegen_list_runtime_prefix(list_type));
-}
-
-static char *list_unary_call(ValueType list_type, const char *suffix, const char *arg)
-{
-    return dup_printf("%s_%s(%s)", codegen_list_runtime_prefix(list_type), suffix, arg);
-}
-
-static char *list_binary_call(ValueType list_type, const char *suffix, const char *arg0, const char *arg1)
-{
-    return dup_printf("%s_%s(%s, %s)", codegen_list_runtime_prefix(list_type), suffix, arg0, arg1);
-}
-
-char *codegen_type_to_c_string(ValueType type)
-{
-    char buffer[MAX_NAME_LEN];
-
-    if (!semantic_type_is_union(type)) {
-        switch (type) {
-            case TYPE_INT: return dup_printf("int");
-            case TYPE_FLOAT: return dup_printf("double");
-            case TYPE_BOOL: return dup_printf("bool");
-            case TYPE_CHAR: return dup_printf("char");
-            case TYPE_STR: return dup_printf("const char *");
-            case TYPE_NONE: return dup_printf("void");
-            case TYPE_LIST_INT: return dup_printf("Py4ListInt *");
-            case TYPE_LIST_FLOAT: return dup_printf("Py4ListFloat *");
-        }
-    }
-
-    codegen_build_union_base_name(buffer, sizeof(buffer), type);
-    return dup_printf("%s", buffer);
-}
-
 char *codegen_next_temp_name(CodegenContext *ctx)
 {
-    return dup_printf("py4_tmp_%d", ctx->temp_counter++);
+    return codegen_dup_printf("py4_tmp_%d", ctx->temp_counter++);
 }
 
 void codegen_push_cleanup_scope(CodegenContext *ctx)
@@ -153,34 +75,20 @@ void codegen_push_cleanup_scope(CodegenContext *ctx)
 
 void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *name)
 {
-    switch (type) {
-        case TYPE_LIST_INT:
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "py4_list_int_incref(%s);\n", name);
-            return;
-        case TYPE_LIST_FLOAT:
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "py4_list_float_incref(%s);\n", name);
-            return;
-        default:
-            codegen_error("unsupported refcounted type %s", semantic_type_name(type));
+    if (!semantic_type_is_ref(type)) {
+        codegen_error("unsupported refcounted type %s", semantic_type_name(type));
     }
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s_incref(%s);\n", codegen_list_runtime_prefix(type), name);
 }
 
 void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *name)
 {
-    switch (type) {
-        case TYPE_LIST_INT:
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "py4_list_int_decref(%s);\n", name);
-            return;
-        case TYPE_LIST_FLOAT:
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "py4_list_float_decref(%s);\n", name);
-            return;
-        default:
-            codegen_error("unsupported refcounted type %s", semantic_type_name(type));
+    if (!semantic_type_is_ref(type)) {
+        codegen_error("unsupported refcounted type %s", semantic_type_name(type));
     }
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s_decref(%s);\n", codegen_list_runtime_prefix(type), name);
 }
 
 void codegen_register_ref_local(CodegenContext *ctx, const char *name, ValueType type)
@@ -318,10 +226,10 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
     if (is_list_builtin_name(callee->value)) {
         if (strcmp(callee->value, "list_int") == 0) {
-            return list_new_call(TYPE_LIST_INT);
+            return codegen_list_new_call(TYPE_LIST_INT);
         }
         if (strcmp(callee->value, "list_float") == 0) {
-            return list_new_call(TYPE_LIST_FLOAT);
+            return codegen_list_new_call(TYPE_LIST_FLOAT);
         }
     } else {
         function_def = codegen_find_function_definition(ctx->root, callee->value);
@@ -363,7 +271,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
             arg_parts[i] = part;
             if (needs_cleanup) {
-                cleanup_names[cleanup_count] = dup_printf("%s", part);
+                cleanup_names[cleanup_count] = codegen_dup_printf("%s", part);
                 cleanup_types[cleanup_count] = target_type;
                 cleanup_count++;
             }
@@ -375,23 +283,25 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             : codegen_wrapped_expression_to_c_string(ctx, arg_node, target_type);
     }
 
-    args = dup_printf("");
+    args = codegen_dup_printf("");
     for (size_t i = 0; i < arg_count; i++) {
-        char *joined = i == 0 ? dup_printf("%s", arg_parts[i]) : dup_printf("%s, %s", args, arg_parts[i]);
+        char *joined = i == 0
+            ? codegen_dup_printf("%s", arg_parts[i])
+            : codegen_dup_printf("%s, %s", args, arg_parts[i]);
         free(args);
         args = joined;
     }
 
     if (strcmp(callee->value, "list_append") == 0) {
-        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "append", args);
+        result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "append", args);
     } else if (strcmp(callee->value, "list_get") == 0) {
-        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "get", args);
+        result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "get", args);
     } else if (strcmp(callee->value, "list_len") == 0 || strcmp(callee->value, "len") == 0) {
-        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "len", args);
+        result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "len", args);
     } else if (strcmp(callee->value, "list_set") == 0) {
-        result = list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
+        result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
     } else {
-        result = dup_printf("%s(%s)", callee->value, args);
+        result = codegen_dup_printf("%s(%s)", callee->value, args);
     }
 
     free(args);
@@ -411,7 +321,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             codegen_emit_ref_decref(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
             free(cleanup_names[i - 1]);
         }
-        return dup_printf("(void)0");
+        return codegen_dup_printf("(void)0");
     }
 
     {
@@ -458,14 +368,14 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             ctx,
             arguments->children[0],
             semantic_list_element_type(receiver_type));
-        result = list_binary_call(receiver_type, "append", receiver_name, value);
+        result = codegen_list_binary_call(receiver_type, "append", receiver_name, value);
         free(value);
     } else if (strcmp(method->value, "pop") == 0) {
-        result = list_unary_call(receiver_type, "pop", receiver_name);
+        result = codegen_list_unary_call(receiver_type, "pop", receiver_name);
     } else if (strcmp(method->value, "clear") == 0) {
-        result = list_unary_call(receiver_type, "clear", receiver_name);
+        result = codegen_list_unary_call(receiver_type, "clear", receiver_name);
     } else if (strcmp(method->value, "copy") == 0) {
-        result = list_unary_call(receiver_type, "copy", receiver_name);
+        result = codegen_list_unary_call(receiver_type, "copy", receiver_name);
     } else {
         free(receiver_name);
         codegen_error("unknown method '%s' during code generation", method->value);
@@ -480,7 +390,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             free(result);
             codegen_emit_ref_decref(ctx, receiver_type, receiver_name);
             free(receiver_name);
-            return dup_printf("(void)0");
+            return codegen_dup_printf("(void)0");
         }
 
         {
@@ -516,26 +426,28 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         ValueType element_type = semantic_list_element_type(list_type);
 
         if (primary->child_count == 0) {
-            return list_new_call(list_type);
+            return codegen_list_new_call(list_type);
         }
 
         {
-            char *values = dup_printf("");
+            char *values = codegen_dup_printf("");
             char *result;
 
             for (size_t i = 0; i < primary->child_count; i++) {
                 char *item = codegen_wrapped_expression_to_c_string(ctx, primary->children[i], element_type);
-                char *joined = i == 0 ? dup_printf("%s", item) : dup_printf("%s, %s", values, item);
+                char *joined = i == 0
+                    ? codegen_dup_printf("%s", item)
+                    : codegen_dup_printf("%s, %s", values, item);
 
                 free(values);
                 free(item);
                 values = joined;
             }
 
-            result = dup_printf("%s_from_values(%zu, (%s[]){%s})",
+            result = codegen_dup_printf("%s_from_values(%zu, (%s[]){%s})",
                 codegen_list_runtime_prefix(list_type),
                 primary->child_count,
-                list_array_c_type(list_type),
+                codegen_list_element_c_type(list_type),
                 values);
             free(values);
             return result;
@@ -548,7 +460,7 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         int needs_cleanup = 0;
         char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
         char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
-        char *call_text = list_binary_call(base_type, "get", base, index);
+        char *call_text = codegen_list_binary_call(base_type, "get", base, index);
         char *result;
 
         if (needs_cleanup) {
@@ -561,7 +473,7 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             free(type_name);
             result = result_name;
         } else {
-            result = dup_printf("%s", call_text);
+            result = codegen_dup_printf("%s", call_text);
         }
 
         free(base);
@@ -580,14 +492,14 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 
     if (primary->token_type == TOKEN_KEYWORD) {
         if (strcmp(primary->value, "True") == 0) {
-            return dup_printf("true");
+            return codegen_dup_printf("true");
         }
         if (strcmp(primary->value, "False") == 0) {
-            return dup_printf("false");
+            return codegen_dup_printf("false");
         }
     }
 
-    return dup_printf("%s", primary->value);
+    return codegen_dup_printf("%s", primary->value);
 }
 
 static char *chain_comparison_to_c_string(CodegenContext *ctx, const ParseNode *expr)
@@ -616,14 +528,16 @@ static char *chain_comparison_to_c_string(CodegenContext *ctx, const ParseNode *
         free(operand_code);
     }
 
-    result = dup_printf("");
+    result = codegen_dup_printf("");
     for (size_t i = 1; i < expr->child_count; i += 2) {
         const ParseNode *op = codegen_expect_child(expr, i, NODE_OPERATOR);
-        char *piece = dup_printf("(%s %s %s)",
+        char *piece = codegen_dup_printf("(%s %s %s)",
             temp_names[(i - 1) / 2],
             map_operator(op->value),
             temp_names[(i + 1) / 2]);
-        char *joined = i == 1 ? dup_printf("%s", piece) : dup_printf("%s && %s", result, piece);
+        char *joined = i == 1
+            ? codegen_dup_printf("%s", piece)
+            : codegen_dup_printf("%s && %s", result, piece);
 
         free(result);
         free(piece);
@@ -631,7 +545,7 @@ static char *chain_comparison_to_c_string(CodegenContext *ctx, const ParseNode *
     }
 
     {
-        char *wrapped = dup_printf("(%s)", result);
+        char *wrapped = codegen_dup_printf("(%s)", result);
         for (size_t i = 0; i < operand_count; i++) {
             free(temp_names[i]);
         }
@@ -663,7 +577,7 @@ char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr)
     if (expr->child_count == 2) {
         operator_node = codegen_expect_child(expr, 0, NODE_OPERATOR);
         rhs = codegen_primary_to_c_string(ctx, expr->children[1]);
-        result = dup_printf("(%s%s)", map_operator(operator_node->value), rhs);
+        result = codegen_dup_printf("(%s%s)", map_operator(operator_node->value), rhs);
         free(rhs);
         return result;
     }
@@ -675,7 +589,7 @@ char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr)
     lhs = codegen_primary_to_c_string(ctx, expr->children[0]);
     operator_node = codegen_expect_child(expr, 1, NODE_OPERATOR);
     rhs = codegen_primary_to_c_string(ctx, expr->children[2]);
-    result = dup_printf("(%s %s %s)", lhs, map_operator(operator_node->value), rhs);
+    result = codegen_dup_printf("(%s %s %s)", lhs, map_operator(operator_node->value), rhs);
     free(lhs);
     free(rhs);
     return result;
@@ -696,7 +610,7 @@ char *codegen_wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNod
 
             codegen_build_union_convert_name(helper_name, sizeof(helper_name), expr_type, target_type);
             inner = codegen_expression_to_c_string(ctx, expr);
-            result = dup_printf("%s(%s)", helper_name, inner);
+            result = codegen_dup_printf("%s(%s)", helper_name, inner);
             free(inner);
             return result;
         }
@@ -708,11 +622,11 @@ char *codegen_wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNod
                 target_type,
                 codegen_resolve_union_member_type(target_type, expr_type));
             if (expr_type == TYPE_NONE) {
-                return dup_printf("%s()", ctor_name);
+                return codegen_dup_printf("%s()", ctor_name);
             }
 
             inner = codegen_expression_to_c_string(ctx, expr);
-            result = dup_printf("%s(%s)", ctor_name, inner);
+            result = codegen_dup_printf("%s(%s)", ctor_name, inner);
             free(inner);
             return result;
         }

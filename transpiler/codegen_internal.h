@@ -49,6 +49,7 @@ extern const size_t CODEGEN_ORDERED_TYPE_COUNT;
 
 void codegen_error(const char *message, ...);
 void codegen_emit_indent(CodegenContext *ctx);
+char *codegen_dup_printf(const char *fmt, ...);
 const ParseNode *codegen_expect_child(const ParseNode *node, size_t index, NodeKind kind);
 int codegen_is_type_assignment(const ParseNode *statement_tail);
 int codegen_is_epsilon_node(const ParseNode *node);
@@ -65,7 +66,18 @@ ValueType codegen_function_return_type(CodegenContext *ctx, const ParseNode *fun
 const ParseNode *codegen_find_function_definition(const ParseNode *root, const char *name);
 const char *codegen_type_suffix(ValueType type);
 const char *codegen_type_field(ValueType type);
+const char *codegen_list_struct_name(ValueType type);
 const char *codegen_list_runtime_prefix(ValueType type);
+const char *codegen_list_element_c_type(ValueType type);
+char *codegen_list_new_call(ValueType type);
+char *codegen_list_unary_call(ValueType type, const char *suffix, const char *arg);
+char *codegen_list_binary_call(ValueType type, const char *suffix, const char *arg0, const char *arg1);
+char *codegen_list_ternary_call(
+    ValueType type,
+    const char *suffix,
+    const char *arg0,
+    const char *arg1,
+    const char *arg2);
 void codegen_build_union_base_name(char *buffer, size_t size, ValueType type);
 void codegen_build_union_tag_name(char *buffer, size_t size, ValueType type);
 void codegen_build_union_enum_value_name(char *buffer, size_t size, ValueType union_type, ValueType member);

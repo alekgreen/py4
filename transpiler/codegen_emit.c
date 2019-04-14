@@ -181,16 +181,17 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
         if (target->kind == NODE_INDEX) {
             ValueType list_type = semantic_type_of(ctx->semantic, target->children[0]);
             ValueType element_type = semantic_list_element_type(list_type);
-            const char *prefix = codegen_list_runtime_prefix(list_type);
             char *base = codegen_primary_to_c_string(ctx, target->children[0]);
             char *index = codegen_expression_to_c_string(ctx, target->children[1]);
             char *value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
+            char *call = codegen_list_ternary_call(list_type, "set", base, index, value);
 
             codegen_emit_indent(ctx);
-            fprintf(ctx->out, "%s_set(%s, %s, %s);\n", prefix, base, index, value);
+            fprintf(ctx->out, "%s;\n", call);
             free(base);
             free(index);
             free(value);
+            free(call);
             return;
         }
 
@@ -434,7 +435,6 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     const ParseNode *suite = codegen_expect_child(for_stmt, 3, NODE_SUITE);
     ValueType iterable_type;
     ValueType element_type;
-    const char *prefix;
     char *iterable_expr;
     char *iterable_name;
     char *iterable_type_name;
@@ -448,7 +448,6 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
 
     iterable_type = semantic_type_of(ctx->semantic, iterable);
     element_type = semantic_list_element_type(iterable_type);
-    prefix = codegen_list_runtime_prefix(iterable_type);
     iterable_expr = codegen_wrapped_expression_to_c_string(ctx, iterable, iterable_type);
     iterable_name = codegen_next_temp_name(ctx);
     iterable_type_name = codegen_type_to_c_string(iterable_type);
@@ -465,17 +464,26 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
         codegen_emit_ref_incref(ctx, iterable_type, iterable_name);
     }
 
-    codegen_emit_indent(ctx);
-    fprintf(ctx->out,
-        "for (int %s = 0; %s < %s_len(%s); %s++)\n",
-        index_name, index_name, prefix, iterable_name, index_name);
+    {
+        char *len_call = codegen_list_unary_call(iterable_type, "len", iterable_name);
+
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out,
+            "for (int %s = 0; %s < %s; %s++)\n",
+            index_name, index_name, len_call, index_name);
+        free(len_call);
+    }
     codegen_emit_indent(ctx);
     fputs("{\n", ctx->out);
     ctx->indent_level++;
-    codegen_emit_indent(ctx);
-    codegen_emit_type_name(ctx, element_type);
-    fprintf(ctx->out, " %s = %s_get(%s, %s);\n",
-        target->value, prefix, iterable_name, index_name);
+    {
+        char *get_call = codegen_list_binary_call(iterable_type, "get", iterable_name, index_name);
+
+        codegen_emit_indent(ctx);
+        codegen_emit_type_name(ctx, element_type);
+        fprintf(ctx->out, " %s = %s;\n", target->value, get_call);
+        free(get_call);
+    }
     codegen_push_cleanup_scope(ctx);
     codegen_emit_suite(ctx, suite);
     codegen_pop_cleanup_scope(ctx);
@@ -726,16 +734,17 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             if (name->kind == NODE_INDEX) {
                 ValueType list_type = semantic_type_of(ctx->semantic, name->children[0]);
                 ValueType element_type = semantic_list_element_type(list_type);
-                const char *prefix = codegen_list_runtime_prefix(list_type);
                 char *base = codegen_primary_to_c_string(ctx, name->children[0]);
                 char *index = codegen_expression_to_c_string(ctx, name->children[1]);
                 char *value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
+                char *call = codegen_list_ternary_call(list_type, "set", base, index, value);
 
                 codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s_set(%s, %s, %s);\n", prefix, base, index, value);
+                fprintf(ctx->out, "%s;\n", call);
                 free(base);
                 free(index);
                 free(value);
+                free(call);
                 continue;
             }
 
