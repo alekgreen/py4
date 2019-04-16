@@ -39,6 +39,8 @@ const char *codegen_list_struct_name(ValueType type)
             return "Py4ListInt";
         case TYPE_LIST_FLOAT:
             return "Py4ListFloat";
+        case TYPE_LIST_BOOL:
+            return "Py4ListBool";
         default:
             codegen_error("%s is not a supported list type", semantic_type_name(type));
             return "";
@@ -52,6 +54,8 @@ const char *codegen_list_runtime_prefix(ValueType type)
             return "py4_list_int";
         case TYPE_LIST_FLOAT:
             return "py4_list_float";
+        case TYPE_LIST_BOOL:
+            return "py4_list_bool";
         default:
             codegen_error("%s is not a supported list type", semantic_type_name(type));
             return "";
@@ -65,6 +69,8 @@ const char *codegen_list_element_c_type(ValueType type)
             return "int";
         case TYPE_FLOAT:
             return "double";
+        case TYPE_BOOL:
+            return "bool";
         default:
             codegen_error("%s does not have a supported list element C type", semantic_type_name(type));
             return "";

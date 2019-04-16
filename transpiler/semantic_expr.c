@@ -87,6 +87,7 @@ static int is_builtin_name(const char *name)
     return strcmp(name, "len") == 0 ||
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
+        strcmp(name, "list_bool") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -173,6 +174,12 @@ static ValueType infer_builtin_call_type(
         expect_argument_count(name, arguments, 0);
         semantic_record_node_type(info, call, TYPE_LIST_FLOAT);
         return TYPE_LIST_FLOAT;
+    }
+
+    if (strcmp(name, "list_bool") == 0) {
+        expect_argument_count(name, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_LIST_BOOL);
+        return TYPE_LIST_BOOL;
     }
 
     if (strcmp(name, "list_append") == 0) {
@@ -327,6 +334,8 @@ ValueType semantic_infer_primary_type(
 
     if (node->kind == NODE_LIST_LITERAL) {
         int saw_float = 0;
+        int saw_bool = 0;
+        int saw_int = 0;
 
         for (size_t i = 0; i < node->child_count; i++) {
             ValueType item_type = semantic_infer_expression_type(info, node->children[i], scope);
@@ -335,9 +344,23 @@ ValueType semantic_infer_primary_type(
                 saw_float = 1;
                 continue;
             }
-            if (item_type != TYPE_INT) {
-                semantic_error("list literals currently support only int and float elements");
+            if (item_type == TYPE_BOOL) {
+                saw_bool = 1;
+                continue;
             }
+            if (item_type == TYPE_INT) {
+                saw_int = 1;
+                continue;
+            }
+            semantic_error("list literals currently support only int, float, and bool elements");
+        }
+
+        if ((saw_float && saw_bool) || (saw_bool && saw_int)) {
+            semantic_error("list literals cannot mix bool elements with numeric elements");
+        }
+        if (saw_bool && node->child_count > 0) {
+            semantic_record_node_type(info, node, TYPE_LIST_BOOL);
+            return TYPE_LIST_BOOL;
         }
 
         semantic_record_node_type(info, node, saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT);

@@ -96,8 +96,10 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
         if (!parse_is_type_token(member_tok)) {
             parse_error(member_tok, "expected type name inside list[...]");
         }
-        if (strcmp(member_tok.value, "int") != 0 && strcmp(member_tok.value, "float") != 0) {
-            parse_error(member_tok, "only list[int] and list[float] are supported right now");
+        if (strcmp(member_tok.value, "int") != 0 &&
+            strcmp(member_tok.value, "float") != 0 &&
+            strcmp(member_tok.value, "bool") != 0) {
+            parse_error(member_tok, "only list[int], list[float], and list[bool] are supported right now");
         }
         expect(ts, TOKEN_RBRACKET);
 
