@@ -12,6 +12,8 @@
 static const char *KEYWORDS[] = {
     "def",
     "return",
+    "break",
+    "continue",
     "import",
     "if",
     "while",

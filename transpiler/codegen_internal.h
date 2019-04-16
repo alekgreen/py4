@@ -11,6 +11,7 @@
 #define MAX_NAME_LEN 128
 #define MAX_REF_LOCALS 256
 #define MAX_SCOPE_DEPTH 128
+#define MAX_LOOP_DEPTH 128
 
 typedef struct {
     ValueType from_type;
@@ -42,6 +43,8 @@ typedef struct {
     size_t ref_local_count;
     size_t cleanup_scope_starts[MAX_SCOPE_DEPTH];
     size_t cleanup_scope_count;
+    int loop_ids[MAX_LOOP_DEPTH];
+    size_t loop_count;
 } CodegenContext;
 
 extern const ValueType CODEGEN_ORDERED_TYPES[];

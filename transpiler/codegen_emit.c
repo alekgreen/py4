@@ -154,12 +154,53 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
     }
 }
 
+static void codegen_push_loop(CodegenContext *ctx, int loop_id)
+{
+    if (ctx->loop_count >= MAX_LOOP_DEPTH) {
+        codegen_error("loop nesting too deep");
+    }
+    ctx->loop_ids[ctx->loop_count++] = loop_id;
+}
+
+static void codegen_pop_loop(CodegenContext *ctx)
+{
+    if (ctx->loop_count == 0) {
+        codegen_error("loop stack underflow");
+    }
+    ctx->loop_count--;
+}
+
+static void emit_loop_jump(CodegenContext *ctx, const char *keyword, int action)
+{
+    int loop_id;
+
+    if (ctx->loop_count == 0) {
+        codegen_error("%s is not valid outside a loop", keyword);
+    }
+
+    loop_id = ctx->loop_ids[ctx->loop_count - 1];
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "py4_loop_action_%d = %d;\n", loop_id, action);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "goto py4_loop_cleanup_%d;\n", loop_id);
+}
+
 static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *simple_stmt)
 {
     const ParseNode *first_child = simple_stmt->children[0];
 
     if (first_child->kind == NODE_RETURN_STATEMENT) {
         emit_return_statement(ctx, first_child);
+        return;
+    }
+
+    if (first_child->kind == NODE_BREAK_STATEMENT) {
+        emit_loop_jump(ctx, "break", 1);
+        return;
+    }
+
+    if (first_child->kind == NODE_CONTINUE_STATEMENT) {
+        emit_loop_jump(ctx, "continue", 2);
         return;
     }
 
@@ -302,6 +343,7 @@ static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
 static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stmt)
 {
     char *cond = codegen_expression_to_c_string(ctx, while_stmt->children[0]);
+    int loop_id = ctx->temp_counter++;
 
     codegen_emit_indent(ctx);
     fprintf(ctx->out, "while (%s)\n", cond);
@@ -309,9 +351,31 @@ static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stm
     codegen_emit_indent(ctx);
     fputs("{\n", ctx->out);
     ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int py4_loop_action_%d = 0;\n", loop_id);
     codegen_push_cleanup_scope(ctx);
+    codegen_push_loop(ctx, loop_id);
     codegen_emit_suite(ctx, while_stmt->children[2]);
+    codegen_pop_loop(ctx);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "py4_loop_cleanup_%d:\n", loop_id);
     codegen_pop_cleanup_scope(ctx);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (py4_loop_action_%d == 1) {\n", loop_id);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("break;\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (py4_loop_action_%d == 2) {\n", loop_id);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("continue;\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
     ctx->indent_level--;
     codegen_emit_indent(ctx);
     fputs("}\n", ctx->out);
@@ -360,6 +424,7 @@ static void emit_range_for_statement(CodegenContext *ctx, const ParseNode *for_s
     char *stop_name;
     char *step_name;
     char *index_name;
+    int loop_id = ctx->temp_counter++;
 
     if (arg_count < 1 || arg_count > 3) {
         codegen_error("function 'range' expects 1 to 3 arguments");
@@ -409,10 +474,32 @@ static void emit_range_for_statement(CodegenContext *ctx, const ParseNode *for_s
     fputs("{\n", ctx->out);
     ctx->indent_level++;
     codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int py4_loop_action_%d = 0;\n", loop_id);
+    codegen_emit_indent(ctx);
     fprintf(ctx->out, "int %s = %s;\n", target->value, index_name);
     codegen_push_cleanup_scope(ctx);
+    codegen_push_loop(ctx, loop_id);
     codegen_emit_suite(ctx, suite);
+    codegen_pop_loop(ctx);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "py4_loop_cleanup_%d:\n", loop_id);
     codegen_pop_cleanup_scope(ctx);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (py4_loop_action_%d == 1) {\n", loop_id);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("break;\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (py4_loop_action_%d == 2) {\n", loop_id);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("continue;\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
     ctx->indent_level--;
     codegen_emit_indent(ctx);
     fputs("}\n", ctx->out);
@@ -441,6 +528,7 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     char *iterable_type_name;
     char *index_name;
     int iterable_owned;
+    int loop_id = ctx->temp_counter++;
 
     if (is_range_expression(iterable)) {
         emit_range_for_statement(ctx, for_stmt);
@@ -477,6 +565,8 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     codegen_emit_indent(ctx);
     fputs("{\n", ctx->out);
     ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "int py4_loop_action_%d = 0;\n", loop_id);
     {
         char *get_call = codegen_list_binary_call(iterable_type, "get", iterable_name, index_name);
 
@@ -486,8 +576,28 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
         free(get_call);
     }
     codegen_push_cleanup_scope(ctx);
+    codegen_push_loop(ctx, loop_id);
     codegen_emit_suite(ctx, suite);
+    codegen_pop_loop(ctx);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "py4_loop_cleanup_%d:\n", loop_id);
     codegen_pop_cleanup_scope(ctx);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (py4_loop_action_%d == 1) {\n", loop_id);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("break;\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (py4_loop_action_%d == 2) {\n", loop_id);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("continue;\n", ctx->out);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
     ctx->indent_level--;
     codegen_emit_indent(ctx);
     fputs("}\n", ctx->out);
@@ -727,6 +837,10 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
             if (payload->children[0]->kind == NODE_RETURN_STATEMENT) {
                 codegen_error("return is not valid at module scope");
+            }
+            if (payload->children[0]->kind == NODE_BREAK_STATEMENT ||
+                payload->children[0]->kind == NODE_CONTINUE_STATEMENT) {
+                codegen_error("break and continue are not valid at module scope");
             }
 
             name = codegen_simple_statement_target(payload);

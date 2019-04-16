@@ -67,7 +67,7 @@ static void typecheck_return_statement(
     Scope *scope,
     FunctionContext *current_function)
 {
-    if (current_function == NULL) {
+    if (current_function == NULL || current_function->name == NULL) {
         semantic_error("return is only valid inside a function");
     }
 
@@ -109,6 +109,20 @@ static void typecheck_simple_statement(
 
     if (first_child->kind == NODE_RETURN_STATEMENT) {
         typecheck_return_statement(info, first_child, scope, current_function);
+        return;
+    }
+
+    if (first_child->kind == NODE_BREAK_STATEMENT) {
+        if (current_function == NULL || current_function->loop_depth <= 0) {
+            semantic_error("break is only valid inside a loop");
+        }
+        return;
+    }
+
+    if (first_child->kind == NODE_CONTINUE_STATEMENT) {
+        if (current_function == NULL || current_function->loop_depth <= 0) {
+            semantic_error("continue is only valid inside a loop");
+        }
         return;
     }
 
@@ -244,7 +258,13 @@ static void typecheck_while_statement(
         semantic_error("while condition must be bool");
     }
 
+    if (current_function == NULL) {
+        semantic_error("internal error: loop context missing for while");
+    }
+
+    current_function->loop_depth++;
     typecheck_branch_suite(info, while_stmt->children[2], scope, current_function);
+    current_function->loop_depth--;
 }
 
 static int range_argument_count(const ParseNode *arguments)
@@ -324,10 +344,16 @@ static void typecheck_for_statement(
         target_type = semantic_list_element_type(iterable_type);
     }
 
+    if (current_function == NULL) {
+        semantic_error("internal error: loop context missing for for");
+    }
+
     loop_scope.parent = scope;
     semantic_bind_variable(&loop_scope, target->value, target_type);
     semantic_record_node_type(info, target, target_type);
+    current_function->loop_depth++;
     typecheck_suite(info, for_stmt->children[3], &loop_scope, current_function);
+    current_function->loop_depth--;
     semantic_free_scope_bindings(loop_scope.vars);
 }
 
@@ -383,6 +409,7 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
     local_scope.parent = global_scope;
     current.name = semantic_expect_child(function_def, 0, NODE_PRIMARY)->value;
     current.return_type = semantic_function_return_type(info, function_def);
+    current.loop_depth = 0;
 
     if (!(parameters->child_count == 1 && semantic_is_epsilon_node(parameters->children[0]))) {
         for (size_t i = 0; i < parameters->child_count; i++) {
@@ -463,13 +490,15 @@ SemanticInfo *analyze_program(const ParseNode *root)
 
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = semantic_statement_payload(root->children[i]);
+        FunctionContext module_context = {0};
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             semantic_error("imports should be resolved before semantic analysis");
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
         } else {
-            typecheck_statement(info, root->children[i], &global_scope, NULL, 0);
+            module_context.loop_depth = 0;
+            typecheck_statement(info, root->children[i], &global_scope, &module_context, 0);
         }
     }
 

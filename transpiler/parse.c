@@ -97,6 +97,8 @@ static ParseNode *parse_statement_list(TokenStream *ts, TokenType terminator, No
 static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts);
 static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts);
+static ParseNode *parse_BREAK_STATEMENT(TokenStream *ts);
+static ParseNode *parse_CONTINUE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
 static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FOR_STATEMENT(TokenStream *ts);
@@ -159,6 +161,8 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_SIMPLE_STATEMENT:     return "SIMPLE_STATEMENT";
         case NODE_IMPORT_STATEMENT:     return "IMPORT_STATEMENT";
         case NODE_RETURN_STATEMENT:     return "RETURN_STATEMENT";
+        case NODE_BREAK_STATEMENT:      return "BREAK_STATEMENT";
+        case NODE_CONTINUE_STATEMENT:   return "CONTINUE_STATEMENT";
         case NODE_IF_STATEMENT:         return "IF_STATEMENT";
         case NODE_WHILE_STATEMENT:      return "WHILE_STATEMENT";
         case NODE_FOR_STATEMENT:        return "FOR_STATEMENT";
@@ -336,6 +340,16 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
         return node;
     }
 
+    if (parse_is_keyword_token(first, "break")) {
+        add_child(node, parse_BREAK_STATEMENT(ts));
+        return node;
+    }
+
+    if (parse_is_keyword_token(first, "continue")) {
+        add_child(node, parse_CONTINUE_STATEMENT(ts));
+        return node;
+    }
+
     if (first.type == TOKEN_IDENTIFIER) {
         ParseNode *target = parse_ASSIGN_TARGET(ts);
         Token look = peek_ts(ts);
@@ -368,6 +382,18 @@ static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts)
 
     add_child(node, parse_EXPRESSION(ts));
     return node;
+}
+
+static ParseNode *parse_BREAK_STATEMENT(TokenStream *ts)
+{
+    parse_expect_keyword(ts, "break");
+    return create_node(NODE_BREAK_STATEMENT, TOKEN_KEYWORD, "break");
+}
+
+static ParseNode *parse_CONTINUE_STATEMENT(TokenStream *ts)
+{
+    parse_expect_keyword(ts, "continue");
+    return create_node(NODE_CONTINUE_STATEMENT, TOKEN_KEYWORD, "continue");
 }
 
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts)
