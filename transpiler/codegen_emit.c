@@ -64,6 +64,7 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         case TYPE_LIST_INT:
         case TYPE_LIST_FLOAT:
         case TYPE_LIST_BOOL:
+        case TYPE_LIST_CHAR:
             free(arg_text);
             codegen_error("print does not support %s yet", semantic_type_name(arg_type));
             return;

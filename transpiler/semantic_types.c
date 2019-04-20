@@ -29,6 +29,7 @@ static const char *type_member_name(ValueType type)
         case TYPE_LIST_INT: return "list[int]";
         case TYPE_LIST_FLOAT: return "list[float]";
         case TYPE_LIST_BOOL: return "list[bool]";
+        case TYPE_LIST_CHAR: return "list[char]";
         default: return "unknown";
     }
 }
@@ -62,6 +63,9 @@ static ValueType parse_type_atom_name(const char *name)
     if (strcmp(name, "list[bool]") == 0) {
         return TYPE_LIST_BOOL;
     }
+    if (strcmp(name, "list[char]") == 0) {
+        return TYPE_LIST_CHAR;
+    }
 
     semantic_error("unsupported type '%s'", name);
     return 0;
@@ -79,12 +83,18 @@ int semantic_type_is_union(ValueType type)
 
 int semantic_type_is_ref(ValueType type)
 {
-    return type == TYPE_LIST_INT || type == TYPE_LIST_FLOAT || type == TYPE_LIST_BOOL;
+    return type == TYPE_LIST_INT ||
+        type == TYPE_LIST_FLOAT ||
+        type == TYPE_LIST_BOOL ||
+        type == TYPE_LIST_CHAR;
 }
 
 int semantic_type_is_list(ValueType type)
 {
-    return type == TYPE_LIST_INT || type == TYPE_LIST_FLOAT || type == TYPE_LIST_BOOL;
+    return type == TYPE_LIST_INT ||
+        type == TYPE_LIST_FLOAT ||
+        type == TYPE_LIST_BOOL ||
+        type == TYPE_LIST_CHAR;
 }
 
 ValueType semantic_list_element_type(ValueType type)
@@ -96,6 +106,8 @@ ValueType semantic_list_element_type(ValueType type)
             return TYPE_FLOAT;
         case TYPE_LIST_BOOL:
             return TYPE_BOOL;
+        case TYPE_LIST_CHAR:
+            return TYPE_CHAR;
         default:
             semantic_error("%s is not a list type", semantic_type_name(type));
             return TYPE_NONE;
@@ -118,7 +130,8 @@ const char *semantic_type_name(ValueType type)
         TYPE_NONE,
         TYPE_LIST_INT,
         TYPE_LIST_FLOAT,
-        TYPE_LIST_BOOL
+        TYPE_LIST_BOOL,
+        TYPE_LIST_CHAR
     };
 
     if (type == TYPE_INT || type == TYPE_FLOAT || type == TYPE_BOOL ||
@@ -202,7 +215,8 @@ int semantic_is_assignable(ValueType target, ValueType value)
         TYPE_NONE,
         TYPE_LIST_INT,
         TYPE_LIST_FLOAT,
-        TYPE_LIST_BOOL
+        TYPE_LIST_BOOL,
+        TYPE_LIST_CHAR
     };
 
     if (target == 0 || value == 0) {
@@ -282,7 +296,8 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
 
     if ((semantic_type_contains(type, TYPE_LIST_INT) ||
          semantic_type_contains(type, TYPE_LIST_FLOAT) ||
-         semantic_type_contains(type, TYPE_LIST_BOOL)) &&
+         semantic_type_contains(type, TYPE_LIST_BOOL) ||
+         semantic_type_contains(type, TYPE_LIST_CHAR)) &&
         semantic_type_is_union(type)) {
         semantic_error("list types cannot be used inside a union yet");
     }
@@ -295,7 +310,8 @@ int semantic_builtin_returns_owned_ref(const char *name)
 {
     return strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
-        strcmp(name, "list_bool") == 0;
+        strcmp(name, "list_bool") == 0 ||
+        strcmp(name, "list_char") == 0;
 }
 
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name)

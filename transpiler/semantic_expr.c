@@ -88,6 +88,7 @@ static int is_builtin_name(const char *name)
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
+        strcmp(name, "list_char") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -180,6 +181,12 @@ static ValueType infer_builtin_call_type(
         expect_argument_count(name, arguments, 0);
         semantic_record_node_type(info, call, TYPE_LIST_BOOL);
         return TYPE_LIST_BOOL;
+    }
+
+    if (strcmp(name, "list_char") == 0) {
+        expect_argument_count(name, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_LIST_CHAR);
+        return TYPE_LIST_CHAR;
     }
 
     if (strcmp(name, "list_append") == 0) {
@@ -335,6 +342,7 @@ ValueType semantic_infer_primary_type(
     if (node->kind == NODE_LIST_LITERAL) {
         int saw_float = 0;
         int saw_bool = 0;
+        int saw_char = 0;
         int saw_int = 0;
 
         for (size_t i = 0; i < node->child_count; i++) {
@@ -348,19 +356,30 @@ ValueType semantic_infer_primary_type(
                 saw_bool = 1;
                 continue;
             }
+            if (item_type == TYPE_CHAR) {
+                saw_char = 1;
+                continue;
+            }
             if (item_type == TYPE_INT) {
                 saw_int = 1;
                 continue;
             }
-            semantic_error("list literals currently support only int, float, and bool elements");
+            semantic_error("list literals currently support only int, float, bool, and char elements");
         }
 
         if ((saw_float && saw_bool) || (saw_bool && saw_int)) {
             semantic_error("list literals cannot mix bool elements with numeric elements");
         }
+        if (saw_char && (saw_int || saw_float || saw_bool)) {
+            semantic_error("list literals cannot mix char elements with non-char elements");
+        }
         if (saw_bool && node->child_count > 0) {
             semantic_record_node_type(info, node, TYPE_LIST_BOOL);
             return TYPE_LIST_BOOL;
+        }
+        if (saw_char && node->child_count > 0) {
+            semantic_record_node_type(info, node, TYPE_LIST_CHAR);
+            return TYPE_LIST_CHAR;
         }
 
         semantic_record_node_type(info, node, saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT);

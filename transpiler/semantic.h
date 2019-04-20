@@ -14,7 +14,8 @@ enum {
     TYPE_NONE = 1u << 5,
     TYPE_LIST_INT = 1u << 6,
     TYPE_LIST_FLOAT = 1u << 7,
-    TYPE_LIST_BOOL = 1u << 8
+    TYPE_LIST_BOOL = 1u << 8,
+    TYPE_LIST_CHAR = 1u << 9
 };
 
 typedef struct SemanticInfo SemanticInfo;

@@ -47,6 +47,7 @@ static int is_list_builtin_name(const char *name)
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
+        strcmp(name, "list_char") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -234,6 +235,9 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         }
         if (strcmp(callee->value, "list_bool") == 0) {
             return codegen_list_new_call(TYPE_LIST_BOOL);
+        }
+        if (strcmp(callee->value, "list_char") == 0) {
+            return codegen_list_new_call(TYPE_LIST_CHAR);
         }
     } else {
         function_def = codegen_find_function_definition(ctx->root, callee->value);

@@ -14,7 +14,8 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
     TYPE_NONE,
     TYPE_LIST_INT,
     TYPE_LIST_FLOAT,
-    TYPE_LIST_BOOL
+    TYPE_LIST_BOOL,
+    TYPE_LIST_CHAR
 };
 
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
@@ -171,6 +172,7 @@ const char *codegen_type_suffix(ValueType type)
         case TYPE_LIST_INT: return "list_int";
         case TYPE_LIST_FLOAT: return "list_float";
         case TYPE_LIST_BOOL: return "list_bool";
+        case TYPE_LIST_CHAR: return "list_char";
         default: return "unknown";
     }
 }
@@ -186,6 +188,7 @@ const char *codegen_type_field(ValueType type)
         case TYPE_LIST_INT: return "as_list_int";
         case TYPE_LIST_FLOAT: return "as_list_float";
         case TYPE_LIST_BOOL: return "as_list_bool";
+        case TYPE_LIST_CHAR: return "as_list_char";
         default: return "";
     }
 }
@@ -205,6 +208,7 @@ static int is_codegen_builtin_name(const char *name)
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
+        strcmp(name, "list_char") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -286,6 +290,7 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         case TYPE_LIST_INT:
         case TYPE_LIST_FLOAT:
         case TYPE_LIST_BOOL:
+        case TYPE_LIST_CHAR:
             fprintf(out, "%s *", codegen_list_struct_name(type));
             return;
         default:
@@ -308,6 +313,7 @@ char *codegen_type_to_c_string(ValueType type)
             case TYPE_LIST_INT:
             case TYPE_LIST_FLOAT:
             case TYPE_LIST_BOOL:
+            case TYPE_LIST_CHAR:
                 return codegen_dup_printf("%s *", codegen_list_struct_name(type));
         }
     }
