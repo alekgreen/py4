@@ -36,29 +36,35 @@ const ParseNode *semantic_statement_tail_type_node(const ParseNode *statement_ta
     return semantic_expect_child(statement_tail, 1, NODE_TYPE);
 }
 
-static void typecheck_statement(
+static int typecheck_statement(
     SemanticInfo *info,
     const ParseNode *statement,
     Scope *scope,
     FunctionContext *current_function,
     int allow_function_defs);
 
-static void typecheck_branch_suite(
+static int typecheck_branch_suite(
     SemanticInfo *info,
     const ParseNode *suite,
     Scope *parent_scope,
     FunctionContext *current_function)
 {
     Scope branch_scope = {0};
+    int returns = 0;
 
     branch_scope.parent = parent_scope;
     if (!(suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0]))) {
         for (size_t i = 0; i < suite->child_count; i++) {
-            typecheck_statement(info, suite->children[i], &branch_scope, current_function, 0);
+            if (!returns) {
+                returns = typecheck_statement(info, suite->children[i], &branch_scope, current_function, 0);
+            } else {
+                (void)typecheck_statement(info, suite->children[i], &branch_scope, current_function, 0);
+            }
         }
     }
 
     semantic_free_scope_bindings(branch_scope.vars);
+    return returns;
 }
 
 static void typecheck_return_statement(
@@ -70,8 +76,6 @@ static void typecheck_return_statement(
     if (current_function == NULL || current_function->name == NULL) {
         semantic_error("return is only valid inside a function");
     }
-
-    current_function->saw_return = 1;
 
     if (return_stmt->child_count != 1) {
         semantic_error("malformed return statement");
@@ -99,7 +103,7 @@ static void typecheck_return_statement(
     }
 }
 
-static void typecheck_simple_statement(
+static int typecheck_simple_statement(
     SemanticInfo *info,
     const ParseNode *simple_stmt,
     Scope *scope,
@@ -109,26 +113,26 @@ static void typecheck_simple_statement(
 
     if (first_child->kind == NODE_RETURN_STATEMENT) {
         typecheck_return_statement(info, first_child, scope, current_function);
-        return;
+        return 1;
     }
 
     if (first_child->kind == NODE_BREAK_STATEMENT) {
         if (current_function == NULL || current_function->loop_depth <= 0) {
             semantic_error("break is only valid inside a loop");
         }
-        return;
+        return 0;
     }
 
     if (first_child->kind == NODE_CONTINUE_STATEMENT) {
         if (current_function == NULL || current_function->loop_depth <= 0) {
             semantic_error("continue is only valid inside a loop");
         }
-        return;
+        return 0;
     }
 
     if (first_child->kind == NODE_EXPRESSION_STATEMENT) {
         semantic_infer_expression_type(info, semantic_expect_child(first_child, 0, NODE_EXPRESSION), scope);
-        return;
+        return 0;
     }
 
     if (simple_stmt->child_count != 2) {
@@ -164,7 +168,7 @@ static void typecheck_simple_statement(
         }
 
         semantic_record_node_type(info, target, element_type);
-        return;
+        return 0;
     }
 
     if (semantic_is_type_assignment(statement_tail)) {
@@ -178,7 +182,7 @@ static void typecheck_simple_statement(
         }
         semantic_bind_variable(scope, target->value, declared);
         semantic_record_node_type(info, target, declared);
-        return;
+        return 0;
     }
 
     VariableBinding *var = semantic_find_variable(scope, target->value);
@@ -194,59 +198,78 @@ static void typecheck_simple_statement(
     }
 
     semantic_record_node_type(info, target, var->type);
+    return 0;
 }
 
-static void typecheck_suite(
+static int typecheck_suite(
     SemanticInfo *info,
     const ParseNode *suite,
     Scope *scope,
     FunctionContext *current_function)
 {
+    int returns = 0;
+
     if (suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0])) {
-        return;
+        return 0;
     }
 
     for (size_t i = 0; i < suite->child_count; i++) {
-        typecheck_statement(info, suite->children[i], scope, current_function, 0);
+        if (!returns) {
+            returns = typecheck_statement(info, suite->children[i], scope, current_function, 0);
+        } else {
+            (void)typecheck_statement(info, suite->children[i], scope, current_function, 0);
+        }
     }
+
+    return returns;
 }
 
-static void typecheck_if_statement(
+static int typecheck_if_statement(
     SemanticInfo *info,
     const ParseNode *if_stmt,
     Scope *scope,
     FunctionContext *current_function)
 {
     ValueType condition_type = semantic_infer_expression_type(info, if_stmt->children[0], scope);
+    int if_returns;
+    int saw_else = 0;
 
     if (condition_type != TYPE_BOOL) {
         semantic_error("if condition must be bool");
     }
 
-    typecheck_branch_suite(info, if_stmt->children[2], scope, current_function);
+    if_returns = typecheck_branch_suite(info, if_stmt->children[2], scope, current_function);
 
     for (size_t i = 3; i < if_stmt->child_count; i++) {
         const ParseNode *branch = if_stmt->children[i];
 
         if (branch->kind == NODE_ELIF_CLAUSE) {
             ValueType elif_type = semantic_infer_expression_type(info, branch->children[0], scope);
+            int branch_returns;
+
             if (elif_type != TYPE_BOOL) {
                 semantic_error("elif condition must be bool");
             }
-            typecheck_branch_suite(info, branch->children[2], scope, current_function);
+            branch_returns = typecheck_branch_suite(info, branch->children[2], scope, current_function);
+            if_returns = if_returns && branch_returns;
             continue;
         }
 
         if (branch->kind == NODE_ELSE_CLAUSE) {
-            typecheck_branch_suite(info, branch->children[1], scope, current_function);
-            continue;
+            int else_returns;
+
+            saw_else = 1;
+            else_returns = typecheck_branch_suite(info, branch->children[1], scope, current_function);
+            return if_returns && else_returns;
         }
 
         semantic_error("malformed if statement");
     }
+
+    return saw_else ? if_returns : 0;
 }
 
-static void typecheck_while_statement(
+static int typecheck_while_statement(
     SemanticInfo *info,
     const ParseNode *while_stmt,
     Scope *scope,
@@ -265,6 +288,7 @@ static void typecheck_while_statement(
     current_function->loop_depth++;
     typecheck_branch_suite(info, while_stmt->children[2], scope, current_function);
     current_function->loop_depth--;
+    return 0;
 }
 
 static int range_argument_count(const ParseNode *arguments)
@@ -317,7 +341,7 @@ static void typecheck_range_expression(
     }
 }
 
-static void typecheck_for_statement(
+static int typecheck_for_statement(
     SemanticInfo *info,
     const ParseNode *for_stmt,
     Scope *scope,
@@ -355,6 +379,7 @@ static void typecheck_for_statement(
     typecheck_suite(info, for_stmt->children[3], &loop_scope, current_function);
     current_function->loop_depth--;
     semantic_free_scope_bindings(loop_scope.vars);
+    return 0;
 }
 
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
@@ -418,17 +443,19 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
         }
     }
 
-    typecheck_suite(info, suite, &local_scope, &current);
+    {
+        int returns = typecheck_suite(info, suite, &local_scope, &current);
 
-    if (current.return_type != TYPE_NONE && !current.saw_return) {
-        semantic_error("function '%s' must return %s",
-            current.name, semantic_type_name(current.return_type));
+        if (current.return_type != TYPE_NONE && !returns) {
+            semantic_error("function '%s' must return %s on all paths",
+                current.name, semantic_type_name(current.return_type));
+        }
     }
 
     semantic_free_scope_bindings(local_scope.vars);
 }
 
-static void typecheck_statement(
+static int typecheck_statement(
     SemanticInfo *info,
     const ParseNode *statement,
     Scope *scope,
@@ -442,7 +469,7 @@ static void typecheck_statement(
             semantic_error("nested function definitions are not supported");
         }
         typecheck_function(info, payload, scope);
-        return;
+        return 0;
     }
 
     if (payload->kind == NODE_IMPORT_STATEMENT) {
@@ -450,25 +477,22 @@ static void typecheck_statement(
     }
 
     if (payload->kind == NODE_WHILE_STATEMENT) {
-        typecheck_while_statement(info, payload, scope, current_function);
-        return;
+        return typecheck_while_statement(info, payload, scope, current_function);
     }
 
     if (payload->kind == NODE_FOR_STATEMENT) {
-        typecheck_for_statement(info, payload, scope, current_function);
-        return;
+        return typecheck_for_statement(info, payload, scope, current_function);
     }
 
     if (semantic_is_if_statement(payload)) {
-        typecheck_if_statement(info, payload, scope, current_function);
-        return;
+        return typecheck_if_statement(info, payload, scope, current_function);
     }
 
     if (payload->kind != NODE_SIMPLE_STATEMENT) {
         semantic_error("unsupported statement node");
     }
 
-    typecheck_simple_statement(info, payload, scope, current_function);
+    return typecheck_simple_statement(info, payload, scope, current_function);
 }
 
 SemanticInfo *analyze_program(const ParseNode *root)

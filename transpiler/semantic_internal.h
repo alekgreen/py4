@@ -26,7 +26,6 @@ typedef struct FunctionInfo {
 typedef struct {
     const char *name;
     ValueType return_type;
-    int saw_return;
     int loop_depth;
 } FunctionContext;
 
