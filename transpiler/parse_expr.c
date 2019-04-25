@@ -31,19 +31,19 @@ static ParseNode *wrap_expression(ParseNode *node)
 
 static ParseNode *make_unary_expression(Token op, ParseNode *operand)
 {
-    ParseNode *expr = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+    ParseNode *expr = create_node_from_token(NODE_EXPRESSION, op);
 
-    add_child(expr, create_node(NODE_OPERATOR, op.type, op.value));
+    add_child(expr, create_node_from_token(NODE_OPERATOR, op));
     add_child(expr, operand);
     return expr;
 }
 
 static ParseNode *make_binary_expression(ParseNode *lhs, Token op, ParseNode *rhs)
 {
-    ParseNode *expr = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
+    ParseNode *expr = create_node_from_token(NODE_EXPRESSION, op);
 
     add_child(expr, lhs);
-    add_child(expr, create_node(NODE_OPERATOR, op.type, op.value));
+    add_child(expr, create_node_from_token(NODE_OPERATOR, op));
     add_child(expr, rhs);
     return expr;
 }
@@ -106,11 +106,15 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
 
         type_name = parse_join_type_name("list", member_tok.value);
         node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
+        node->line = type_tok.line;
+        node->column = type_tok.column;
+        node->source_path = parse_dup_string(type_tok.path);
+        node->source_line = parse_dup_string(type_tok.line_text);
         free(type_name);
         return node;
     }
 
-    return create_node(NODE_PRIMARY, type_tok.type, type_tok.value);
+    return create_node_from_token(NODE_PRIMARY, type_tok);
 }
 
 ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
@@ -119,7 +123,7 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
     ParseNode *index_node;
     Token tok = expect(ts, TOKEN_IDENTIFIER);
 
-    node = create_node(NODE_PRIMARY, tok.type, tok.value);
+    node = create_node_from_token(NODE_PRIMARY, tok);
     while (peek_ts(ts).type == TOKEN_LBRACKET) {
         expect(ts, TOKEN_LBRACKET);
         index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
@@ -191,7 +195,7 @@ static ParseNode *parse_COMPARISON(TokenStream *ts)
         Token op = get_from_ts(ts);
         ParseNode *rhs = parse_TERM(ts);
 
-        add_child(node, create_node(NODE_OPERATOR, op.type, op.value));
+        add_child(node, create_node_from_token(NODE_OPERATOR, op));
         add_child(node, rhs);
     }
 
@@ -268,12 +272,12 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     if (tok.type == TOKEN_NUMBER || tok.type == TOKEN_STRING || tok.type == TOKEN_CHAR ||
         parse_is_bool_literal(tok)) {
         tok = get_from_ts(ts);
-        return create_node(NODE_PRIMARY, tok.type, tok.value);
+        return create_node_from_token(NODE_PRIMARY, tok);
     }
 
     if (tok.type == TOKEN_IDENTIFIER) {
         tok = get_from_ts(ts);
-        base = create_node(NODE_PRIMARY, tok.type, tok.value);
+        base = create_node_from_token(NODE_PRIMARY, tok);
     } else if (tok.type == TOKEN_LPAREN) {
         expect(ts, TOKEN_LPAREN);
         base = parse_EXPRESSION(ts);
@@ -310,7 +314,7 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
             method_name = expect(ts, TOKEN_IDENTIFIER);
             method_call = create_node(NODE_METHOD_CALL, TOKEN_NULL, NULL);
             add_child(method_call, base);
-            add_child(method_call, create_node(NODE_PRIMARY, method_name.type, method_name.value));
+            add_child(method_call, create_node_from_token(NODE_PRIMARY, method_name));
             expect(ts, TOKEN_LPAREN);
             add_child(method_call, parse_ARGUMENTS(ts));
             expect(ts, TOKEN_RPAREN);

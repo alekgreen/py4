@@ -12,6 +12,7 @@ int parse_is_operator_token(Token tok);
 int parse_is_type_token(Token tok);
 int parse_is_pipe_token(Token tok);
 void parse_error(Token tok, const char *message);
+void parse_error_at_node(const ParseNode *node, const char *message);
 Token parse_expect_keyword(TokenStream *ts, const char *value);
 void parse_skip_newlines(TokenStream *ts);
 

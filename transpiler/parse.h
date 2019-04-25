@@ -44,11 +44,16 @@ typedef struct ParseNode {
     NodeKind kind;
     TokenType token_type;
     char *value;
+    char *source_path;
+    char *source_line;
+    int line;
+    int column;
     struct ParseNode **children;
     size_t child_count;
 } ParseNode;
 
 ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value);
+ParseNode *create_node_from_token(NodeKind kind, Token tok);
 void add_child(ParseNode *parent, ParseNode *child);
 void free_tree(ParseNode *node);
 const char *node_kind_to_str(NodeKind kind);

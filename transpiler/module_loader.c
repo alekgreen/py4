@@ -130,7 +130,7 @@ static ParseNode *parse_file(const char *path, int show_tokens)
         exit(1);
     }
 
-    ts = lexer(fp);
+    ts = lexer(fp, path);
     if (show_tokens) {
         debug_print_ts(ts);
         reset_ts(ts);

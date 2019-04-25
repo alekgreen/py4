@@ -41,6 +41,7 @@ struct SemanticInfo {
 };
 
 void semantic_error(const char *message, ...);
+void semantic_error_at_node(const ParseNode *node, const char *message, ...);
 const ParseNode *semantic_expect_child(const ParseNode *node, size_t index, NodeKind kind);
 const ParseNode *semantic_statement_payload(const ParseNode *statement);
 int semantic_is_if_statement(const ParseNode *node);

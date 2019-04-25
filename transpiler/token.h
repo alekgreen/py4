@@ -31,6 +31,10 @@ typedef enum {
 typedef struct {
     TokenType type;
     char value[64];
+    const char *path;
+    const char *line_text;
+    int line;
+    int column;
 } Token;
 
 typedef struct {
@@ -38,10 +42,22 @@ typedef struct {
     int count;
     int capacity;
     int pos;
+    char *source_path;
+    char **source_lines;
+    int line_count;
+    int line_capacity;
 } TokenStream;
 
 Token make_token(TokenType type, const char *value);
-TokenStream *create_token_stream(void);
+Token make_token_at(
+    TokenType type,
+    const char *value,
+    const char *path,
+    int line,
+    int column,
+    const char *line_text);
+TokenStream *create_token_stream(const char *source_path);
+void add_source_line(TokenStream *ts, const char *line_text);
 void add_token_to_ts(TokenStream *ts, Token tok);
 Token peek_ts(TokenStream *ts);
 Token expect(TokenStream *ts, TokenType type);
@@ -52,5 +68,14 @@ const char *token_type_to_str(TokenType type);
 void print_token(Token tok);
 void reset_ts(TokenStream *ts);
 void debug_print_ts(const TokenStream *ts);
+void print_source_diagnostic(
+    FILE *stream,
+    const char *path,
+    int line,
+    int column,
+    const char *kind,
+    const char *message,
+    const char *line_text);
+void print_token_diagnostic(FILE *stream, Token tok, const char *kind, const char *message);
 
 #endif

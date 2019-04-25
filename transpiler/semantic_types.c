@@ -173,6 +173,53 @@ void semantic_error(const char *message, ...)
     exit(1);
 }
 
+void semantic_error_at_node(const ParseNode *node, const char *message, ...)
+{
+    va_list args;
+    va_list copy;
+    int needed;
+    char *buffer;
+
+    if (node == NULL || node->source_path == NULL || node->line <= 0 || node->column <= 0) {
+        va_start(args, message);
+        fprintf(stderr, "Type error: ");
+        vfprintf(stderr, message, args);
+        fprintf(stderr, "\n");
+        va_end(args);
+        exit(1);
+    }
+
+    va_start(args, message);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, message, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        semantic_error("failed to format type error");
+    }
+
+    buffer = malloc((size_t)needed + 1);
+    if (buffer == NULL) {
+        va_end(args);
+        perror("malloc");
+        exit(1);
+    }
+
+    vsnprintf(buffer, (size_t)needed + 1, message, args);
+    va_end(args);
+
+    print_source_diagnostic(
+        stderr,
+        node->source_path,
+        node->line,
+        node->column,
+        "Type error",
+        buffer,
+        node->source_line);
+    free(buffer);
+    exit(1);
+}
+
 const ParseNode *semantic_expect_child(const ParseNode *node, size_t index, NodeKind kind)
 {
     if (node == NULL || index >= node->child_count || node->children[index]->kind != kind) {
@@ -287,7 +334,7 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         ValueType atom = parse_type_atom_name(member->value);
 
         if (semantic_type_contains(type, atom)) {
-            semantic_error("duplicate type '%s' in union", member->value);
+            semantic_error_at_node(member, "duplicate type '%s' in union", member->value);
         }
 
         semantic_record_node_type(info, member, atom);
@@ -299,7 +346,7 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
          semantic_type_contains(type, TYPE_LIST_BOOL) ||
          semantic_type_contains(type, TYPE_LIST_CHAR)) &&
         semantic_type_is_union(type)) {
-        semantic_error("list types cannot be used inside a union yet");
+        semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
     }
 
     semantic_record_node_type(info, type_node, type);

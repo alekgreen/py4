@@ -74,7 +74,7 @@ static void typecheck_return_statement(
     FunctionContext *current_function)
 {
     if (current_function == NULL || current_function->name == NULL) {
-        semantic_error("return is only valid inside a function");
+        semantic_error_at_node(return_stmt, "return is only valid inside a function");
     }
 
     if (return_stmt->child_count != 1) {
@@ -83,7 +83,7 @@ static void typecheck_return_statement(
 
     if (semantic_is_epsilon_node(return_stmt->children[0])) {
         if (!semantic_type_contains(current_function->return_type, TYPE_NONE)) {
-            semantic_error("function '%s' must return %s",
+            semantic_error_at_node(return_stmt, "function '%s' must return %s",
                 current_function->name,
                 semantic_type_name(current_function->return_type));
         }
@@ -96,7 +96,7 @@ static void typecheck_return_statement(
         scope,
         current_function->return_type);
     if (!semantic_is_assignable(current_function->return_type, expr_type)) {
-        semantic_error("function '%s' returns %s but got %s",
+        semantic_error_at_node(return_stmt->children[0], "function '%s' returns %s but got %s",
             current_function->name,
             semantic_type_name(current_function->return_type),
             semantic_type_name(expr_type));
@@ -118,14 +118,14 @@ static int typecheck_simple_statement(
 
     if (first_child->kind == NODE_BREAK_STATEMENT) {
         if (current_function == NULL || current_function->loop_depth <= 0) {
-            semantic_error("break is only valid inside a loop");
+            semantic_error_at_node(first_child, "break is only valid inside a loop");
         }
         return 0;
     }
 
     if (first_child->kind == NODE_CONTINUE_STATEMENT) {
         if (current_function == NULL || current_function->loop_depth <= 0) {
-            semantic_error("continue is only valid inside a loop");
+            semantic_error_at_node(first_child, "continue is only valid inside a loop");
         }
         return 0;
     }
@@ -151,18 +151,18 @@ static int typecheck_simple_statement(
         expr_type = semantic_infer_expression_type(info, expr, scope);
 
         if (semantic_is_type_assignment(statement_tail)) {
-            semantic_error("indexed assignment cannot use a type annotation");
+            semantic_error_at_node(target, "indexed assignment cannot use a type annotation");
         }
         if (!semantic_type_is_list(container_type)) {
-            semantic_error("indexed assignment requires list but got %s",
+            semantic_error_at_node(target->children[0], "indexed assignment requires list but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {
-            semantic_error("list index must be int");
+            semantic_error_at_node(target->children[1], "list index must be int");
         }
         element_type = semantic_list_element_type(container_type);
         if (!semantic_is_assignable(element_type, expr_type)) {
-            semantic_error("cannot assign %s to %s element",
+            semantic_error_at_node(expr, "cannot assign %s to %s element",
                 semantic_type_name(expr_type),
                 semantic_type_name(element_type));
         }
@@ -175,7 +175,7 @@ static int typecheck_simple_statement(
         ValueType declared = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
         expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, declared);
         if (!semantic_is_assignable(declared, expr_type)) {
-            semantic_error("cannot assign %s to %s '%s'",
+            semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
                 semantic_type_name(expr_type),
                 semantic_type_name(declared),
                 target->value);
@@ -187,11 +187,11 @@ static int typecheck_simple_statement(
 
     VariableBinding *var = semantic_find_variable(scope, target->value);
     if (var == NULL) {
-        semantic_error("assignment to undeclared variable '%s'", target->value);
+        semantic_error_at_node(target, "assignment to undeclared variable '%s'", target->value);
     }
     expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, var->type);
     if (!semantic_is_assignable(var->type, expr_type)) {
-        semantic_error("cannot assign %s to %s '%s'",
+        semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
             semantic_type_name(expr_type),
             semantic_type_name(var->type),
             target->value);
@@ -235,7 +235,7 @@ static int typecheck_if_statement(
     int saw_else = 0;
 
     if (condition_type != TYPE_BOOL) {
-        semantic_error("if condition must be bool");
+        semantic_error_at_node(if_stmt->children[0], "if condition must be bool");
     }
 
     if_returns = typecheck_branch_suite(info, if_stmt->children[2], scope, current_function);
@@ -248,7 +248,7 @@ static int typecheck_if_statement(
             int branch_returns;
 
             if (elif_type != TYPE_BOOL) {
-                semantic_error("elif condition must be bool");
+                semantic_error_at_node(branch->children[0], "elif condition must be bool");
             }
             branch_returns = typecheck_branch_suite(info, branch->children[2], scope, current_function);
             if_returns = if_returns && branch_returns;
@@ -278,7 +278,7 @@ static int typecheck_while_statement(
     ValueType condition_type = semantic_infer_expression_type(info, while_stmt->children[0], scope);
 
     if (condition_type != TYPE_BOOL) {
-        semantic_error("while condition must be bool");
+        semantic_error_at_node(while_stmt->children[0], "while condition must be bool");
     }
 
     if (current_function == NULL) {
@@ -329,14 +329,14 @@ static void typecheck_range_expression(
     int arg_count = range_argument_count(arguments);
 
     if (arg_count < 1 || arg_count > 3) {
-        semantic_error("function 'range' expects 1 to 3 arguments");
+        semantic_error_at_node(expr, "function 'range' expects 1 to 3 arguments");
     }
 
     for (int i = 0; i < arg_count; i++) {
         ValueType arg_type = semantic_infer_expression_type(info, arguments->children[i], scope);
 
         if (arg_type != TYPE_INT) {
-            semantic_error("function 'range' argument %d expects int", i + 1);
+            semantic_error_at_node(arguments->children[i], "function 'range' argument %d expects int", i + 1);
         }
     }
 }
@@ -362,7 +362,7 @@ static int typecheck_for_statement(
     } else {
         iterable_type = semantic_infer_expression_type(info, iterable, scope);
         if (!semantic_type_is_list(iterable_type)) {
-            semantic_error("for loop iterable must be list or range but got %s",
+            semantic_error_at_node(iterable, "for loop iterable must be list or range but got %s",
                 semantic_type_name(iterable_type));
         }
         target_type = semantic_list_element_type(iterable_type);
@@ -393,7 +393,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
 
         const char *name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
         if (semantic_find_function(info->functions, name) != NULL) {
-            semantic_error("duplicate function '%s'", name);
+            semantic_error_at_node(payload->children[0], "duplicate function '%s'", name);
         }
 
         const ParseNode *parameters = semantic_function_parameters(payload);
@@ -447,7 +447,7 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
         int returns = typecheck_suite(info, suite, &local_scope, &current);
 
         if (current.return_type != TYPE_NONE && !returns) {
-            semantic_error("function '%s' must return %s on all paths",
+            semantic_error_at_node(function_def->children[0], "function '%s' must return %s on all paths",
                 current.name, semantic_type_name(current.return_type));
         }
     }
@@ -466,14 +466,14 @@ static int typecheck_statement(
 
     if (payload->kind == NODE_FUNCTION_DEF) {
         if (!allow_function_defs) {
-            semantic_error("nested function definitions are not supported");
+            semantic_error_at_node(payload->children[0], "nested function definitions are not supported");
         }
         typecheck_function(info, payload, scope);
         return 0;
     }
 
     if (payload->kind == NODE_IMPORT_STATEMENT) {
-        semantic_error("imports are only supported at module scope");
+        semantic_error_at_node(payload, "imports are only supported at module scope");
     }
 
     if (payload->kind == NODE_WHILE_STATEMENT) {
@@ -517,7 +517,7 @@ SemanticInfo *analyze_program(const ParseNode *root)
         FunctionContext module_context = {0};
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
-            semantic_error("imports should be resolved before semantic analysis");
+            semantic_error_at_node(payload, "imports should be resolved before semantic analysis");
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
         } else {

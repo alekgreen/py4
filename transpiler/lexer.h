@@ -3,6 +3,6 @@
 #include "token.h"
 
 Token next_token(FILE *fp);
-TokenStream *lexer(FILE *fp);
+TokenStream *lexer(FILE *fp, const char *source_path);
 
 #endif

@@ -39,6 +39,25 @@ char *parse_join_type_name(const char *container, const char *member)
     return name;
 }
 
+static void parse_set_node_location(
+    ParseNode *node,
+    const char *path,
+    int line,
+    int column,
+    const char *source_line)
+{
+    if (node == NULL || path == NULL || line <= 0 || column <= 0) {
+        return;
+    }
+
+    free(node->source_path);
+    free(node->source_line);
+    node->source_path = parse_dup_string(path);
+    node->source_line = parse_dup_string(source_line);
+    node->line = line;
+    node->column = column;
+}
+
 int parse_is_keyword_token(Token tok, const char *value)
 {
     return tok.type == TOKEN_KEYWORD && strcmp(tok.value, value) == 0;
@@ -71,7 +90,24 @@ int parse_is_pipe_token(Token tok)
 
 void parse_error(Token tok, const char *message)
 {
-    fprintf(stderr, "Parse error: %s near '%s'\n", message, tok.value);
+    print_token_diagnostic(stderr, tok, "Parse error", message);
+    exit(1);
+}
+
+void parse_error_at_node(const ParseNode *node, const char *message)
+{
+    if (node != NULL && node->source_path != NULL && node->line > 0 && node->column > 0) {
+        print_source_diagnostic(
+            stderr,
+            node->source_path,
+            node->line,
+            node->column,
+            "Parse error",
+            message,
+            node->source_line);
+    } else {
+        fprintf(stderr, "Parse error: %s\n", message);
+    }
     exit(1);
 }
 
@@ -119,8 +155,20 @@ ParseNode *create_node(NodeKind kind, TokenType token_type, const char *value)
     node->kind = kind;
     node->token_type = token_type;
     node->value = parse_dup_string(value);
+    node->source_path = NULL;
+    node->source_line = NULL;
+    node->line = 0;
+    node->column = 0;
     node->children = NULL;
     node->child_count = 0;
+    return node;
+}
+
+ParseNode *create_node_from_token(NodeKind kind, Token tok)
+{
+    ParseNode *node = create_node(kind, tok.type, tok.value);
+
+    parse_set_node_location(node, tok.path, tok.line, tok.column, tok.line_text);
     return node;
 }
 
@@ -136,6 +184,14 @@ void add_child(ParseNode *parent, ParseNode *child)
 
     parent->children = children;
     parent->children[parent->child_count++] = child;
+    if (parent->line == 0 && child != NULL && child->line > 0) {
+        parse_set_node_location(
+            parent,
+            child->source_path,
+            child->line,
+            child->column,
+            child->source_line);
+    }
 }
 
 void free_tree(ParseNode *node)
@@ -150,6 +206,8 @@ void free_tree(ParseNode *node)
 
     free(node->children);
     free(node->value);
+    free(node->source_path);
+    free(node->source_line);
     free(node);
 }
 
@@ -261,21 +319,22 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
 {
     ParseNode *node = create_node(NODE_STATEMENT_TAIL, TOKEN_NULL, NULL);
     Token look = peek_ts(ts);
+    Token tok;
 
     if (look.type == TOKEN_COLON) {
-        expect(ts, TOKEN_COLON);
-        add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+        tok = expect(ts, TOKEN_COLON);
+        add_child(node, create_node_from_token(NODE_COLON, tok));
         add_child(node, parse_TYPE(ts));
 
-        expect(ts, TOKEN_ASSIGN);
-        add_child(node, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
+        tok = expect(ts, TOKEN_ASSIGN);
+        add_child(node, create_node_from_token(NODE_ASSIGN, tok));
         add_child(node, parse_EXPRESSION(ts));
         return node;
     }
 
     if (look.type == TOKEN_ASSIGN) {
-        expect(ts, TOKEN_ASSIGN);
-        add_child(node, create_node(NODE_ASSIGN, TOKEN_ASSIGN, "="));
+        tok = expect(ts, TOKEN_ASSIGN);
+        add_child(node, create_node_from_token(NODE_ASSIGN, tok));
         add_child(node, parse_EXPRESSION(ts));
         return node;
     }
@@ -286,23 +345,24 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
 
 static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_IMPORT_STATEMENT, TOKEN_NULL, NULL);
+    Token import_tok = parse_expect_keyword(ts, "import");
+    ParseNode *node = create_node_from_token(NODE_IMPORT_STATEMENT, import_tok);
     Token module_name;
 
-    parse_expect_keyword(ts, "import");
     module_name = expect(ts, TOKEN_IDENTIFIER);
-    add_child(node, create_node(NODE_PRIMARY, module_name.type, module_name.value));
+    add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
     return node;
 }
 
 static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_WHILE_STATEMENT, TOKEN_NULL, NULL);
+    Token while_tok = parse_expect_keyword(ts, "while");
+    ParseNode *node = create_node_from_token(NODE_WHILE_STATEMENT, while_tok);
+    Token colon_tok;
 
-    parse_expect_keyword(ts, "while");
     add_child(node, parse_EXPRESSION(ts));
-    expect(ts, TOKEN_COLON);
-    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
     expect(ts, TOKEN_NEWLINE);
     expect(ts, TOKEN_INDENT);
     add_child(node, parse_SUITE(ts));
@@ -312,16 +372,17 @@ static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts)
 
 static ParseNode *parse_FOR_STATEMENT(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_FOR_STATEMENT, TOKEN_NULL, NULL);
+    Token for_tok = parse_expect_keyword(ts, "for");
+    ParseNode *node = create_node_from_token(NODE_FOR_STATEMENT, for_tok);
     Token iterator_name;
+    Token colon_tok;
 
-    parse_expect_keyword(ts, "for");
     iterator_name = expect(ts, TOKEN_IDENTIFIER);
-    add_child(node, create_node(NODE_PRIMARY, iterator_name.type, iterator_name.value));
+    add_child(node, create_node_from_token(NODE_PRIMARY, iterator_name));
     parse_expect_keyword(ts, "in");
     add_child(node, parse_EXPRESSION(ts));
-    expect(ts, TOKEN_COLON);
-    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
     expect(ts, TOKEN_NEWLINE);
     expect(ts, TOKEN_INDENT);
     add_child(node, parse_SUITE(ts));
@@ -371,9 +432,9 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
 
 static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_RETURN_STATEMENT, TOKEN_NULL, NULL);
+    Token return_tok = parse_expect_keyword(ts, "return");
+    ParseNode *node = create_node_from_token(NODE_RETURN_STATEMENT, return_tok);
 
-    parse_expect_keyword(ts, "return");
     if (peek_ts(ts).type == TOKEN_NEWLINE || peek_ts(ts).type == TOKEN_DEDENT ||
         peek_ts(ts).type == TOKEN_EOF) {
         add_child(node, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
@@ -386,39 +447,40 @@ static ParseNode *parse_RETURN_STATEMENT(TokenStream *ts)
 
 static ParseNode *parse_BREAK_STATEMENT(TokenStream *ts)
 {
-    parse_expect_keyword(ts, "break");
-    return create_node(NODE_BREAK_STATEMENT, TOKEN_KEYWORD, "break");
+    return create_node_from_token(NODE_BREAK_STATEMENT, parse_expect_keyword(ts, "break"));
 }
 
 static ParseNode *parse_CONTINUE_STATEMENT(TokenStream *ts)
 {
-    parse_expect_keyword(ts, "continue");
-    return create_node(NODE_CONTINUE_STATEMENT, TOKEN_KEYWORD, "continue");
+    return create_node_from_token(NODE_CONTINUE_STATEMENT, parse_expect_keyword(ts, "continue"));
 }
 
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_FUNCTION_DEF, TOKEN_NULL, NULL);
+    Token def_tok = parse_expect_keyword(ts, "def");
+    ParseNode *node = create_node_from_token(NODE_FUNCTION_DEF, def_tok);
     Token name;
+    Token arrow_tok;
+    Token colon_tok;
 
-    parse_expect_keyword(ts, "def");
     name = expect(ts, TOKEN_IDENTIFIER);
-    add_child(node, create_node(NODE_PRIMARY, name.type, name.value));
+    add_child(node, create_node_from_token(NODE_PRIMARY, name));
 
     expect(ts, TOKEN_LPAREN);
     add_child(node, parse_PARAMETERS(ts));
     expect(ts, TOKEN_RPAREN);
 
     if (peek_ts(ts).type == TOKEN_RARROW) {
-        ParseNode *return_type = create_node(NODE_RETURN_TYPE, TOKEN_NULL, NULL);
+        ParseNode *return_type;
 
-        expect(ts, TOKEN_RARROW);
+        arrow_tok = expect(ts, TOKEN_RARROW);
+        return_type = create_node_from_token(NODE_RETURN_TYPE, arrow_tok);
         add_child(return_type, parse_TYPE(ts));
         add_child(node, return_type);
     }
 
-    expect(ts, TOKEN_COLON);
-    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
     expect(ts, TOKEN_NEWLINE);
     expect(ts, TOKEN_INDENT);
     add_child(node, parse_SUITE(ts));
@@ -428,24 +490,25 @@ static ParseNode *parse_FUNCTION_DEF(TokenStream *ts)
 
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts)
 {
-    ParseNode *node = create_node(NODE_IF_STATEMENT, TOKEN_NULL, NULL);
+    Token if_tok = parse_expect_keyword(ts, "if");
+    ParseNode *node = create_node_from_token(NODE_IF_STATEMENT, if_tok);
+    Token colon_tok;
 
-    parse_expect_keyword(ts, "if");
     add_child(node, parse_EXPRESSION(ts));
-    expect(ts, TOKEN_COLON);
-    add_child(node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
     expect(ts, TOKEN_NEWLINE);
     expect(ts, TOKEN_INDENT);
     add_child(node, parse_SUITE(ts));
     expect(ts, TOKEN_DEDENT);
 
     while (parse_is_keyword_token(peek_ts(ts), "elif")) {
-        ParseNode *elif_node = create_node(NODE_ELIF_CLAUSE, TOKEN_NULL, NULL);
+        Token elif_tok = parse_expect_keyword(ts, "elif");
+        ParseNode *elif_node = create_node_from_token(NODE_ELIF_CLAUSE, elif_tok);
 
-        parse_expect_keyword(ts, "elif");
         add_child(elif_node, parse_EXPRESSION(ts));
-        expect(ts, TOKEN_COLON);
-        add_child(elif_node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+        colon_tok = expect(ts, TOKEN_COLON);
+        add_child(elif_node, create_node_from_token(NODE_COLON, colon_tok));
         expect(ts, TOKEN_NEWLINE);
         expect(ts, TOKEN_INDENT);
         add_child(elif_node, parse_SUITE(ts));
@@ -454,11 +517,11 @@ static ParseNode *parse_IF_STATEMENT(TokenStream *ts)
     }
 
     if (parse_is_keyword_token(peek_ts(ts), "else")) {
-        ParseNode *else_node = create_node(NODE_ELSE_CLAUSE, TOKEN_NULL, NULL);
+        Token else_tok = parse_expect_keyword(ts, "else");
+        ParseNode *else_node = create_node_from_token(NODE_ELSE_CLAUSE, else_tok);
 
-        parse_expect_keyword(ts, "else");
-        expect(ts, TOKEN_COLON);
-        add_child(else_node, create_node(NODE_COLON, TOKEN_COLON, ":"));
+        colon_tok = expect(ts, TOKEN_COLON);
+        add_child(else_node, create_node_from_token(NODE_COLON, colon_tok));
         expect(ts, TOKEN_NEWLINE);
         expect(ts, TOKEN_INDENT);
         add_child(else_node, parse_SUITE(ts));
@@ -482,7 +545,7 @@ static ParseNode *parse_PARAMETERS(TokenStream *ts)
         ParseNode *param_node;
         Token param = expect(ts, TOKEN_IDENTIFIER);
 
-        param_node = create_node(NODE_PARAMETER, param.type, param.value);
+        param_node = create_node_from_token(NODE_PARAMETER, param);
         expect(ts, TOKEN_COLON);
         add_child(param_node, parse_TYPE(ts));
         add_child(node, param_node);

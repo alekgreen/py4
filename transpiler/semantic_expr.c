@@ -13,7 +13,7 @@ static void expect_argument_count(const char *name, const ParseNode *arguments, 
     }
 
     if (actual != expected) {
-        semantic_error("function '%s' expects %zu arguments", name, expected);
+        semantic_error_at_node(arguments, "function '%s' expects %zu arguments", name, expected);
     }
 }
 
@@ -37,7 +37,7 @@ static ValueType infer_list_literal_with_hint(
         ValueType item_type = semantic_infer_expression_type(info, literal->children[i], scope);
 
         if (!semantic_is_assignable(element_type, item_type)) {
-            semantic_error("cannot assign %s to %s list literal element",
+            semantic_error_at_node(literal->children[i], "cannot assign %s to %s list literal element",
                 semantic_type_name(item_type),
                 semantic_type_name(element_type));
         }
@@ -115,7 +115,7 @@ static ValueType infer_method_call_type(
     element_type = semantic_list_element_type(receiver_type);
 
     if (!semantic_type_is_list(receiver_type)) {
-        semantic_error("method '%s' requires list receiver", method->value);
+        semantic_error_at_node(receiver, "method '%s' requires list receiver", method->value);
     }
 
     if (strcmp(method->value, "append") == 0) {
@@ -128,7 +128,7 @@ static ValueType infer_method_call_type(
             scope,
             element_type);
         if (!semantic_is_assignable(element_type, arg_type)) {
-            semantic_error("method 'append' expects %s argument", semantic_type_name(element_type));
+            semantic_error_at_node(arguments->children[0], "method 'append' expects %s argument", semantic_type_name(element_type));
         }
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
@@ -152,7 +152,7 @@ static ValueType infer_method_call_type(
         return receiver_type;
     }
 
-    semantic_error("unknown list method '%s'", method->value);
+    semantic_error_at_node(method, "unknown list method '%s'", method->value);
     return TYPE_NONE;
 }
 
@@ -196,7 +196,7 @@ static ValueType infer_builtin_call_type(
         expect_argument_count(name, arguments, 2);
         list_type = semantic_infer_expression_type(info, arguments->children[0], scope);
         if (!semantic_type_is_list(list_type)) {
-            semantic_error("function 'list_append' argument 1 expects list");
+            semantic_error_at_node(arguments->children[0], "function 'list_append' argument 1 expects list");
         }
         arg_type = semantic_infer_expression_type_with_hint(
             info,
@@ -204,7 +204,7 @@ static ValueType infer_builtin_call_type(
             scope,
             semantic_list_element_type(list_type));
         if (!semantic_is_assignable(semantic_list_element_type(list_type), arg_type)) {
-            semantic_error("function 'list_append' argument 2 expects %s",
+            semantic_error_at_node(arguments->children[1], "function 'list_append' argument 2 expects %s",
                 semantic_type_name(semantic_list_element_type(list_type)));
         }
         semantic_record_node_type(info, call, TYPE_NONE);
@@ -217,10 +217,10 @@ static ValueType infer_builtin_call_type(
         expect_argument_count(name, arguments, 2);
         list_type = semantic_infer_expression_type(info, arguments->children[0], scope);
         if (!semantic_type_is_list(list_type)) {
-            semantic_error("function 'list_get' argument 1 expects list");
+            semantic_error_at_node(arguments->children[0], "function 'list_get' argument 1 expects list");
         }
         if (semantic_infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
-            semantic_error("function 'list_get' argument 2 expects int");
+            semantic_error_at_node(arguments->children[1], "function 'list_get' argument 2 expects int");
         }
         semantic_record_node_type(info, call, semantic_list_element_type(list_type));
         return semantic_list_element_type(list_type);
@@ -229,7 +229,7 @@ static ValueType infer_builtin_call_type(
     if (strcmp(name, "list_len") == 0 || strcmp(name, "len") == 0) {
         expect_argument_count(name, arguments, 1);
         if (!semantic_type_is_list(semantic_infer_expression_type(info, arguments->children[0], scope))) {
-            semantic_error("function '%s' argument 1 expects list", name);
+            semantic_error_at_node(arguments->children[0], "function '%s' argument 1 expects list", name);
         }
         semantic_record_node_type(info, call, TYPE_INT);
         return TYPE_INT;
@@ -242,10 +242,10 @@ static ValueType infer_builtin_call_type(
         expect_argument_count(name, arguments, 3);
         list_type = semantic_infer_expression_type(info, arguments->children[0], scope);
         if (!semantic_type_is_list(list_type)) {
-            semantic_error("function 'list_set' argument 1 expects list");
+            semantic_error_at_node(arguments->children[0], "function 'list_set' argument 1 expects list");
         }
         if (semantic_infer_expression_type(info, arguments->children[1], scope) != TYPE_INT) {
-            semantic_error("function 'list_set' argument 2 expects int");
+            semantic_error_at_node(arguments->children[1], "function 'list_set' argument 2 expects int");
         }
         value_type = semantic_infer_expression_type_with_hint(
             info,
@@ -253,14 +253,14 @@ static ValueType infer_builtin_call_type(
             scope,
             semantic_list_element_type(list_type));
         if (!semantic_is_assignable(semantic_list_element_type(list_type), value_type)) {
-            semantic_error("function 'list_set' argument 3 expects %s",
+            semantic_error_at_node(arguments->children[2], "function 'list_set' argument 3 expects %s",
                 semantic_type_name(semantic_list_element_type(list_type)));
         }
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
     }
 
-    semantic_error("unknown builtin '%s'", name);
+    semantic_error_at_node(call, "unknown builtin '%s'", name);
     return TYPE_NONE;
 }
 
@@ -278,15 +278,15 @@ static ValueType infer_call_type(
             return TYPE_NONE;
         }
         if (arguments->child_count != 1) {
-            semantic_error("print expects zero or one argument");
+            semantic_error_at_node(call, "print expects zero or one argument");
         }
 
         ValueType arg_type = semantic_infer_expression_type(info, arguments->children[0], scope);
         if (arg_type == TYPE_NONE) {
-            semantic_error("print cannot print None");
+            semantic_error_at_node(arguments->children[0], "print cannot print None");
         }
         if (semantic_type_is_ref(arg_type)) {
-            semantic_error("print does not support %s yet", semantic_type_name(arg_type));
+            semantic_error_at_node(arguments->children[0], "print does not support %s yet", semantic_type_name(arg_type));
         }
 
         semantic_record_node_type(info, call, TYPE_NONE);
@@ -299,19 +299,19 @@ static ValueType infer_call_type(
 
     FunctionInfo *fn = semantic_find_function(info->functions, callee->value);
     if (fn == NULL) {
-        semantic_error("unknown function '%s'", callee->value);
+        semantic_error_at_node(callee, "unknown function '%s'", callee->value);
     }
 
     if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
         if (fn->param_count != 0) {
-            semantic_error("function '%s' expects %zu arguments", fn->name, fn->param_count);
+            semantic_error_at_node(call, "function '%s' expects %zu arguments", fn->name, fn->param_count);
         }
         semantic_record_node_type(info, call, fn->return_type);
         return fn->return_type;
     }
 
     if (arguments->child_count != fn->param_count) {
-        semantic_error("function '%s' expects %zu arguments", fn->name, fn->param_count);
+        semantic_error_at_node(call, "function '%s' expects %zu arguments", fn->name, fn->param_count);
     }
 
     for (size_t i = 0; i < arguments->child_count; i++) {
@@ -321,7 +321,7 @@ static ValueType infer_call_type(
             scope,
             fn->param_types[i]);
         if (!semantic_is_assignable(fn->param_types[i], actual)) {
-            semantic_error("function '%s' argument %zu expects %s but got %s",
+            semantic_error_at_node(arguments->children[i], "function '%s' argument %zu expects %s but got %s",
                 fn->name, i + 1,
                 semantic_type_name(fn->param_types[i]),
                 semantic_type_name(actual));
@@ -364,14 +364,14 @@ ValueType semantic_infer_primary_type(
                 saw_int = 1;
                 continue;
             }
-            semantic_error("list literals currently support only int, float, bool, and char elements");
+            semantic_error_at_node(node->children[i], "list literals currently support only int, float, bool, and char elements");
         }
 
         if ((saw_float && saw_bool) || (saw_bool && saw_int)) {
-            semantic_error("list literals cannot mix bool elements with numeric elements");
+            semantic_error_at_node(node, "list literals cannot mix bool elements with numeric elements");
         }
         if (saw_char && (saw_int || saw_float || saw_bool)) {
-            semantic_error("list literals cannot mix char elements with non-char elements");
+            semantic_error_at_node(node, "list literals cannot mix char elements with non-char elements");
         }
         if (saw_bool && node->child_count > 0) {
             semantic_record_node_type(info, node, TYPE_LIST_BOOL);
@@ -397,11 +397,11 @@ ValueType semantic_infer_primary_type(
         ValueType index_type = semantic_infer_expression_type(info, node->children[1], scope);
 
         if (!semantic_type_is_list(container_type)) {
-            semantic_error("indexing requires list but got %s",
+            semantic_error_at_node(node->children[0], "indexing requires list but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {
-            semantic_error("list index must be int");
+            semantic_error_at_node(node->children[1], "list index must be int");
         }
 
         semantic_record_node_type(info, node, semantic_list_element_type(container_type));
@@ -439,18 +439,18 @@ ValueType semantic_infer_primary_type(
                 type = TYPE_BOOL;
                 break;
             }
-            semantic_error("unexpected keyword '%s' in expression", node->value);
+            semantic_error_at_node(node, "unexpected keyword '%s' in expression", node->value);
             break;
         case TOKEN_IDENTIFIER: {
             VariableBinding *var = semantic_find_variable(scope, node->value);
             if (var == NULL) {
-                semantic_error("unknown variable '%s'", node->value);
+                semantic_error_at_node(node, "unknown variable '%s'", node->value);
             }
             type = var->type;
             break;
         }
         default:
-            semantic_error("unsupported primary token");
+            semantic_error_at_node(node, "unsupported primary token");
     }
 
     semantic_record_node_type(info, node, type);
@@ -479,35 +479,39 @@ static int is_boolean_operator(const char *op)
     return strcmp(op, "and") == 0 || strcmp(op, "or") == 0;
 }
 
-static void typecheck_comparison_operands(ValueType lhs_type, ValueType rhs_type, const char *op)
+static void typecheck_comparison_operands(
+    const ParseNode *operator_node,
+    ValueType lhs_type,
+    ValueType rhs_type,
+    const char *op)
 {
     if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
-        semantic_error("operator '%s' does not support union operands yet", op);
+        semantic_error_at_node(operator_node, "operator '%s' does not support union operands yet", op);
     }
     if (semantic_type_is_ref(lhs_type) || semantic_type_is_ref(rhs_type)) {
-        semantic_error("operator '%s' does not support %s operands",
+        semantic_error_at_node(operator_node, "operator '%s' does not support %s operands",
             op,
             semantic_type_is_ref(lhs_type) ? semantic_type_name(lhs_type) : semantic_type_name(rhs_type));
     }
 
     if (is_comparison_operator(op)) {
         if (!semantic_is_numeric_type(lhs_type) || !semantic_is_numeric_type(rhs_type)) {
-            semantic_error("comparison '%s' requires numeric operands", op);
+            semantic_error_at_node(operator_node, "comparison '%s' requires numeric operands", op);
         }
         return;
     }
 
     if (is_equality_operator(op)) {
         if (lhs_type == TYPE_STR || rhs_type == TYPE_STR) {
-            semantic_error("str equality is not supported yet");
+            semantic_error_at_node(operator_node, "str equality is not supported yet");
         }
         if (!(semantic_is_assignable(lhs_type, rhs_type) || semantic_is_assignable(rhs_type, lhs_type))) {
-            semantic_error("operator '%s' requires comparable operands", op);
+            semantic_error_at_node(operator_node, "operator '%s' requires comparable operands", op);
         }
         return;
     }
 
-    semantic_error("unsupported operator '%s'", op);
+    semantic_error_at_node(operator_node, "unsupported operator '%s'", op);
 }
 
 ValueType semantic_infer_expression_type(
@@ -536,21 +540,21 @@ ValueType semantic_infer_expression_type(
 
         if (strcmp(operator_node->value, "not") == 0) {
             if (rhs_type != TYPE_BOOL) {
-                semantic_error("operator 'not' requires bool operands");
+                semantic_error_at_node(operator_node, "operator 'not' requires bool operands");
             }
             semantic_record_node_type(info, expr, TYPE_BOOL);
             return TYPE_BOOL;
         }
 
         if (semantic_type_is_union(rhs_type)) {
-            semantic_error("operator '%s' does not support union operands yet", operator_node->value);
+            semantic_error_at_node(operator_node, "operator '%s' does not support union operands yet", operator_node->value);
         }
 
         if (!is_arithmetic_operator(operator_node->value)) {
-            semantic_error("unsupported unary operator '%s'", operator_node->value);
+            semantic_error_at_node(operator_node, "unsupported unary operator '%s'", operator_node->value);
         }
         if (!semantic_is_numeric_type(rhs_type)) {
-            semantic_error("operator '%s' requires numeric operands", operator_node->value);
+            semantic_error_at_node(operator_node, "operator '%s' requires numeric operands", operator_node->value);
         }
 
         semantic_record_node_type(info, expr, rhs_type);
@@ -564,9 +568,9 @@ ValueType semantic_infer_expression_type(
             ValueType chain_rhs = semantic_infer_primary_type(info, expr->children[i + 1], scope);
 
             if (!(is_comparison_operator(chain_op->value) || is_equality_operator(chain_op->value))) {
-                semantic_error("unsupported operator '%s' in comparison chain", chain_op->value);
+                semantic_error_at_node(chain_op, "unsupported operator '%s' in comparison chain", chain_op->value);
             }
-            typecheck_comparison_operands(chain_lhs, chain_rhs, chain_op->value);
+            typecheck_comparison_operands(chain_op, chain_lhs, chain_rhs, chain_op->value);
         }
 
         semantic_record_node_type(info, expr, TYPE_BOOL);
@@ -585,10 +589,10 @@ ValueType semantic_infer_expression_type(
         ValueType result_type;
 
         if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
-            semantic_error("operator '%s' does not support union operands yet", operator_node->value);
+            semantic_error_at_node(operator_node, "operator '%s' does not support union operands yet", operator_node->value);
         }
         if (!semantic_is_numeric_type(lhs_type) || !semantic_is_numeric_type(rhs_type)) {
-            semantic_error("operator '%s' requires numeric operands", operator_node->value);
+            semantic_error_at_node(operator_node, "operator '%s' requires numeric operands", operator_node->value);
         }
         if (strcmp(operator_node->value, "/") == 0 || lhs_type == TYPE_FLOAT || rhs_type == TYPE_FLOAT) {
             result_type = TYPE_FLOAT;
@@ -602,7 +606,7 @@ ValueType semantic_infer_expression_type(
 
     if (is_boolean_operator(operator_node->value)) {
         if (lhs_type != TYPE_BOOL || rhs_type != TYPE_BOOL) {
-            semantic_error("operator '%s' requires bool operands", operator_node->value);
+            semantic_error_at_node(operator_node, "operator '%s' requires bool operands", operator_node->value);
         }
 
         semantic_record_node_type(info, expr, TYPE_BOOL);
@@ -610,12 +614,12 @@ ValueType semantic_infer_expression_type(
     }
 
     if (is_comparison_operator(operator_node->value) || is_equality_operator(operator_node->value)) {
-        typecheck_comparison_operands(lhs_type, rhs_type, operator_node->value);
+        typecheck_comparison_operands(operator_node, lhs_type, rhs_type, operator_node->value);
         semantic_record_node_type(info, expr, TYPE_BOOL);
         return TYPE_BOOL;
     }
 
-    semantic_error("unsupported operator '%s'", operator_node->value);
+    semantic_error_at_node(operator_node, "unsupported operator '%s'", operator_node->value);
     return TYPE_NONE;
 }
 
