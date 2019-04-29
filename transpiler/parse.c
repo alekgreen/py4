@@ -237,6 +237,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_EXPRESSION:           return "EXPRESSION";
         case NODE_PRIMARY:              return "PRIMARY";
         case NODE_LIST_LITERAL:         return "LIST_LITERAL";
+        case NODE_TUPLE_LITERAL:        return "TUPLE_LITERAL";
         case NODE_CALL:                 return "CALL";
         case NODE_METHOD_CALL:          return "METHOD_CALL";
         case NODE_INDEX:                return "INDEX";

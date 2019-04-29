@@ -5,6 +5,11 @@
 
 typedef unsigned int ValueType;
 
+#define TYPE_ATOMIC_MASK ((1u << 10) - 1u)
+#define TYPE_TUPLE_BASE (1u << 16)
+#define MAX_TUPLE_TYPES 64
+#define MAX_TUPLE_ELEMENTS 8
+
 enum {
     TYPE_INT = 1u << 0,
     TYPE_FLOAT = 1u << 1,
@@ -26,8 +31,15 @@ ValueType semantic_type_of(const SemanticInfo *info, const ParseNode *node);
 const char *semantic_type_name(ValueType type);
 int semantic_type_contains(ValueType type, ValueType member);
 int semantic_type_is_union(ValueType type);
+int semantic_type_is_tuple(ValueType type);
 int semantic_type_is_ref(ValueType type);
 int semantic_type_is_list(ValueType type);
 ValueType semantic_list_element_type(ValueType type);
+ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count);
+size_t semantic_tuple_element_count(ValueType type);
+ValueType semantic_tuple_element_type(ValueType type, size_t index);
+size_t semantic_tuple_type_count(void);
+ValueType semantic_tuple_type_at(size_t index);
+int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
 
 #endif

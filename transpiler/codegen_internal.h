@@ -69,6 +69,7 @@ ValueType codegen_function_return_type(CodegenContext *ctx, const ParseNode *fun
 const ParseNode *codegen_find_function_definition(const ParseNode *root, const char *name);
 const char *codegen_type_suffix(ValueType type);
 const char *codegen_type_field(ValueType type);
+void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type);
 const char *codegen_list_struct_name(ValueType type);
 const char *codegen_list_runtime_prefix(ValueType type);
 const char *codegen_list_element_c_type(ValueType type);
@@ -96,6 +97,7 @@ void codegen_add_printable_union_type(CodegenContext *ctx, ValueType type);
 void codegen_collect_union_types_from_node(CodegenContext *ctx, const ParseNode *node);
 void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *node);
 void codegen_emit_container_runtime(CodegenContext *ctx);
+void codegen_emit_tuple_runtime(CodegenContext *ctx);
 void codegen_emit_union_runtime(CodegenContext *ctx);
 void codegen_collect_program_state(CodegenContext *ctx, const ParseNode *root);
 char *codegen_type_to_c_string(ValueType type);

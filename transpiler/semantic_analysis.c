@@ -153,6 +153,9 @@ static int typecheck_simple_statement(
         if (semantic_is_type_assignment(statement_tail)) {
             semantic_error_at_node(target, "indexed assignment cannot use a type annotation");
         }
+        if (semantic_type_is_tuple(container_type)) {
+            semantic_error_at_node(target, "tuple elements are immutable");
+        }
         if (!semantic_type_is_list(container_type)) {
             semantic_error_at_node(target->children[0], "indexed assignment requires list but got %s",
                 semantic_type_name(container_type));

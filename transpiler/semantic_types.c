@@ -5,6 +5,43 @@
 
 #include "semantic_internal.h"
 
+typedef struct {
+    ValueType id;
+    size_t element_count;
+    ValueType element_types[MAX_TUPLE_ELEMENTS];
+    char name[128];
+} TupleTypeInfo;
+
+static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
+static size_t TUPLE_TYPE_COUNT = 0;
+
+static const TupleTypeInfo *find_tuple_type(ValueType type)
+{
+    for (size_t i = 0; i < TUPLE_TYPE_COUNT; i++) {
+        if (TUPLE_TYPES[i].id == type) {
+            return &TUPLE_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown tuple type id %u", type);
+    return NULL;
+}
+
+static int tuple_elements_equal(const TupleTypeInfo *info, const ValueType *elements, size_t count)
+{
+    if (info->element_count != count) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (info->element_types[i] != elements[i]) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static int count_type_bits(ValueType type)
 {
     int count = 0;
@@ -19,6 +56,10 @@ static int count_type_bits(ValueType type)
 
 static const char *type_member_name(ValueType type)
 {
+    if (semantic_type_is_tuple(type)) {
+        return find_tuple_type(type)->name;
+    }
+
     switch (type) {
         case TYPE_INT: return "int";
         case TYPE_FLOAT: return "float";
@@ -36,6 +77,41 @@ static const char *type_member_name(ValueType type)
 
 static ValueType parse_type_atom_name(const char *name)
 {
+    if (name[0] == '(') {
+        char buffer[128];
+        char *cursor;
+        char *token;
+        ValueType elements[MAX_TUPLE_ELEMENTS];
+        size_t count = 0;
+        size_t len = strlen(name);
+
+        if (len < 5 || name[len - 1] != ')') {
+            semantic_error("malformed tuple type '%s'", name);
+        }
+        if (len >= sizeof(buffer)) {
+            semantic_error("tuple type name is too long");
+        }
+
+        memcpy(buffer, name + 1, len - 2);
+        buffer[len - 2] = '\0';
+
+        cursor = buffer;
+        token = strtok(cursor, ",");
+        while (token != NULL) {
+            if (count >= MAX_TUPLE_ELEMENTS) {
+                semantic_error("tuple types support at most %d elements", MAX_TUPLE_ELEMENTS);
+            }
+            elements[count++] = parse_type_atom_name(token);
+            token = strtok(NULL, ",");
+        }
+
+        if (count < 2) {
+            semantic_error("tuple type '%s' must have at least two elements", name);
+        }
+
+        return semantic_make_tuple_type(elements, count);
+    }
+
     if (strcmp(name, "int") == 0) {
         return TYPE_INT;
     }
@@ -73,20 +149,31 @@ static ValueType parse_type_atom_name(const char *name)
 
 int semantic_type_contains(ValueType type, ValueType member)
 {
+    if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member)) {
+        return type == member;
+    }
     return member != 0 && (type & member) == member;
 }
 
 int semantic_type_is_union(ValueType type)
 {
+    if (semantic_type_is_tuple(type) || (type & ~TYPE_ATOMIC_MASK) != 0) {
+        return 0;
+    }
     return count_type_bits(type) > 1;
+}
+
+int semantic_type_is_tuple(ValueType type)
+{
+    return type >= TYPE_TUPLE_BASE;
 }
 
 int semantic_type_is_ref(ValueType type)
 {
-    return type == TYPE_LIST_INT ||
+    return !semantic_type_is_tuple(type) && (type == TYPE_LIST_INT ||
         type == TYPE_LIST_FLOAT ||
         type == TYPE_LIST_BOOL ||
-        type == TYPE_LIST_CHAR;
+        type == TYPE_LIST_CHAR);
 }
 
 int semantic_type_is_list(ValueType type)
@@ -133,6 +220,10 @@ const char *semantic_type_name(ValueType type)
         TYPE_LIST_BOOL,
         TYPE_LIST_CHAR
     };
+
+    if (semantic_type_is_tuple(type)) {
+        return type_member_name(type);
+    }
 
     if (type == TYPE_INT || type == TYPE_FLOAT || type == TYPE_BOOL ||
         type == TYPE_CHAR || type == TYPE_STR || type == TYPE_NONE) {
@@ -270,6 +361,10 @@ int semantic_is_assignable(ValueType target, ValueType value)
         return 0;
     }
 
+    if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value)) {
+        return target == value;
+    }
+
     for (size_t i = 0; i < sizeof(source_members) / sizeof(source_members[0]); i++) {
         ValueType member = source_members[i];
 
@@ -286,6 +381,99 @@ int semantic_is_assignable(ValueType target, ValueType value)
     }
 
     return 1;
+}
+
+ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count)
+{
+    TupleTypeInfo *entry;
+    size_t used = 0;
+
+    if (element_count < 2) {
+        semantic_error("tuple types must have at least two elements");
+    }
+    if (element_count > MAX_TUPLE_ELEMENTS) {
+        semantic_error("tuple types support at most %d elements", MAX_TUPLE_ELEMENTS);
+    }
+
+    for (size_t i = 0; i < element_count; i++) {
+        if (semantic_type_is_union(elements[i])) {
+            semantic_error("tuple elements cannot be union types yet");
+        }
+        if (semantic_type_is_ref(elements[i])) {
+            semantic_error("tuple elements cannot be list types yet");
+        }
+        if (semantic_type_is_tuple(elements[i])) {
+            semantic_error("nested tuple types are not supported yet");
+        }
+        if (elements[i] == TYPE_NONE) {
+            semantic_error("tuple elements cannot be None");
+        }
+    }
+
+    for (size_t i = 0; i < TUPLE_TYPE_COUNT; i++) {
+        if (tuple_elements_equal(&TUPLE_TYPES[i], elements, element_count)) {
+            return TUPLE_TYPES[i].id;
+        }
+    }
+
+    if (TUPLE_TYPE_COUNT >= MAX_TUPLE_TYPES) {
+        semantic_error("too many tuple types in one program");
+    }
+
+    entry = &TUPLE_TYPES[TUPLE_TYPE_COUNT];
+    entry->id = TYPE_TUPLE_BASE + (ValueType)TUPLE_TYPE_COUNT;
+    entry->element_count = element_count;
+    for (size_t i = 0; i < element_count; i++) {
+        entry->element_types[i] = elements[i];
+    }
+
+    entry->name[used++] = '(';
+    for (size_t i = 0; i < element_count; i++) {
+        const char *part = semantic_type_name(elements[i]);
+        size_t part_len = strlen(part);
+
+        if (used + part_len + 3 >= sizeof(entry->name)) {
+            semantic_error("tuple type name is too long");
+        }
+        memcpy(entry->name + used, part, part_len);
+        used += part_len;
+        if (i + 1 < element_count) {
+            entry->name[used++] = ',';
+        }
+    }
+    entry->name[used++] = ')';
+    entry->name[used] = '\0';
+
+    TUPLE_TYPE_COUNT++;
+    return entry->id;
+}
+
+size_t semantic_tuple_element_count(ValueType type)
+{
+    return find_tuple_type(type)->element_count;
+}
+
+ValueType semantic_tuple_element_type(ValueType type, size_t index)
+{
+    const TupleTypeInfo *info = find_tuple_type(type);
+
+    if (index >= info->element_count) {
+        semantic_error("tuple index out of bounds for %s", semantic_type_name(type));
+    }
+    return info->element_types[index];
+}
+
+size_t semantic_tuple_type_count(void)
+{
+    return TUPLE_TYPE_COUNT;
+}
+
+ValueType semantic_tuple_type_at(size_t index)
+{
+    if (index >= TUPLE_TYPE_COUNT) {
+        semantic_error("tuple type index out of bounds");
+    }
+    return TUPLE_TYPES[index].id;
 }
 
 void semantic_record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type)
@@ -333,6 +521,11 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         const ParseNode *member = semantic_expect_child(type_node, i, NODE_PRIMARY);
         ValueType atom = parse_type_atom_name(member->value);
 
+        if ((semantic_type_is_tuple(atom) || semantic_type_is_tuple(type)) &&
+            (type != 0 || type_node->child_count > 1)) {
+            semantic_error_at_node(type_node, "tuple types cannot be used inside a union yet");
+        }
+
         if (semantic_type_contains(type, atom)) {
             semantic_error_at_node(member, "duplicate type '%s' in union", member->value);
         }
@@ -347,6 +540,14 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
          semantic_type_contains(type, TYPE_LIST_CHAR)) &&
         semantic_type_is_union(type)) {
         semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
+    }
+    if (semantic_type_is_union(type)) {
+        for (size_t i = 0; i < type_node->child_count; i++) {
+            ValueType member_type = parse_type_atom_name(type_node->children[i]->value);
+            if (semantic_type_is_tuple(member_type)) {
+                semantic_error_at_node(type_node, "tuple types cannot be used inside a union yet");
+            }
+        }
     }
 
     semantic_record_node_type(info, type_node, type);

@@ -462,32 +462,72 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         }
     }
 
-    if (primary->kind == NODE_INDEX) {
-        ValueType base_type = semantic_type_of(ctx->semantic, primary->children[0]);
-        ValueType element_type = semantic_list_element_type(base_type);
-        int needs_cleanup = 0;
-        char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
-        char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
-        char *call_text = codegen_list_binary_call(base_type, "get", base, index);
+    if (primary->kind == NODE_TUPLE_LITERAL) {
+        ValueType tuple_type = semantic_type_of(ctx->semantic, primary);
+        size_t element_count = semantic_tuple_element_count(tuple_type);
+        char *values = codegen_dup_printf("");
         char *result;
+        char *type_name;
 
-        if (needs_cleanup) {
-            char *result_name = codegen_next_temp_name(ctx);
-            char *type_name = codegen_type_to_c_string(element_type);
+        for (size_t i = 0; i < element_count; i++) {
+            ValueType element_type = semantic_tuple_element_type(tuple_type, i);
+            char *item = codegen_wrapped_expression_to_c_string(ctx, primary->children[i], element_type);
+            char *joined = i == 0
+                ? codegen_dup_printf("%s", item)
+                : codegen_dup_printf("%s, %s", values, item);
 
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, call_text);
-            codegen_emit_ref_decref(ctx, base_type, base);
-            free(type_name);
-            result = result_name;
-        } else {
-            result = codegen_dup_printf("%s", call_text);
+            free(values);
+            free(item);
+            values = joined;
         }
 
-        free(base);
-        free(index);
-        free(call_text);
+        type_name = codegen_type_to_c_string(tuple_type);
+        result = codegen_dup_printf("((%s){%s})", type_name, values);
+        free(type_name);
+        free(values);
         return result;
+    }
+
+    if (primary->kind == NODE_INDEX) {
+        ValueType base_type = semantic_type_of(ctx->semantic, primary->children[0]);
+        if (semantic_type_is_tuple(base_type)) {
+            size_t tuple_index;
+            char *base = codegen_primary_to_c_string(ctx, primary->children[0]);
+            char *result;
+
+            if (!semantic_tuple_literal_index(primary->children[1], &tuple_index)) {
+                codegen_error("tuple index must be a non-negative integer literal");
+            }
+
+            result = codegen_dup_printf("((%s).item%zu)", base, tuple_index);
+            free(base);
+            return result;
+        } else {
+            ValueType element_type = semantic_list_element_type(base_type);
+            int needs_cleanup = 0;
+            char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
+            char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
+            char *call_text = codegen_list_binary_call(base_type, "get", base, index);
+            char *result;
+
+            if (needs_cleanup) {
+                char *result_name = codegen_next_temp_name(ctx);
+                char *type_name = codegen_type_to_c_string(element_type);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, call_text);
+                codegen_emit_ref_decref(ctx, base_type, base);
+                free(type_name);
+                result = result_name;
+            } else {
+                result = codegen_dup_printf("%s", call_text);
+            }
+
+            free(base);
+            free(index);
+            free(call_text);
+            return result;
+        }
     }
 
     if (primary->kind == NODE_EXPRESSION) {

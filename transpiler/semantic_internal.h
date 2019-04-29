@@ -71,5 +71,6 @@ int semantic_is_type_assignment(const ParseNode *statement_tail);
 const ParseNode *semantic_simple_statement_tail(const ParseNode *simple_stmt);
 const ParseNode *semantic_statement_tail_expression(const ParseNode *statement_tail);
 const ParseNode *semantic_statement_tail_type_node(const ParseNode *statement_tail);
+int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
 
 #endif

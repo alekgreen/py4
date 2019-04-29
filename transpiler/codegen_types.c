@@ -21,6 +21,27 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
     sizeof(CODEGEN_ORDERED_TYPES) / sizeof(CODEGEN_ORDERED_TYPES[0]);
 
+void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type)
+{
+    size_t count;
+
+    if (!semantic_type_is_tuple(type)) {
+        codegen_error("%s is not a tuple type", semantic_type_name(type));
+    }
+
+    snprintf(buffer, size, "py4_tuple");
+    count = semantic_tuple_element_count(type);
+    for (size_t i = 0; i < count; i++) {
+        const char *suffix = codegen_type_suffix(semantic_tuple_element_type(type, i));
+
+        if (strlen(buffer) + strlen(suffix) + 2 >= size) {
+            codegen_error("generated tuple identifier is too long");
+        }
+        strcat(buffer, "_");
+        strcat(buffer, suffix);
+    }
+}
+
 void codegen_error(const char *message, ...)
 {
     va_list args;
@@ -162,6 +183,13 @@ const ParseNode *codegen_find_function_definition(const ParseNode *root, const c
 
 const char *codegen_type_suffix(ValueType type)
 {
+    static char tuple_name[MAX_NAME_LEN];
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
+        return tuple_name;
+    }
+
     switch (type) {
         case TYPE_INT: return "int";
         case TYPE_FLOAT: return "float";
@@ -179,6 +207,10 @@ const char *codegen_type_suffix(ValueType type)
 
 const char *codegen_type_field(ValueType type)
 {
+    if (semantic_type_is_tuple(type)) {
+        codegen_error("tuple types are not valid union fields");
+    }
+
     switch (type) {
         case TYPE_INT: return "as_int";
         case TYPE_FLOAT: return "as_float";
@@ -268,6 +300,14 @@ void codegen_build_union_convert_name(char *buffer, size_t size, ValueType from_
 
 void codegen_emit_scalar_c_type(FILE *out, ValueType type)
 {
+    char tuple_name[MAX_NAME_LEN];
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
+        fputs(tuple_name, out);
+        return;
+    }
+
     switch (type) {
         case TYPE_INT:
             fputs("int", out);
@@ -315,6 +355,12 @@ char *codegen_type_to_c_string(ValueType type)
             case TYPE_LIST_BOOL:
             case TYPE_LIST_CHAR:
                 return codegen_dup_printf("%s *", codegen_list_struct_name(type));
+        }
+        if (semantic_type_is_tuple(type)) {
+            char tuple_name[MAX_NAME_LEN];
+
+            codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
+            return codegen_dup_printf("%s", tuple_name);
         }
     }
 
@@ -608,6 +654,23 @@ static void emit_union_definition(CodegenContext *ctx, ValueType type)
             fprintf(ctx->out, "    result.value.%s = value;\n", codegen_type_field(member));
         }
         fputs("    return result;\n}\n\n", ctx->out);
+    }
+}
+
+void codegen_emit_tuple_runtime(CodegenContext *ctx)
+{
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        ValueType tuple_type = semantic_tuple_type_at(i);
+        char tuple_name[MAX_NAME_LEN];
+        size_t element_count = semantic_tuple_element_count(tuple_type);
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        fprintf(ctx->out, "typedef struct {\n");
+        for (size_t j = 0; j < element_count; j++) {
+            codegen_emit_scalar_c_type(ctx->out, semantic_tuple_element_type(tuple_type, j));
+            fprintf(ctx->out, " item%zu;\n", j);
+        }
+        fprintf(ctx->out, "} %s;\n\n", tuple_name);
     }
 }
 

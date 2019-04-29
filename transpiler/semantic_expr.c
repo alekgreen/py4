@@ -25,6 +25,23 @@ static int is_direct_list_literal_expression(const ParseNode *expr)
         expr->children[0]->kind == NODE_LIST_LITERAL;
 }
 
+static int is_direct_tuple_literal_expression(const ParseNode *expr)
+{
+    return expr != NULL &&
+        expr->kind == NODE_EXPRESSION &&
+        expr->child_count == 1 &&
+        expr->children[0]->kind == NODE_TUPLE_LITERAL;
+}
+
+static int tuple_element_type_supported(ValueType type)
+{
+    return type == TYPE_INT ||
+        type == TYPE_FLOAT ||
+        type == TYPE_BOOL ||
+        type == TYPE_CHAR ||
+        type == TYPE_STR;
+}
+
 static ValueType infer_list_literal_with_hint(
     SemanticInfo *info,
     const ParseNode *literal,
@@ -45,6 +62,70 @@ static ValueType infer_list_literal_with_hint(
 
     semantic_record_node_type(info, literal, expected_type);
     return expected_type;
+}
+
+static ValueType infer_tuple_literal_with_hint(
+    SemanticInfo *info,
+    const ParseNode *literal,
+    Scope *scope,
+    ValueType expected_type)
+{
+    size_t expected_count = semantic_tuple_element_count(expected_type);
+
+    if (literal->child_count != expected_count) {
+        semantic_error_at_node(literal,
+            "tuple literal for %s expects %zu elements but got %zu",
+            semantic_type_name(expected_type),
+            expected_count,
+            literal->child_count);
+    }
+
+    for (size_t i = 0; i < literal->child_count; i++) {
+        ValueType expected_element = semantic_tuple_element_type(expected_type, i);
+        ValueType actual = semantic_infer_expression_type_with_hint(
+            info,
+            literal->children[i],
+            scope,
+            expected_element);
+
+        if (!semantic_is_assignable(expected_element, actual)) {
+            semantic_error_at_node(literal->children[i],
+                "tuple element %zu expects %s but got %s",
+                i,
+                semantic_type_name(expected_element),
+                semantic_type_name(actual));
+        }
+    }
+
+    semantic_record_node_type(info, literal, expected_type);
+    return expected_type;
+}
+
+int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out)
+{
+    const ParseNode *primary;
+    char *end = NULL;
+    long index;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    primary = expr->children[0];
+    if (primary->kind != NODE_PRIMARY || primary->token_type != TOKEN_NUMBER) {
+        return 0;
+    }
+    if (strchr(primary->value, '.') != NULL) {
+        return 0;
+    }
+
+    index = strtol(primary->value, &end, 10);
+    if (end == NULL || *end != '\0' || index < 0) {
+        return 0;
+    }
+
+    *index_out = (size_t)index;
+    return 1;
 }
 
 const ParseNode *semantic_function_parameters(const ParseNode *function_def)
@@ -112,11 +193,10 @@ static ValueType infer_method_call_type(
 
     receiver = call->children[0];
     receiver_type = semantic_infer_primary_type(info, receiver, scope);
-    element_type = semantic_list_element_type(receiver_type);
-
     if (!semantic_type_is_list(receiver_type)) {
         semantic_error_at_node(receiver, "method '%s' requires list receiver", method->value);
     }
+    element_type = semantic_list_element_type(receiver_type);
 
     if (strcmp(method->value, "append") == 0) {
         ValueType arg_type;
@@ -285,7 +365,7 @@ static ValueType infer_call_type(
         if (arg_type == TYPE_NONE) {
             semantic_error_at_node(arguments->children[0], "print cannot print None");
         }
-        if (semantic_type_is_ref(arg_type)) {
+        if (semantic_type_is_ref(arg_type) || semantic_type_is_tuple(arg_type)) {
             semantic_error_at_node(arguments->children[0], "print does not support %s yet", semantic_type_name(arg_type));
         }
 
@@ -386,6 +466,31 @@ ValueType semantic_infer_primary_type(
         return saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT;
     }
 
+    if (node->kind == NODE_TUPLE_LITERAL) {
+        ValueType element_types[MAX_TUPLE_ELEMENTS];
+
+        if (node->child_count < 2) {
+            semantic_error_at_node(node, "tuple literals must have at least two elements");
+        }
+        if (node->child_count > MAX_TUPLE_ELEMENTS) {
+            semantic_error_at_node(node, "tuple literals support at most %d elements", MAX_TUPLE_ELEMENTS);
+        }
+
+        for (size_t i = 0; i < node->child_count; i++) {
+            ValueType item_type = semantic_infer_expression_type(info, node->children[i], scope);
+
+            if (!tuple_element_type_supported(item_type)) {
+                semantic_error_at_node(node->children[i],
+                    "tuple elements currently support only int, float, bool, char, and str");
+            }
+            element_types[i] = item_type;
+        }
+
+        type = semantic_make_tuple_type(element_types, node->child_count);
+        semantic_record_node_type(info, node, type);
+        return type;
+    }
+
     if (node->kind == NODE_METHOD_CALL) {
         type = infer_method_call_type(info, node, scope);
         semantic_record_node_type(info, node, type);
@@ -395,9 +500,22 @@ ValueType semantic_infer_primary_type(
     if (node->kind == NODE_INDEX) {
         ValueType container_type = semantic_infer_primary_type(info, node->children[0], scope);
         ValueType index_type = semantic_infer_expression_type(info, node->children[1], scope);
+        size_t tuple_index;
+
+        if (semantic_type_is_tuple(container_type)) {
+            if (!semantic_tuple_literal_index(node->children[1], &tuple_index)) {
+                semantic_error_at_node(node->children[1], "tuple index must be a non-negative integer literal");
+            }
+            if (tuple_index >= semantic_tuple_element_count(container_type)) {
+                semantic_error_at_node(node->children[1], "tuple index %zu is out of bounds", tuple_index);
+            }
+
+            semantic_record_node_type(info, node, semantic_tuple_element_type(container_type, tuple_index));
+            return semantic_tuple_element_type(container_type, tuple_index);
+        }
 
         if (!semantic_type_is_list(container_type)) {
-            semantic_error_at_node(node->children[0], "indexing requires list but got %s",
+            semantic_error_at_node(node->children[0], "indexing requires list or tuple but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {
@@ -488,6 +606,9 @@ static void typecheck_comparison_operands(
     if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
         semantic_error_at_node(operator_node, "operator '%s' does not support union operands yet", op);
     }
+    if (semantic_type_is_tuple(lhs_type) || semantic_type_is_tuple(rhs_type)) {
+        semantic_error_at_node(operator_node, "operator '%s' does not support tuple operands", op);
+    }
     if (semantic_type_is_ref(lhs_type) || semantic_type_is_ref(rhs_type)) {
         semantic_error_at_node(operator_node, "operator '%s' does not support %s operands",
             op,
@@ -548,6 +669,9 @@ ValueType semantic_infer_expression_type(
 
         if (semantic_type_is_union(rhs_type)) {
             semantic_error_at_node(operator_node, "operator '%s' does not support union operands yet", operator_node->value);
+        }
+        if (semantic_type_is_tuple(rhs_type)) {
+            semantic_error_at_node(operator_node, "operator '%s' does not support tuple operands", operator_node->value);
         }
 
         if (!is_arithmetic_operator(operator_node->value)) {
@@ -633,6 +757,12 @@ ValueType semantic_infer_expression_type_with_hint(
 
     if (semantic_type_is_list(expected_type) && is_direct_list_literal_expression(expr)) {
         type = infer_list_literal_with_hint(info, expr->children[0], scope, expected_type);
+        semantic_record_node_type(info, expr, type);
+        return type;
+    }
+
+    if (semantic_type_is_tuple(expected_type) && is_direct_tuple_literal_expression(expr)) {
+        type = infer_tuple_literal_with_hint(info, expr->children[0], scope, expected_type);
         semantic_record_node_type(info, expr, type);
         return type;
     }

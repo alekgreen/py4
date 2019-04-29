@@ -6,6 +6,8 @@
 
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_LIST_LITERAL(TokenStream *ts);
+static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
+static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
 static ParseNode *parse_OR(TokenStream *ts);
 static ParseNode *parse_AND(TokenStream *ts);
@@ -65,6 +67,30 @@ static int is_comparison_operator_token(Token tok)
         matches_operator(tok, "<=") || matches_operator(tok, ">=");
 }
 
+static char *build_tuple_type_name(ParseNode *node)
+{
+    char buffer[256];
+    size_t used = 0;
+
+    buffer[used++] = '(';
+    for (size_t i = 0; i < node->child_count; i++) {
+        const ParseNode *child = node->children[i];
+        size_t value_len = strlen(child->value);
+
+        if (used + value_len + 3 >= sizeof(buffer)) {
+            parse_error_at_node(node, "tuple type name is too long");
+        }
+        memcpy(buffer + used, child->value, value_len);
+        used += value_len;
+        if (i + 1 < node->child_count) {
+            buffer[used++] = ',';
+        }
+    }
+    buffer[used++] = ')';
+    buffer[used] = '\0';
+    return parse_dup_string(buffer);
+}
+
 ParseNode *parse_TYPE(TokenStream *ts)
 {
     ParseNode *node = create_node(NODE_TYPE, TOKEN_NULL, NULL);
@@ -82,10 +108,6 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
 {
     ParseNode *node;
     Token type_tok = get_from_ts(ts);
-
-    if (!parse_is_type_token(type_tok)) {
-        parse_error(type_tok, "expected type name");
-    }
 
     if (parse_is_keyword_token(type_tok, "list")) {
         Token member_tok;
@@ -114,7 +136,38 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
         return node;
     }
 
+    if (type_tok.type == TOKEN_LPAREN) {
+        return parse_TUPLE_TYPE(ts, type_tok);
+    }
+
+    if (!parse_is_type_token(type_tok)) {
+        parse_error(type_tok, "expected type name");
+    }
+
     return create_node_from_token(NODE_PRIMARY, type_tok);
+}
+
+static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok)
+{
+    ParseNode *tuple_node = create_node_from_token(NODE_PRIMARY, lparen_tok);
+    char *type_name;
+
+    add_child(tuple_node, parse_TYPE_ATOM(ts));
+    if (peek_ts(ts).type != TOKEN_COMMA) {
+        parse_error(peek_ts(ts), "tuple type must have at least two elements");
+    }
+
+    while (peek_ts(ts).type == TOKEN_COMMA) {
+        get_from_ts(ts);
+        add_child(tuple_node, parse_TYPE_ATOM(ts));
+    }
+
+    expect(ts, TOKEN_RPAREN);
+
+    type_name = build_tuple_type_name(tuple_node);
+    free(tuple_node->value);
+    tuple_node->value = type_name;
+    return tuple_node;
 }
 
 ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
@@ -279,9 +332,8 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
         tok = get_from_ts(ts);
         base = create_node_from_token(NODE_PRIMARY, tok);
     } else if (tok.type == TOKEN_LPAREN) {
-        expect(ts, TOKEN_LPAREN);
-        base = parse_EXPRESSION(ts);
-        expect(ts, TOKEN_RPAREN);
+        tok = expect(ts, TOKEN_LPAREN);
+        base = parse_TUPLE_LITERAL(ts, tok);
     } else if (tok.type == TOKEN_LBRACKET) {
         base = parse_LIST_LITERAL(ts);
     } else {
@@ -337,6 +389,33 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     }
 
     return base;
+}
+
+static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok)
+{
+    ParseNode *first;
+
+    if (peek_ts(ts).type == TOKEN_RPAREN) {
+        parse_error(peek_ts(ts), "expected expression");
+    }
+
+    first = parse_EXPRESSION(ts);
+    if (peek_ts(ts).type != TOKEN_COMMA) {
+        expect(ts, TOKEN_RPAREN);
+        return first;
+    }
+
+    {
+        ParseNode *tuple_node = create_node_from_token(NODE_TUPLE_LITERAL, lparen_tok);
+
+        add_child(tuple_node, first);
+        while (peek_ts(ts).type == TOKEN_COMMA) {
+            get_from_ts(ts);
+            add_child(tuple_node, parse_EXPRESSION(ts));
+        }
+        expect(ts, TOKEN_RPAREN);
+        return tuple_node;
+    }
 }
 
 static ParseNode *parse_LIST_LITERAL(TokenStream *ts)
