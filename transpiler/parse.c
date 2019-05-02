@@ -238,6 +238,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_PRIMARY:              return "PRIMARY";
         case NODE_LIST_LITERAL:         return "LIST_LITERAL";
         case NODE_TUPLE_LITERAL:        return "TUPLE_LITERAL";
+        case NODE_TUPLE_TARGET:         return "TUPLE_TARGET";
         case NODE_CALL:                 return "CALL";
         case NODE_METHOD_CALL:          return "METHOD_CALL";
         case NODE_INDEX:                return "INDEX";
@@ -412,12 +413,13 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
         return node;
     }
 
-    if (first.type == TOKEN_IDENTIFIER) {
+    if (first.type == TOKEN_IDENTIFIER || first.type == TOKEN_LPAREN) {
         ParseNode *target = parse_ASSIGN_TARGET(ts);
         Token look = peek_ts(ts);
 
         if ((target->kind == NODE_PRIMARY && (look.type == TOKEN_COLON || look.type == TOKEN_ASSIGN)) ||
-            (target->kind == NODE_INDEX && look.type == TOKEN_ASSIGN)) {
+            (target->kind == NODE_INDEX && look.type == TOKEN_ASSIGN) ||
+            (target->kind == NODE_TUPLE_TARGET && (look.type == TOKEN_COLON || look.type == TOKEN_ASSIGN))) {
             add_child(node, target);
             add_child(node, parse_STATEMENT_TAIL(ts));
             return node;

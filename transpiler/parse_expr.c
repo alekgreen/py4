@@ -8,6 +8,7 @@ static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_LIST_LITERAL(TokenStream *ts);
 static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
+static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
 static ParseNode *parse_OR(TokenStream *ts);
 static ParseNode *parse_AND(TokenStream *ts);
@@ -174,7 +175,14 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
 {
     ParseNode *node;
     ParseNode *index_node;
-    Token tok = expect(ts, TOKEN_IDENTIFIER);
+    Token tok = peek_ts(ts);
+
+    if (tok.type == TOKEN_LPAREN) {
+        tok = expect(ts, TOKEN_LPAREN);
+        return parse_TUPLE_TARGET(ts, tok);
+    }
+
+    tok = expect(ts, TOKEN_IDENTIFIER);
 
     node = create_node_from_token(NODE_PRIMARY, tok);
     while (peek_ts(ts).type == TOKEN_LBRACKET) {
@@ -186,6 +194,24 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
         node = index_node;
     }
 
+    return node;
+}
+
+static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok)
+{
+    ParseNode *node = create_node_from_token(NODE_TUPLE_TARGET, lparen_tok);
+
+    add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
+    if (peek_ts(ts).type != TOKEN_COMMA) {
+        parse_error(peek_ts(ts), "tuple target must have at least two elements");
+    }
+
+    while (peek_ts(ts).type == TOKEN_COMMA) {
+        get_from_ts(ts);
+        add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
+    }
+
+    expect(ts, TOKEN_RPAREN);
     return node;
 }
 

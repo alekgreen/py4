@@ -191,6 +191,44 @@ static void emit_loop_jump(CodegenContext *ctx, const char *keyword, int action)
     fprintf(ctx->out, "goto py4_loop_cleanup_%d;\n", loop_id);
 }
 
+static void emit_tuple_destructuring_assignment(
+    CodegenContext *ctx,
+    const ParseNode *target,
+    const ParseNode *statement_tail,
+    const ParseNode *expr)
+{
+    ValueType tuple_type = codegen_is_type_assignment(statement_tail)
+        ? semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail))
+        : semantic_type_of(ctx->semantic, target);
+    char *tuple_temp = codegen_next_temp_name(ctx);
+    char *tuple_type_name = codegen_type_to_c_string(tuple_type);
+    char *expr_text = codegen_wrapped_expression_to_c_string(ctx, expr, tuple_type);
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", tuple_type_name, tuple_temp, expr_text);
+
+    for (size_t i = 0; i < target->child_count; i++) {
+        const ParseNode *name = codegen_expect_child(target, i, NODE_PRIMARY);
+        ValueType element_type = codegen_is_type_assignment(statement_tail)
+            ? semantic_tuple_element_type(tuple_type, i)
+            : semantic_type_of(ctx->semantic, name);
+        char *field_expr = codegen_dup_printf("%s.item%zu", tuple_temp, i);
+
+        codegen_emit_indent(ctx);
+        if (codegen_is_type_assignment(statement_tail)) {
+            codegen_emit_type_name(ctx, element_type);
+            fprintf(ctx->out, " %s = %s;\n", name->value, field_expr);
+        } else {
+            fprintf(ctx->out, "%s = %s;\n", name->value, field_expr);
+        }
+        free(field_expr);
+    }
+
+    free(tuple_temp);
+    free(tuple_type_name);
+    free(expr_text);
+}
+
 static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *simple_stmt)
 {
     const ParseNode *first_child = simple_stmt->children[0];
@@ -240,6 +278,11 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             free(index);
             free(value);
             free(call);
+            return;
+        }
+
+        if (target->kind == NODE_TUPLE_TARGET) {
+            emit_tuple_destructuring_assignment(ctx, target, statement_tail, expr);
             return;
         }
 
@@ -758,8 +801,17 @@ static void emit_global_declaration(CodegenContext *ctx, const ParseNode *simple
 
     name = codegen_simple_statement_target(simple_stmt);
     type = semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail));
-    codegen_emit_type_name(ctx, type);
-    fprintf(ctx->out, " %s;\n", name->value);
+    if (name->kind == NODE_TUPLE_TARGET) {
+        for (size_t i = 0; i < name->child_count; i++) {
+            const ParseNode *item = codegen_expect_child(name, i, NODE_PRIMARY);
+
+            codegen_emit_type_name(ctx, semantic_tuple_element_type(type, i));
+            fprintf(ctx->out, " %s;\n", item->value);
+        }
+    } else {
+        codegen_emit_type_name(ctx, type);
+        fprintf(ctx->out, " %s;\n", name->value);
+    }
 }
 
 static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
@@ -773,7 +825,7 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
             codegen_error("imports should be resolved before C code generation");
         } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
             if (payload->child_count == 2 &&
-                payload->children[0]->kind == NODE_PRIMARY &&
+                (payload->children[0]->kind == NODE_PRIMARY || payload->children[0]->kind == NODE_TUPLE_TARGET) &&
                 codegen_is_type_assignment(payload->children[1])) {
                 emit_global_declaration(ctx, payload);
                 wrote_any = 1;
@@ -852,6 +904,10 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             name = codegen_simple_statement_target(payload);
             statement_tail = codegen_simple_statement_tail(payload);
             expr = codegen_statement_tail_expression(statement_tail);
+            if (name->kind == NODE_TUPLE_TARGET) {
+                emit_tuple_destructuring_assignment(ctx, name, statement_tail, expr);
+                continue;
+            }
             if (name->kind == NODE_INDEX) {
                 ValueType list_type = semantic_type_of(ctx->semantic, name->children[0]);
                 ValueType element_type = semantic_list_element_type(list_type);
