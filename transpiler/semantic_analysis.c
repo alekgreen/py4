@@ -43,6 +43,115 @@ static int typecheck_statement(
     FunctionContext *current_function,
     int allow_function_defs);
 
+static size_t tuple_target_leaf_count(const ParseNode *target)
+{
+    size_t count = 0;
+
+    if (target->kind == NODE_PRIMARY) {
+        return 1;
+    }
+
+    if (target->kind != NODE_TUPLE_TARGET) {
+        semantic_error("malformed tuple target");
+    }
+
+    for (size_t i = 0; i < target->child_count; i++) {
+        count += tuple_target_leaf_count(target->children[i]);
+    }
+    return count;
+}
+
+static size_t tuple_type_leaf_count(ValueType type)
+{
+    size_t count = 0;
+
+    if (!semantic_type_is_tuple(type)) {
+        return 1;
+    }
+
+    for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+        count += tuple_type_leaf_count(semantic_tuple_element_type(type, i));
+    }
+    return count;
+}
+
+static int tuple_target_matches_type(const ParseNode *target, ValueType type)
+{
+    if (target->kind == NODE_PRIMARY) {
+        return !semantic_type_is_tuple(type);
+    }
+
+    if (target->kind != NODE_TUPLE_TARGET || !semantic_type_is_tuple(type)) {
+        return 0;
+    }
+    if (target->child_count != semantic_tuple_element_count(type)) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < target->child_count; i++) {
+        if (!tuple_target_matches_type(target->children[i], semantic_tuple_element_type(type, i))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void bind_tuple_target_declaration(
+    SemanticInfo *info,
+    const ParseNode *target,
+    Scope *scope,
+    ValueType tuple_type)
+{
+    if (target->kind == NODE_PRIMARY) {
+        semantic_bind_variable(scope, target->value, tuple_type);
+        semantic_record_node_type(info, target, tuple_type);
+        return;
+    }
+
+    semantic_record_node_type(info, target, tuple_type);
+    for (size_t i = 0; i < target->child_count; i++) {
+        bind_tuple_target_declaration(
+            info,
+            target->children[i],
+            scope,
+            semantic_tuple_element_type(tuple_type, i));
+    }
+}
+
+static void check_tuple_target_assignment(
+    SemanticInfo *info,
+    const ParseNode *target,
+    Scope *scope,
+    ValueType tuple_type,
+    const ParseNode *expr)
+{
+    if (target->kind == NODE_PRIMARY) {
+        VariableBinding *var = semantic_find_variable(scope, target->value);
+
+        if (var == NULL) {
+            semantic_error_at_node(target, "assignment to undeclared variable '%s'", target->value);
+        }
+        if (!semantic_is_assignable(var->type, tuple_type)) {
+            semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
+                semantic_type_name(tuple_type),
+                semantic_type_name(var->type),
+                target->value);
+        }
+        semantic_record_node_type(info, target, var->type);
+        return;
+    }
+
+    semantic_record_node_type(info, target, tuple_type);
+    for (size_t i = 0; i < target->child_count; i++) {
+        check_tuple_target_assignment(
+            info,
+            target->children[i],
+            scope,
+            semantic_tuple_element_type(tuple_type, i),
+            expr);
+    }
+}
+
 static int typecheck_branch_suite(
     SemanticInfo *info,
     const ParseNode *suite,
@@ -176,19 +285,24 @@ static int typecheck_simple_statement(
 
     if (target->kind == NODE_TUPLE_TARGET) {
         ValueType tuple_type;
-        size_t target_count = target->child_count;
+        size_t target_count = tuple_target_leaf_count(target);
 
         if (semantic_is_type_assignment(statement_tail)) {
             tuple_type = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
             if (!semantic_type_is_tuple(tuple_type)) {
                 semantic_error_at_node(target, "tuple destructuring requires a tuple type annotation");
             }
-            if (semantic_tuple_element_count(tuple_type) != target_count) {
+            if (tuple_type_leaf_count(tuple_type) != target_count) {
                 semantic_error_at_node(target,
                     "tuple target expects %zu elements but type %s has %zu",
                     target_count,
                     semantic_type_name(tuple_type),
-                    semantic_tuple_element_count(tuple_type));
+                    tuple_type_leaf_count(tuple_type));
+            }
+            if (!tuple_target_matches_type(target, tuple_type)) {
+                semantic_error_at_node(target,
+                    "tuple target shape does not match %s",
+                    semantic_type_name(tuple_type));
             }
 
             expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, tuple_type);
@@ -198,14 +312,7 @@ static int typecheck_simple_statement(
                     semantic_type_name(tuple_type));
             }
 
-            for (size_t i = 0; i < target_count; i++) {
-                const ParseNode *name = semantic_expect_child(target, i, NODE_PRIMARY);
-                ValueType element_type = semantic_tuple_element_type(tuple_type, i);
-
-                semantic_bind_variable(scope, name->value, element_type);
-                semantic_record_node_type(info, name, element_type);
-            }
-            semantic_record_node_type(info, target, tuple_type);
+            bind_tuple_target_declaration(info, target, scope, tuple_type);
             return 0;
         }
 
@@ -213,30 +320,19 @@ static int typecheck_simple_statement(
         if (!semantic_type_is_tuple(expr_type)) {
             semantic_error_at_node(expr, "tuple destructuring requires a tuple value");
         }
-        if (semantic_tuple_element_count(expr_type) != target_count) {
+        if (tuple_type_leaf_count(expr_type) != target_count) {
             semantic_error_at_node(expr,
                 "tuple target expects %zu elements but got %zu",
                 target_count,
-                semantic_tuple_element_count(expr_type));
+                tuple_type_leaf_count(expr_type));
+        }
+        if (!tuple_target_matches_type(target, expr_type)) {
+            semantic_error_at_node(expr,
+                "tuple target shape does not match %s",
+                semantic_type_name(expr_type));
         }
 
-        for (size_t i = 0; i < target_count; i++) {
-            const ParseNode *name = semantic_expect_child(target, i, NODE_PRIMARY);
-            VariableBinding *var = semantic_find_variable(scope, name->value);
-            ValueType element_type = semantic_tuple_element_type(expr_type, i);
-
-            if (var == NULL) {
-                semantic_error_at_node(name, "assignment to undeclared variable '%s'", name->value);
-            }
-            if (!semantic_is_assignable(var->type, element_type)) {
-                semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
-                    semantic_type_name(element_type),
-                    semantic_type_name(var->type),
-                    name->value);
-            }
-            semantic_record_node_type(info, name, var->type);
-        }
-        semantic_record_node_type(info, target, expr_type);
+        check_tuple_target_assignment(info, target, scope, expr_type, expr);
         return 0;
     }
 

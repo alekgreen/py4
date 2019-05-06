@@ -39,7 +39,8 @@ static int tuple_element_type_supported(ValueType type)
         type == TYPE_FLOAT ||
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
-        type == TYPE_STR;
+        type == TYPE_STR ||
+        semantic_type_is_tuple(type);
 }
 
 static ValueType infer_list_literal_with_hint(

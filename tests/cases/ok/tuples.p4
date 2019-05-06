@@ -13,6 +13,8 @@ def main() -> None:
     a: int = 0
     b: float = 0.0
     (a, b) = pair
+    nested: ((int,float),int) = ((4, 5.5), 6)
+    ((inner_a, inner_b), inner_c): ((int,float),int) = nested
     widened: (float,float) = (1, 2)
     print(first(pair))
     print(second(pair))
@@ -20,5 +22,8 @@ def main() -> None:
     print(right)
     print(a)
     print(b)
+    print(inner_a)
+    print(inner_b)
+    print(inner_c)
     print(widened[0])
     print(widened[1])

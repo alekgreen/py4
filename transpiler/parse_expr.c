@@ -200,15 +200,27 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
 static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok)
 {
     ParseNode *node = create_node_from_token(NODE_TUPLE_TARGET, lparen_tok);
+    Token look = peek_ts(ts);
 
-    add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
+    if (look.type == TOKEN_LPAREN) {
+        look = expect(ts, TOKEN_LPAREN);
+        add_child(node, parse_TUPLE_TARGET(ts, look));
+    } else {
+        add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
+    }
     if (peek_ts(ts).type != TOKEN_COMMA) {
         parse_error(peek_ts(ts), "tuple target must have at least two elements");
     }
 
     while (peek_ts(ts).type == TOKEN_COMMA) {
         get_from_ts(ts);
-        add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
+        look = peek_ts(ts);
+        if (look.type == TOKEN_LPAREN) {
+            look = expect(ts, TOKEN_LPAREN);
+            add_child(node, parse_TUPLE_TARGET(ts, look));
+        } else {
+            add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
+        }
     }
 
     expect(ts, TOKEN_RPAREN);
