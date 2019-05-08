@@ -34,17 +34,20 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
     arg_text = codegen_expression_to_c_string(ctx, arguments->children[0]);
 
     codegen_emit_indent(ctx);
-        if (semantic_type_is_union(arg_type)) {
-            codegen_build_union_print_name(helper_name, sizeof(helper_name), arg_type);
-            fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
-            free(arg_text);
-            return;
-        }
-        if (semantic_type_is_tuple(arg_type)) {
-            free(arg_text);
-            codegen_error("print does not support %s yet", semantic_type_name(arg_type));
-            return;
-        }
+    if (semantic_type_is_union(arg_type)) {
+        codegen_build_union_print_name(helper_name, sizeof(helper_name), arg_type);
+        fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
+        free(arg_text);
+        return;
+    }
+    if (semantic_type_is_tuple(arg_type)) {
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), arg_type);
+        fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
+        codegen_emit_indent(ctx);
+        fputs("printf(\"\\n\");\n", ctx->out);
+        free(arg_text);
+        return;
+    }
 
     switch (arg_type) {
         case TYPE_INT:

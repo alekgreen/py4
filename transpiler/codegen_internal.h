@@ -70,6 +70,7 @@ const ParseNode *codegen_find_function_definition(const ParseNode *root, const c
 const char *codegen_type_suffix(ValueType type);
 const char *codegen_type_field(ValueType type);
 void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type);
+void codegen_build_tuple_print_name(char *buffer, size_t size, ValueType type);
 const char *codegen_list_struct_name(ValueType type);
 const char *codegen_list_runtime_prefix(ValueType type);
 const char *codegen_list_element_c_type(ValueType type);

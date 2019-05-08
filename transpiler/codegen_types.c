@@ -42,6 +42,16 @@ void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type)
     }
 }
 
+void codegen_build_tuple_print_name(char *buffer, size_t size, ValueType type)
+{
+    char base_name[MAX_NAME_LEN];
+    const char *trimmed;
+
+    codegen_build_tuple_base_name(base_name, sizeof(base_name), type);
+    trimmed = strncmp(base_name, "py4_", 4) == 0 ? base_name + 4 : base_name;
+    snprintf(buffer, size, "py4_print_%s", trimmed);
+}
+
 void codegen_error(const char *message, ...)
 {
     va_list args;
@@ -596,6 +606,37 @@ static void emit_scalar_print_case(FILE *out, ValueType type, const char *value_
     }
 }
 
+static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_expr)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "            %s(%s);\n", helper_name, value_expr);
+        return;
+    }
+
+    switch (type) {
+        case TYPE_INT:
+            fprintf(out, "            printf(\"%%d\", %s);\n", value_expr);
+            return;
+        case TYPE_FLOAT:
+            fprintf(out, "            printf(\"%%g\", %s);\n", value_expr);
+            return;
+        case TYPE_BOOL:
+            fprintf(out, "            printf(\"%%s\", %s ? \"True\" : \"False\");\n", value_expr);
+            return;
+        case TYPE_CHAR:
+            fprintf(out, "            printf(\"%%c\", %s);\n", value_expr);
+            return;
+        case TYPE_STR:
+            fprintf(out, "            printf(\"%%s\", %s);\n", value_expr);
+            return;
+        default:
+            codegen_error("unsupported tuple print type %s", semantic_type_name(type));
+    }
+}
+
 static void emit_union_definition(CodegenContext *ctx, ValueType type)
 {
     char base_name[MAX_NAME_LEN];
@@ -659,6 +700,8 @@ static void emit_union_definition(CodegenContext *ctx, ValueType type)
 
 void codegen_emit_tuple_runtime(CodegenContext *ctx)
 {
+    char helper_name[MAX_NAME_LEN];
+
     for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
         ValueType tuple_type = semantic_tuple_type_at(i);
         char tuple_name[MAX_NAME_LEN];
@@ -671,6 +714,41 @@ void codegen_emit_tuple_runtime(CodegenContext *ctx)
             fprintf(ctx->out, " item%zu;\n", j);
         }
         fprintf(ctx->out, "} %s;\n\n", tuple_name);
+    }
+
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        ValueType tuple_type = semantic_tuple_type_at(i);
+        char tuple_name[MAX_NAME_LEN];
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s value);\n", helper_name, tuple_name);
+    }
+
+    if (semantic_tuple_type_count() > 0) {
+        fputc('\n', ctx->out);
+    }
+
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        ValueType tuple_type = semantic_tuple_type_at(i);
+        char tuple_name[MAX_NAME_LEN];
+        size_t element_count = semantic_tuple_element_count(tuple_type);
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s value)\n{\n", helper_name, tuple_name);
+        fputs("    printf(\"(\");\n", ctx->out);
+        for (size_t j = 0; j < element_count; j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            if (j > 0) {
+                fputs("    printf(\", \");\n", ctx->out);
+            }
+            snprintf(value_expr, sizeof(value_expr), "value.item%zu", j);
+            emit_tuple_value_print(ctx->out, semantic_tuple_element_type(tuple_type, j), value_expr);
+        }
+        fputs("    printf(\")\");\n", ctx->out);
+        fputs("}\n\n", ctx->out);
     }
 }
 

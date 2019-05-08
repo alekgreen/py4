@@ -25,5 +25,7 @@ def main() -> None:
     print(inner_a)
     print(inner_b)
     print(inner_c)
+    print(pair)
+    print(nested)
     print(widened[0])
     print(widened[1])
