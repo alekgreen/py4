@@ -42,6 +42,10 @@ static int typecheck_statement(
     Scope *scope,
     FunctionContext *current_function,
     int allow_function_defs);
+static void collect_classes(const ParseNode *root);
+static void validate_class_definitions(SemanticInfo *info, const ParseNode *root);
+static void collect_functions(SemanticInfo *info, const ParseNode *root);
+static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
 
 static size_t tuple_target_leaf_count(const ParseNode *target)
 {
@@ -547,6 +551,28 @@ static int typecheck_for_statement(
     return 0;
 }
 
+static void collect_classes(const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
+
+        if (payload->kind == NODE_CLASS_DEF) {
+            semantic_register_class(payload);
+        }
+    }
+}
+
+static void validate_class_definitions(SemanticInfo *info, const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
+
+        if (payload->kind == NODE_CLASS_DEF) {
+            semantic_define_class_fields(info, payload);
+        }
+    }
+}
+
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -557,6 +583,9 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         const char *name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
+        if (semantic_find_class_type(name) != 0) {
+            semantic_error_at_node(payload->children[0], "function name '%s' conflicts with class", name);
+        }
         if (semantic_find_function(info->functions, name) != NULL) {
             semantic_error_at_node(payload->children[0], "duplicate function '%s'", name);
         }
@@ -637,6 +666,10 @@ static int typecheck_statement(
         return 0;
     }
 
+    if (payload->kind == NODE_CLASS_DEF) {
+        semantic_error_at_node(payload->children[0], "class definitions are only supported at module scope");
+    }
+
     if (payload->kind == NODE_IMPORT_STATEMENT) {
         semantic_error_at_node(payload, "imports are only supported at module scope");
     }
@@ -675,6 +708,8 @@ SemanticInfo *analyze_program(const ParseNode *root)
         exit(1);
     }
 
+    collect_classes(root);
+    validate_class_definitions(info, root);
     collect_functions(info, root);
 
     for (size_t i = 0; i < root->child_count; i++) {
@@ -683,6 +718,8 @@ SemanticInfo *analyze_program(const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             semantic_error_at_node(payload, "imports should be resolved before semantic analysis");
+        } else if (payload->kind == NODE_CLASS_DEF) {
+            continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
         } else {

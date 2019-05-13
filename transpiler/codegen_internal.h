@@ -99,6 +99,7 @@ void codegen_collect_union_types_from_node(CodegenContext *ctx, const ParseNode 
 void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *node);
 void codegen_emit_container_runtime(CodegenContext *ctx);
 void codegen_emit_tuple_runtime(CodegenContext *ctx);
+void codegen_emit_class_types(CodegenContext *ctx);
 void codegen_emit_union_runtime(CodegenContext *ctx);
 void codegen_collect_program_state(CodegenContext *ctx, const ParseNode *root);
 char *codegen_type_to_c_string(ValueType type);

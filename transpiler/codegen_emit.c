@@ -800,6 +800,10 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_CLASS_DEF) {
+        codegen_error("class definitions are only supported at module scope");
+    }
+
     if (payload->kind == NODE_WHILE_STATEMENT) {
         emit_while_statement(ctx, payload);
         return;
@@ -855,6 +859,8 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_CLASS_DEF) {
+            continue;
         } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
             if (payload->child_count == 2 &&
                 (payload->children[0]->kind == NODE_PRIMARY || payload->children[0]->kind == NODE_TUPLE_TARGET) &&
@@ -884,6 +890,8 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_CLASS_DEF) {
+            continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_signature(ctx, payload, 1);
             wrote_any = 1;
@@ -913,6 +921,8 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_CLASS_DEF) {
+            continue;
         } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
             const ParseNode *name;
             const ParseNode *statement_tail;
@@ -1006,6 +1016,8 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_CLASS_DEF) {
+            continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_definition(ctx, payload);
             fputc('\n', ctx->out);
@@ -1047,6 +1059,7 @@ void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n\n", out);
     codegen_emit_container_runtime(&ctx);
     codegen_emit_tuple_runtime(&ctx);
+    codegen_emit_class_types(&ctx);
     codegen_emit_union_runtime(&ctx);
     emit_global_declarations(&ctx, root);
     emit_function_prototypes(&ctx, root);

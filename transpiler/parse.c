@@ -138,6 +138,8 @@ static ParseNode *parse_CONTINUE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
 static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FOR_STATEMENT(TokenStream *ts);
+static ParseNode *parse_CLASS_DEF(TokenStream *ts);
+static ParseNode *parse_FIELD_DECL(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
@@ -224,6 +226,8 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_IF_STATEMENT:         return "IF_STATEMENT";
         case NODE_WHILE_STATEMENT:      return "WHILE_STATEMENT";
         case NODE_FOR_STATEMENT:        return "FOR_STATEMENT";
+        case NODE_CLASS_DEF:            return "CLASS_DEF";
+        case NODE_FIELD_DECL:           return "FIELD_DECL";
         case NODE_ELIF_CLAUSE:          return "ELIF_CLAUSE";
         case NODE_ELSE_CLAUSE:          return "ELSE_CLAUSE";
         case NODE_STATEMENT_TAIL:       return "STATEMENT_TAIL";
@@ -310,6 +314,8 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
         add_child(node, parse_WHILE_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "for")) {
         add_child(node, parse_FOR_STATEMENT(ts));
+    } else if (parse_is_keyword_token(peek_ts(ts), "class")) {
+        add_child(node, parse_CLASS_DEF(ts));
     } else {
         add_child(node, parse_SIMPLE_STATEMENT(ts));
     }
@@ -388,6 +394,48 @@ static ParseNode *parse_FOR_STATEMENT(TokenStream *ts)
     expect(ts, TOKEN_NEWLINE);
     expect(ts, TOKEN_INDENT);
     add_child(node, parse_SUITE(ts));
+    expect(ts, TOKEN_DEDENT);
+    return node;
+}
+
+static ParseNode *parse_FIELD_DECL(TokenStream *ts)
+{
+    Token field_tok = expect(ts, TOKEN_IDENTIFIER);
+    ParseNode *node = create_node_from_token(NODE_FIELD_DECL, field_tok);
+
+    expect(ts, TOKEN_COLON);
+    add_child(node, parse_TYPE(ts));
+    return node;
+}
+
+static ParseNode *parse_CLASS_DEF(TokenStream *ts)
+{
+    Token class_tok = parse_expect_keyword(ts, "class");
+    ParseNode *node = create_node_from_token(NODE_CLASS_DEF, class_tok);
+    Token name;
+    Token colon_tok;
+
+    name = expect(ts, TOKEN_IDENTIFIER);
+    add_child(node, create_node_from_token(NODE_PRIMARY, name));
+
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    parse_skip_newlines(ts);
+
+    while (peek_ts(ts).type != TOKEN_DEDENT && peek_ts(ts).type != TOKEN_EOF) {
+        add_child(node, parse_FIELD_DECL(ts));
+        if (peek_ts(ts).type == TOKEN_NEWLINE) {
+            get_from_ts(ts);
+        }
+        parse_skip_newlines(ts);
+    }
+
+    if (node->child_count == 2) {
+        parse_error_at_node(node, "class body must declare at least one field");
+    }
+
     expect(ts, TOKEN_DEDENT);
     return node;
 }

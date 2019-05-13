@@ -12,8 +12,19 @@ typedef struct {
     char name[128];
 } TupleTypeInfo;
 
+typedef struct {
+    ValueType id;
+    const char *name;
+    const ParseNode *node;
+    size_t field_count;
+    const char *field_names[MAX_CLASS_FIELDS];
+    ValueType field_types[MAX_CLASS_FIELDS];
+} ClassTypeInfo;
+
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
 static size_t TUPLE_TYPE_COUNT = 0;
+static ClassTypeInfo CLASS_TYPES[MAX_CLASS_TYPES];
+static size_t CLASS_TYPE_COUNT = 0;
 
 static const TupleTypeInfo *find_tuple_type(ValueType type)
 {
@@ -24,6 +35,18 @@ static const TupleTypeInfo *find_tuple_type(ValueType type)
     }
 
     semantic_error("unknown tuple type id %u", type);
+    return NULL;
+}
+
+static ClassTypeInfo *find_class_type(ValueType type)
+{
+    for (size_t i = 0; i < CLASS_TYPE_COUNT; i++) {
+        if (CLASS_TYPES[i].id == type) {
+            return &CLASS_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown class type id %u", type);
     return NULL;
 }
 
@@ -58,6 +81,9 @@ static const char *type_member_name(ValueType type)
 {
     if (semantic_type_is_tuple(type)) {
         return find_tuple_type(type)->name;
+    }
+    if (semantic_type_is_class(type)) {
+        return find_class_type(type)->name;
     }
 
     switch (type) {
@@ -108,20 +134,30 @@ static ValueType parse_named_type_atom(const char *name)
         return TYPE_LIST_CHAR;
     }
 
-    semantic_error("unsupported type '%s'", name);
     return 0;
 }
 
-static ValueType parse_type_atom_node(const ParseNode *node)
+static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 {
     ValueType elements[MAX_TUPLE_ELEMENTS];
+    ValueType named_type;
 
     if (node == NULL || node->kind != NODE_PRIMARY || node->value == NULL) {
         semantic_error("malformed type atom");
     }
 
     if (node->child_count == 0) {
-        return parse_named_type_atom(node->value);
+        named_type = parse_named_type_atom(node->value);
+        if (named_type != 0) {
+            return named_type;
+        }
+
+        named_type = semantic_find_class_type(node->value);
+        if (named_type != 0) {
+            return named_type;
+        }
+
+        semantic_error_at_node(node, "unsupported type '%s'", node->value);
     }
 
     if (node->child_count < 2) {
@@ -132,7 +168,7 @@ static ValueType parse_type_atom_node(const ParseNode *node)
     }
 
     for (size_t i = 0; i < node->child_count; i++) {
-        elements[i] = parse_type_atom_node(semantic_expect_child(node, i, NODE_PRIMARY));
+        elements[i] = parse_type_atom_node(info, semantic_expect_child(node, i, NODE_PRIMARY));
     }
 
     return semantic_make_tuple_type(elements, node->child_count);
@@ -140,7 +176,8 @@ static ValueType parse_type_atom_node(const ParseNode *node)
 
 int semantic_type_contains(ValueType type, ValueType member)
 {
-    if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member)) {
+    if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member) ||
+        semantic_type_is_class(type) || semantic_type_is_class(member)) {
         return type == member;
     }
     return member != 0 && (type & member) == member;
@@ -148,7 +185,7 @@ int semantic_type_contains(ValueType type, ValueType member)
 
 int semantic_type_is_union(ValueType type)
 {
-    if (semantic_type_is_tuple(type) || (type & ~TYPE_ATOMIC_MASK) != 0) {
+    if (semantic_type_is_tuple(type) || semantic_type_is_class(type) || (type & ~TYPE_ATOMIC_MASK) != 0) {
         return 0;
     }
     return count_type_bits(type) > 1;
@@ -156,7 +193,12 @@ int semantic_type_is_union(ValueType type)
 
 int semantic_type_is_tuple(ValueType type)
 {
-    return type >= TYPE_TUPLE_BASE;
+    return type >= TYPE_TUPLE_BASE && type < TYPE_CLASS_BASE;
+}
+
+int semantic_type_is_class(ValueType type)
+{
+    return type >= TYPE_CLASS_BASE;
 }
 
 int semantic_type_is_ref(ValueType type)
@@ -212,7 +254,7 @@ const char *semantic_type_name(ValueType type)
         TYPE_LIST_CHAR
     };
 
-    if (semantic_type_is_tuple(type)) {
+    if (semantic_type_is_tuple(type) || semantic_type_is_class(type)) {
         return type_member_name(type);
     }
 
@@ -352,7 +394,8 @@ int semantic_is_assignable(ValueType target, ValueType value)
         return 0;
     }
 
-    if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value)) {
+    if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value) ||
+        semantic_type_is_class(target) || semantic_type_is_class(value)) {
         return target == value;
     }
 
@@ -464,6 +507,138 @@ ValueType semantic_tuple_type_at(size_t index)
     return TUPLE_TYPES[index].id;
 }
 
+ValueType semantic_find_class_type(const char *name)
+{
+    for (size_t i = 0; i < CLASS_TYPE_COUNT; i++) {
+        if (strcmp(CLASS_TYPES[i].name, name) == 0) {
+            return CLASS_TYPES[i].id;
+        }
+    }
+    return 0;
+}
+
+ValueType semantic_register_class(const ParseNode *class_def)
+{
+    const ParseNode *name_node;
+    const char *name;
+    ValueType builtin_type;
+    ClassTypeInfo *entry;
+
+    if (class_def == NULL || class_def->kind != NODE_CLASS_DEF) {
+        semantic_error("malformed class definition");
+    }
+
+    name_node = semantic_expect_child(class_def, 0, NODE_PRIMARY);
+    name = name_node->value;
+    if (semantic_find_class_type(name) != 0) {
+        semantic_error_at_node(name_node, "duplicate class '%s'", name);
+    }
+
+    builtin_type = parse_named_type_atom(name);
+    if (builtin_type != 0) {
+        semantic_error_at_node(name_node, "class name '%s' conflicts with built-in type", name);
+    }
+
+    if (CLASS_TYPE_COUNT >= MAX_CLASS_TYPES) {
+        semantic_error("too many classes in one program");
+    }
+
+    entry = &CLASS_TYPES[CLASS_TYPE_COUNT];
+    entry->id = TYPE_CLASS_BASE + (ValueType)CLASS_TYPE_COUNT;
+    entry->name = name;
+    entry->node = class_def;
+    entry->field_count = 0;
+    CLASS_TYPE_COUNT++;
+    return entry->id;
+}
+
+void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def)
+{
+    ClassTypeInfo *entry;
+    ValueType class_type;
+
+    class_type = semantic_find_class_type(semantic_expect_child(class_def, 0, NODE_PRIMARY)->value);
+    if (class_type == 0) {
+        semantic_error("class definition missing from registry");
+    }
+    entry = find_class_type(class_type);
+
+    for (size_t i = 2; i < class_def->child_count; i++) {
+        const ParseNode *field = semantic_expect_child(class_def, i, NODE_FIELD_DECL);
+        const ParseNode *type_node = semantic_expect_child(field, 0, NODE_TYPE);
+        ValueType field_type = semantic_parse_type_node(info, type_node);
+
+        if (entry->field_count >= MAX_CLASS_FIELDS) {
+            semantic_error_at_node(field, "class '%s' supports at most %d fields", entry->name, MAX_CLASS_FIELDS);
+        }
+        for (size_t j = 0; j < entry->field_count; j++) {
+            if (strcmp(entry->field_names[j], field->value) == 0) {
+                semantic_error_at_node(field, "duplicate field '%s' in class '%s'", field->value, entry->name);
+            }
+        }
+        if (semantic_type_is_union(field_type)) {
+            semantic_error_at_node(field, "class fields cannot use union types yet");
+        }
+        if (semantic_type_is_ref(field_type)) {
+            semantic_error_at_node(field, "class fields cannot use list types yet");
+        }
+        if (semantic_type_is_class(field_type)) {
+            semantic_error_at_node(field, "class fields cannot use class types yet");
+        }
+        if (field_type == TYPE_NONE) {
+            semantic_error_at_node(field, "class fields cannot use None");
+        }
+
+        entry->field_names[entry->field_count] = field->value;
+        entry->field_types[entry->field_count] = field_type;
+        entry->field_count++;
+        semantic_record_node_type(info, field, field_type);
+    }
+}
+
+size_t semantic_class_type_count(void)
+{
+    return CLASS_TYPE_COUNT;
+}
+
+ValueType semantic_class_type_at(size_t index)
+{
+    if (index >= CLASS_TYPE_COUNT) {
+        semantic_error("class type index out of bounds");
+    }
+    return CLASS_TYPES[index].id;
+}
+
+const char *semantic_class_name(ValueType type)
+{
+    return find_class_type(type)->name;
+}
+
+size_t semantic_class_field_count(ValueType type)
+{
+    return find_class_type(type)->field_count;
+}
+
+const char *semantic_class_field_name(ValueType type, size_t index)
+{
+    ClassTypeInfo *info = find_class_type(type);
+
+    if (index >= info->field_count) {
+        semantic_error("class field index out of bounds for %s", info->name);
+    }
+    return info->field_names[index];
+}
+
+ValueType semantic_class_field_type(ValueType type, size_t index)
+{
+    ClassTypeInfo *info = find_class_type(type);
+
+    if (index >= info->field_count) {
+        semantic_error("class field index out of bounds for %s", info->name);
+    }
+    return info->field_types[index];
+}
+
 void semantic_record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type)
 {
     for (NodeTypeInfo *curr = info->node_types; curr != NULL; curr = curr->next) {
@@ -507,11 +682,15 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
 
     for (size_t i = 0; i < type_node->child_count; i++) {
         const ParseNode *member = semantic_expect_child(type_node, i, NODE_PRIMARY);
-        ValueType atom = parse_type_atom_node(member);
+        ValueType atom = parse_type_atom_node(info, member);
 
         if ((semantic_type_is_tuple(atom) || semantic_type_is_tuple(type)) &&
             (type != 0 || type_node->child_count > 1)) {
             semantic_error_at_node(type_node, "tuple types cannot be used inside a union yet");
+        }
+        if ((semantic_type_is_class(atom) || semantic_type_is_class(type)) &&
+            (type != 0 || type_node->child_count > 1)) {
+            semantic_error_at_node(type_node, "class types cannot be used inside a union yet");
         }
 
         if (semantic_type_contains(type, atom)) {
@@ -531,9 +710,12 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
     }
     if (semantic_type_is_union(type)) {
         for (size_t i = 0; i < type_node->child_count; i++) {
-            ValueType member_type = parse_type_atom_node(type_node->children[i]);
+            ValueType member_type = parse_type_atom_node(info, type_node->children[i]);
             if (semantic_type_is_tuple(member_type)) {
                 semantic_error_at_node(type_node, "tuple types cannot be used inside a union yet");
+            }
+            if (semantic_type_is_class(member_type)) {
+                semantic_error_at_node(type_node, "class types cannot be used inside a union yet");
             }
         }
     }

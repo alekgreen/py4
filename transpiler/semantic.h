@@ -7,8 +7,11 @@ typedef unsigned int ValueType;
 
 #define TYPE_ATOMIC_MASK ((1u << 10) - 1u)
 #define TYPE_TUPLE_BASE (1u << 16)
+#define TYPE_CLASS_BASE (1u << 24)
 #define MAX_TUPLE_TYPES 64
 #define MAX_TUPLE_ELEMENTS 8
+#define MAX_CLASS_TYPES 64
+#define MAX_CLASS_FIELDS 32
 
 enum {
     TYPE_INT = 1u << 0,
@@ -32,6 +35,7 @@ const char *semantic_type_name(ValueType type);
 int semantic_type_contains(ValueType type, ValueType member);
 int semantic_type_is_union(ValueType type);
 int semantic_type_is_tuple(ValueType type);
+int semantic_type_is_class(ValueType type);
 int semantic_type_is_ref(ValueType type);
 int semantic_type_is_list(ValueType type);
 ValueType semantic_list_element_type(ValueType type);
@@ -41,5 +45,11 @@ ValueType semantic_tuple_element_type(ValueType type, size_t index);
 size_t semantic_tuple_type_count(void);
 ValueType semantic_tuple_type_at(size_t index);
 int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
+size_t semantic_class_type_count(void);
+ValueType semantic_class_type_at(size_t index);
+const char *semantic_class_name(ValueType type);
+size_t semantic_class_field_count(ValueType type);
+const char *semantic_class_field_name(ValueType type, size_t index);
+ValueType semantic_class_field_type(ValueType type, size_t index);
 
 #endif

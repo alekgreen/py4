@@ -199,6 +199,9 @@ const char *codegen_type_suffix(ValueType type)
         codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
         return tuple_name;
     }
+    if (semantic_type_is_class(type)) {
+        return semantic_class_name(type);
+    }
 
     switch (type) {
         case TYPE_INT: return "int";
@@ -219,6 +222,9 @@ const char *codegen_type_field(ValueType type)
 {
     if (semantic_type_is_tuple(type)) {
         codegen_error("tuple types are not valid union fields");
+    }
+    if (semantic_type_is_class(type)) {
+        codegen_error("class types are not valid union fields");
     }
 
     switch (type) {
@@ -317,6 +323,10 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         fputs(tuple_name, out);
         return;
     }
+    if (semantic_type_is_class(type)) {
+        fputs(semantic_class_name(type), out);
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:
@@ -371,6 +381,9 @@ char *codegen_type_to_c_string(ValueType type)
 
             codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
             return codegen_dup_printf("%s", tuple_name);
+        }
+        if (semantic_type_is_class(type)) {
+            return codegen_dup_printf("%s", semantic_class_name(type));
         }
     }
 
@@ -752,6 +765,20 @@ void codegen_emit_tuple_runtime(CodegenContext *ctx)
     }
 }
 
+void codegen_emit_class_types(CodegenContext *ctx)
+{
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        ValueType class_type = semantic_class_type_at(i);
+
+        fprintf(ctx->out, "typedef struct {\n");
+        for (size_t j = 0; j < semantic_class_field_count(class_type); j++) {
+            codegen_emit_scalar_c_type(ctx->out, semantic_class_field_type(class_type, j));
+            fprintf(ctx->out, " %s;\n", semantic_class_field_name(class_type, j));
+        }
+        fprintf(ctx->out, "} %s;\n\n", semantic_class_name(class_type));
+    }
+}
+
 static void emit_union_print_helper(CodegenContext *ctx, ValueType type)
 {
     char base_name[MAX_NAME_LEN];
@@ -861,7 +888,7 @@ void codegen_collect_program_state(CodegenContext *ctx, const ParseNode *root)
             if (codegen_is_main_function(payload)) {
                 ctx->has_user_main = 1;
             }
-        } else {
+        } else if (payload->kind != NODE_CLASS_DEF) {
             ctx->has_top_level_executable_statements = 1;
         }
     }
