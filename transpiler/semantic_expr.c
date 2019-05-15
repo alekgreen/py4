@@ -43,6 +43,53 @@ static int tuple_element_type_supported(ValueType type)
         semantic_type_is_tuple(type);
 }
 
+static ValueType infer_class_constructor_type(
+    SemanticInfo *info,
+    ValueType class_type,
+    const ParseNode *call,
+    const ParseNode *arguments,
+    Scope *scope)
+{
+    size_t field_count = semantic_class_field_count(class_type);
+
+    if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+        if (field_count != 0) {
+            semantic_error_at_node(call, "constructor '%s' expects %zu arguments",
+                semantic_class_name(class_type),
+                field_count);
+        }
+        semantic_record_node_type(info, call, class_type);
+        return class_type;
+    }
+
+    if (arguments->child_count != field_count) {
+        semantic_error_at_node(call, "constructor '%s' expects %zu arguments",
+            semantic_class_name(class_type),
+            field_count);
+    }
+
+    for (size_t i = 0; i < field_count; i++) {
+        ValueType field_type = semantic_class_field_type(class_type, i);
+        ValueType actual = semantic_infer_expression_type_with_hint(
+            info,
+            arguments->children[i],
+            scope,
+            field_type);
+
+        if (!semantic_is_assignable(field_type, actual)) {
+            semantic_error_at_node(arguments->children[i],
+                "constructor '%s' field '%s' expects %s but got %s",
+                semantic_class_name(class_type),
+                semantic_class_field_name(class_type, i),
+                semantic_type_name(field_type),
+                semantic_type_name(actual));
+        }
+    }
+
+    semantic_record_node_type(info, call, class_type);
+    return class_type;
+}
+
 static ValueType infer_list_literal_with_hint(
     SemanticInfo *info,
     const ParseNode *literal,
@@ -352,6 +399,7 @@ static ValueType infer_call_type(
 {
     const ParseNode *callee = semantic_expect_child(call, 0, NODE_PRIMARY);
     const ParseNode *arguments = semantic_expect_child(call, 1, NODE_ARGUMENTS);
+    ValueType class_type;
 
     if (is_print_call(call)) {
         if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
@@ -369,6 +417,9 @@ static ValueType infer_call_type(
         if (semantic_type_is_ref(arg_type)) {
             semantic_error_at_node(arguments->children[0], "print does not support %s yet", semantic_type_name(arg_type));
         }
+        if (semantic_type_is_class(arg_type)) {
+            semantic_error_at_node(arguments->children[0], "print does not support %s yet", semantic_type_name(arg_type));
+        }
 
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;
@@ -376,6 +427,11 @@ static ValueType infer_call_type(
 
     if (is_builtin_name(callee->value)) {
         return infer_builtin_call_type(info, callee->value, call, arguments, scope);
+    }
+
+    class_type = semantic_find_class_type(callee->value);
+    if (class_type != 0) {
+        return infer_class_constructor_type(info, class_type, call, arguments, scope);
     }
 
     FunctionInfo *fn = semantic_find_function(info->functions, callee->value);
@@ -498,6 +554,30 @@ ValueType semantic_infer_primary_type(
         return type;
     }
 
+    if (node->kind == NODE_FIELD_ACCESS) {
+        const ParseNode *base = node->children[0];
+        const ParseNode *field = semantic_expect_child(node, 1, NODE_PRIMARY);
+        ValueType base_type = semantic_infer_primary_type(info, base, scope);
+
+        if (!semantic_type_is_class(base_type)) {
+            semantic_error_at_node(base, "field access requires class value but got %s",
+                semantic_type_name(base_type));
+        }
+
+        for (size_t i = 0; i < semantic_class_field_count(base_type); i++) {
+            if (strcmp(semantic_class_field_name(base_type, i), field->value) == 0) {
+                type = semantic_class_field_type(base_type, i);
+                semantic_record_node_type(info, field, type);
+                semantic_record_node_type(info, node, type);
+                return type;
+            }
+        }
+
+        semantic_error_at_node(field, "class '%s' has no field '%s'",
+            semantic_class_name(base_type),
+            field->value);
+    }
+
     if (node->kind == NODE_INDEX) {
         ValueType container_type = semantic_infer_primary_type(info, node->children[0], scope);
         ValueType index_type = semantic_infer_expression_type(info, node->children[1], scope);
@@ -610,6 +690,9 @@ static void typecheck_comparison_operands(
     if (semantic_type_is_tuple(lhs_type) || semantic_type_is_tuple(rhs_type)) {
         semantic_error_at_node(operator_node, "operator '%s' does not support tuple operands", op);
     }
+    if (semantic_type_is_class(lhs_type) || semantic_type_is_class(rhs_type)) {
+        semantic_error_at_node(operator_node, "operator '%s' does not support class operands", op);
+    }
     if (semantic_type_is_ref(lhs_type) || semantic_type_is_ref(rhs_type)) {
         semantic_error_at_node(operator_node, "operator '%s' does not support %s operands",
             op,
@@ -673,6 +756,9 @@ ValueType semantic_infer_expression_type(
         }
         if (semantic_type_is_tuple(rhs_type)) {
             semantic_error_at_node(operator_node, "operator '%s' does not support tuple operands", operator_node->value);
+        }
+        if (semantic_type_is_class(rhs_type)) {
+            semantic_error_at_node(operator_node, "operator '%s' does not support class operands", operator_node->value);
         }
 
         if (!is_arithmetic_operator(operator_node->value)) {

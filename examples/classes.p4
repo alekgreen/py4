@@ -7,8 +7,16 @@ class Metrics:
     ok: bool
     sample: (int,float)
 
-def describe(p: Point, m: Metrics) -> None:
-    print("class metadata ready")
+def point_sum(p: Point) -> int:
+    return p.x + p.y
+
+def metric_sample_sum(m: Metrics) -> float:
+    return m.sample[0] + m.sample[1]
 
 def main() -> None:
-    print("classes")
+    p: Point = Point(3, 4)
+    m: Metrics = Metrics("load", True, (2, 1.5))
+    print(p.x)
+    print(point_sum(p))
+    print(m.ok)
+    print(metric_sample_sum(m))

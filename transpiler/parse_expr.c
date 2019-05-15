@@ -397,18 +397,24 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
         }
 
         if (peek_ts(ts).type == TOKEN_DOT) {
-            ParseNode *method_call;
-            Token method_name;
+            ParseNode *member_access;
+            Token member_name;
 
             expect(ts, TOKEN_DOT);
-            method_name = expect(ts, TOKEN_IDENTIFIER);
-            method_call = create_node(NODE_METHOD_CALL, TOKEN_NULL, NULL);
-            add_child(method_call, base);
-            add_child(method_call, create_node_from_token(NODE_PRIMARY, method_name));
-            expect(ts, TOKEN_LPAREN);
-            add_child(method_call, parse_ARGUMENTS(ts));
-            expect(ts, TOKEN_RPAREN);
-            base = method_call;
+            member_name = expect(ts, TOKEN_IDENTIFIER);
+            if (peek_ts(ts).type == TOKEN_LPAREN) {
+                member_access = create_node(NODE_METHOD_CALL, TOKEN_NULL, NULL);
+                add_child(member_access, base);
+                add_child(member_access, create_node_from_token(NODE_PRIMARY, member_name));
+                expect(ts, TOKEN_LPAREN);
+                add_child(member_access, parse_ARGUMENTS(ts));
+                expect(ts, TOKEN_RPAREN);
+            } else {
+                member_access = create_node(NODE_FIELD_ACCESS, TOKEN_NULL, NULL);
+                add_child(member_access, base);
+                add_child(member_access, create_node_from_token(NODE_PRIMARY, member_name));
+            }
+            base = member_access;
             continue;
         }
 

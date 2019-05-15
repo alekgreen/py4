@@ -51,5 +51,6 @@ const char *semantic_class_name(ValueType type);
 size_t semantic_class_field_count(ValueType type);
 const char *semantic_class_field_name(ValueType type, size_t index);
 ValueType semantic_class_field_type(ValueType type, size_t index);
+ValueType semantic_find_class_type(const char *name);
 
 #endif

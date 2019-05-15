@@ -543,6 +543,7 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
         const ParseNode *arguments = codegen_expect_child(node, 1, NODE_ARGUMENTS);
         const ParseNode *function_def;
         const ParseNode *parameters;
+        ValueType class_type;
 
         if (strcmp(callee->value, "print") == 0) {
             if (arguments->child_count == 1 && !codegen_is_epsilon_node(arguments->children[0])) {
@@ -551,6 +552,11 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
         } else if (is_codegen_builtin_name(callee->value)) {
             /* Builtins lower directly to runtime helpers and do not need union conversions. */
         } else {
+            class_type = semantic_find_class_type(callee->value);
+            if (class_type != 0) {
+                return;
+            }
+
             function_def = codegen_find_function_definition(ctx->root, callee->value);
             if (function_def == NULL) {
                 codegen_error("unknown function '%s' during conversion collection", callee->value);

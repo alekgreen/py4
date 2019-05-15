@@ -218,6 +218,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     const ParseNode *function_def = NULL;
     const ParseNode *parameters = NULL;
     ValueType return_type = semantic_type_of(ctx->semantic, call);
+    ValueType class_type = 0;
     char *arg_parts[32];
     ValueType cleanup_types[32];
     char *cleanup_names[32];
@@ -240,11 +241,16 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             return codegen_list_new_call(TYPE_LIST_CHAR);
         }
     } else {
-        function_def = codegen_find_function_definition(ctx->root, callee->value);
-        if (function_def == NULL) {
+        class_type = semantic_find_class_type(callee->value);
+        if (class_type == 0) {
+            function_def = codegen_find_function_definition(ctx->root, callee->value);
+        }
+        if (function_def == NULL && class_type == 0) {
             codegen_error("unknown function '%s' during code generation", callee->value);
         }
-        parameters = codegen_function_parameters(function_def);
+        if (function_def != NULL) {
+            parameters = codegen_function_parameters(function_def);
+        }
     }
 
     if (!(arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))) {
@@ -267,10 +273,12 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                 (strcmp(callee->value, "list_set") == 0 && i == 2)) {
                 target_type = semantic_list_element_type(semantic_type_of(ctx->semantic, arguments->children[0]));
             }
-        } else {
+        } else if (function_def != NULL) {
             const ParseNode *parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
             const ParseNode *type_node = codegen_expect_child(parameter, 0, NODE_TYPE);
             target_type = semantic_type_of(ctx->semantic, type_node);
+        } else if (class_type != 0) {
+            target_type = semantic_class_field_type(class_type, i);
         }
 
         if (semantic_type_is_ref(target_type) && semantic_type_is_ref(arg_type)) {
@@ -308,6 +316,10 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "len", args);
     } else if (strcmp(callee->value, "list_set") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
+    } else if (class_type != 0) {
+        char *type_name = codegen_type_to_c_string(class_type);
+        result = codegen_dup_printf("((%s){%s})", type_name, args);
+        free(type_name);
     } else {
         result = codegen_dup_printf("%s(%s)", callee->value, args);
     }
@@ -427,6 +439,14 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 
     if (primary->kind == NODE_METHOD_CALL) {
         return method_call_to_c_string(ctx, primary);
+    }
+
+    if (primary->kind == NODE_FIELD_ACCESS) {
+        char *base = codegen_primary_to_c_string(ctx, primary->children[0]);
+        char *result = codegen_dup_printf("((%s).%s)", base, primary->children[1]->value);
+
+        free(base);
+        return result;
     }
 
     if (primary->kind == NODE_LIST_LITERAL) {

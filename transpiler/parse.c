@@ -245,6 +245,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_TUPLE_TARGET:         return "TUPLE_TARGET";
         case NODE_CALL:                 return "CALL";
         case NODE_METHOD_CALL:          return "METHOD_CALL";
+        case NODE_FIELD_ACCESS:         return "FIELD_ACCESS";
         case NODE_INDEX:                return "INDEX";
         case NODE_ARGUMENTS:            return "ARGUMENTS";
         case NODE_COLON:                return "COLON";
