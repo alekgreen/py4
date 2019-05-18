@@ -174,7 +174,6 @@ static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok)
 ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
 {
     ParseNode *node;
-    ParseNode *index_node;
     Token tok = peek_ts(ts);
 
     if (tok.type == TOKEN_LPAREN) {
@@ -185,13 +184,33 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
     tok = expect(ts, TOKEN_IDENTIFIER);
 
     node = create_node_from_token(NODE_PRIMARY, tok);
-    while (peek_ts(ts).type == TOKEN_LBRACKET) {
-        expect(ts, TOKEN_LBRACKET);
-        index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
-        add_child(index_node, node);
-        add_child(index_node, parse_EXPRESSION(ts));
-        expect(ts, TOKEN_RBRACKET);
-        node = index_node;
+    while (1) {
+        if (peek_ts(ts).type == TOKEN_DOT) {
+            ParseNode *field_node;
+            Token field_name;
+
+            expect(ts, TOKEN_DOT);
+            field_name = expect(ts, TOKEN_IDENTIFIER);
+            field_node = create_node(NODE_FIELD_ACCESS, TOKEN_NULL, NULL);
+            add_child(field_node, node);
+            add_child(field_node, create_node_from_token(NODE_PRIMARY, field_name));
+            node = field_node;
+            continue;
+        }
+
+        if (peek_ts(ts).type == TOKEN_LBRACKET) {
+            ParseNode *index_node;
+
+            expect(ts, TOKEN_LBRACKET);
+            index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
+            add_child(index_node, node);
+            add_child(index_node, parse_EXPRESSION(ts));
+            expect(ts, TOKEN_RBRACKET);
+            node = index_node;
+            continue;
+        }
+
+        break;
     }
 
     return node;

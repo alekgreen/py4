@@ -16,6 +16,8 @@ def metric_sample_sum(m: Metrics) -> float:
 def main() -> None:
     p: Point = Point(3, 4)
     m: Metrics = Metrics("load", True, (2, 1.5))
+    p.x = 10
+    m.ok = False
     print(p.x)
     print(point_sum(p))
     print(m.ok)

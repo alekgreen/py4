@@ -287,6 +287,26 @@ static int typecheck_simple_statement(
         return 0;
     }
 
+    if (target->kind == NODE_FIELD_ACCESS) {
+        ValueType field_type;
+
+        if (semantic_is_type_assignment(statement_tail)) {
+            semantic_error_at_node(target, "field assignment cannot use a type annotation");
+        }
+
+        field_type = semantic_infer_primary_type(info, target, scope);
+        expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, field_type);
+        if (!semantic_is_assignable(field_type, expr_type)) {
+            semantic_error_at_node(expr, "cannot assign %s to %s field '%s'",
+                semantic_type_name(expr_type),
+                semantic_type_name(field_type),
+                target->children[1]->value);
+        }
+
+        semantic_record_node_type(info, target, field_type);
+        return 0;
+    }
+
     if (target->kind == NODE_TUPLE_TARGET) {
         ValueType tuple_type;
         size_t target_count = tuple_target_leaf_count(target);

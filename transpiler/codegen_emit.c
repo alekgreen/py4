@@ -318,6 +318,18 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             return;
         }
 
+        if (target->kind == NODE_FIELD_ACCESS) {
+            ValueType field_type = semantic_type_of(ctx->semantic, target);
+            char *target_text = codegen_primary_to_c_string(ctx, target);
+            char *value_text = codegen_wrapped_expression_to_c_string(ctx, expr, field_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s = %s;\n", target_text, value_text);
+            free(target_text);
+            free(value_text);
+            return;
+        }
+
         if (target->kind == NODE_TUPLE_TARGET) {
             emit_tuple_destructuring_assignment(ctx, target, statement_tail, expr);
             return;
@@ -964,6 +976,17 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
                 free(index);
                 free(value);
                 free(call);
+                continue;
+            }
+            if (name->kind == NODE_FIELD_ACCESS) {
+                ValueType field_type = semantic_type_of(ctx->semantic, name);
+                char *target_text = codegen_primary_to_c_string(ctx, name);
+                char *value_text = codegen_wrapped_expression_to_c_string(ctx, expr, field_type);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s = %s;\n", target_text, value_text);
+                free(target_text);
+                free(value_text);
                 continue;
             }
 

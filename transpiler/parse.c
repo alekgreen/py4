@@ -467,6 +467,7 @@ static ParseNode *parse_SIMPLE_STATEMENT(TokenStream *ts)
         Token look = peek_ts(ts);
 
         if ((target->kind == NODE_PRIMARY && (look.type == TOKEN_COLON || look.type == TOKEN_ASSIGN)) ||
+            (target->kind == NODE_FIELD_ACCESS && (look.type == TOKEN_COLON || look.type == TOKEN_ASSIGN)) ||
             (target->kind == NODE_INDEX && look.type == TOKEN_ASSIGN) ||
             (target->kind == NODE_TUPLE_TARGET && (look.type == TOKEN_COLON || look.type == TOKEN_ASSIGN))) {
             add_child(node, target);
