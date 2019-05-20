@@ -564,9 +564,19 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
     entry = find_class_type(class_type);
 
     for (size_t i = 2; i < class_def->child_count; i++) {
-        const ParseNode *field = semantic_expect_child(class_def, i, NODE_FIELD_DECL);
-        const ParseNode *type_node = semantic_expect_child(field, 0, NODE_TYPE);
-        ValueType field_type = semantic_parse_type_node(info, type_node);
+        const ParseNode *field = class_def->children[i];
+        const ParseNode *type_node;
+        ValueType field_type;
+
+        if (field->kind == NODE_FUNCTION_DEF) {
+            continue;
+        }
+        if (field->kind != NODE_FIELD_DECL) {
+            semantic_error("malformed class definition");
+        }
+
+        type_node = semantic_expect_child(field, 0, NODE_TYPE);
+        field_type = semantic_parse_type_node(info, type_node);
 
         if (entry->field_count >= MAX_CLASS_FIELDS) {
             semantic_error_at_node(field, "class '%s' supports at most %d fields", entry->name, MAX_CLASS_FIELDS);
@@ -740,6 +750,53 @@ FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name)
         }
     }
     return NULL;
+}
+
+MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name)
+{
+    for (MethodInfo *method = methods; method != NULL; method = method->next) {
+        if (method->owner_type == owner_type && strcmp(method->name, name) == 0) {
+            return method;
+        }
+    }
+    return NULL;
+}
+
+const char *semantic_method_c_name(const SemanticInfo *info, ValueType owner_type, const char *method_name)
+{
+    MethodInfo *method = semantic_find_method(info->methods, owner_type, method_name);
+
+    if (method == NULL) {
+        semantic_error("unknown method '%s' on %s", method_name, semantic_type_name(owner_type));
+    }
+    return method->c_name;
+}
+
+size_t semantic_method_arity(const SemanticInfo *info, ValueType owner_type, const char *method_name)
+{
+    MethodInfo *method = semantic_find_method(info->methods, owner_type, method_name);
+
+    if (method == NULL) {
+        semantic_error("unknown method '%s' on %s", method_name, semantic_type_name(owner_type));
+    }
+    return method->param_count > 0 ? method->param_count - 1 : 0;
+}
+
+ValueType semantic_method_parameter_type(
+    const SemanticInfo *info,
+    ValueType owner_type,
+    const char *method_name,
+    size_t index)
+{
+    MethodInfo *method = semantic_find_method(info->methods, owner_type, method_name);
+
+    if (method == NULL) {
+        semantic_error("unknown method '%s' on %s", method_name, semantic_type_name(owner_type));
+    }
+    if (index + 1 >= method->param_count) {
+        semantic_error("method parameter index out of bounds");
+    }
+    return method->param_types[index + 1];
 }
 
 VariableBinding *semantic_find_variable(Scope *scope, const char *name)

@@ -44,8 +44,10 @@ static int typecheck_statement(
     int allow_function_defs);
 static void collect_classes(const ParseNode *root);
 static void validate_class_definitions(SemanticInfo *info, const ParseNode *root);
+static void collect_methods(SemanticInfo *info, const ParseNode *root);
 static void collect_functions(SemanticInfo *info, const ParseNode *root);
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
+static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope);
 
 static size_t tuple_target_leaf_count(const ParseNode *target)
 {
@@ -593,6 +595,96 @@ static void validate_class_definitions(SemanticInfo *info, const ParseNode *root
     }
 }
 
+static char *build_method_c_name(ValueType owner_type, const char *method_name)
+{
+    const char *class_name = semantic_class_name(owner_type);
+    size_t len = strlen(class_name) + strlen(method_name) + 2;
+    char *name = malloc(len);
+
+    if (name == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    snprintf(name, len, "%s_%s", class_name, method_name);
+    return name;
+}
+
+static void collect_methods(SemanticInfo *info, const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
+        ValueType owner_type;
+
+        if (payload->kind != NODE_CLASS_DEF) {
+            continue;
+        }
+
+        owner_type = semantic_find_class_type(semantic_expect_child(payload, 0, NODE_PRIMARY)->value);
+        for (size_t j = 2; j < payload->child_count; j++) {
+            const ParseNode *member = payload->children[j];
+            const ParseNode *parameters;
+            size_t count;
+            MethodInfo *method;
+            const char *name;
+
+            if (member->kind != NODE_FUNCTION_DEF) {
+                continue;
+            }
+
+            name = semantic_expect_child(member, 0, NODE_PRIMARY)->value;
+            if (semantic_find_method(info->methods, owner_type, name) != NULL) {
+                semantic_error_at_node(member->children[0], "duplicate method '%s' on class '%s'",
+                    name,
+                    semantic_class_name(owner_type));
+            }
+            for (size_t k = 0; k < semantic_class_field_count(owner_type); k++) {
+                if (strcmp(semantic_class_field_name(owner_type, k), name) == 0) {
+                    semantic_error_at_node(member->children[0], "method '%s' conflicts with field on class '%s'",
+                        name,
+                        semantic_class_name(owner_type));
+                }
+            }
+
+            parameters = semantic_function_parameters(member);
+            count = semantic_parameter_count(parameters);
+            if (count == 0) {
+                semantic_error_at_node(member->children[0], "method '%s' on class '%s' must declare self",
+                    name,
+                    semantic_class_name(owner_type));
+            }
+            if (semantic_parameter_type(info, semantic_expect_child(parameters, 0, NODE_PARAMETER)) != owner_type) {
+                semantic_error_at_node(parameters->children[0], "method '%s' must use self: %s as first parameter",
+                    name,
+                    semantic_class_name(owner_type));
+            }
+
+            method = malloc(sizeof(MethodInfo));
+            if (method == NULL) {
+                perror("malloc");
+                exit(1);
+            }
+            method->owner_type = owner_type;
+            method->name = name;
+            method->c_name = build_method_c_name(owner_type, name);
+            method->return_type = semantic_function_return_type(info, member);
+            method->param_count = count;
+            method->param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
+            method->node = member;
+            method->next = info->methods;
+            info->methods = method;
+
+            if (count > 0 && method->param_types == NULL) {
+                perror("malloc");
+                exit(1);
+            }
+            for (size_t k = 0; k < count; k++) {
+                method->param_types[k] = semantic_parameter_type(info, semantic_expect_child(parameters, k, NODE_PARAMETER));
+            }
+        }
+    }
+}
+
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -669,6 +761,15 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
     semantic_free_scope_bindings(local_scope.vars);
 }
 
+static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope)
+{
+    for (size_t i = 2; i < class_def->child_count; i++) {
+        if (class_def->children[i]->kind == NODE_FUNCTION_DEF) {
+            typecheck_function(info, class_def->children[i], global_scope);
+        }
+    }
+}
+
 static int typecheck_statement(
     SemanticInfo *info,
     const ParseNode *statement,
@@ -730,6 +831,7 @@ SemanticInfo *analyze_program(const ParseNode *root)
 
     collect_classes(root);
     validate_class_definitions(info, root);
+    collect_methods(info, root);
     collect_functions(info, root);
 
     for (size_t i = 0; i < root->child_count; i++) {
@@ -739,6 +841,7 @@ SemanticInfo *analyze_program(const ParseNode *root)
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             semantic_error_at_node(payload, "imports should be resolved before semantic analysis");
         } else if (payload->kind == NODE_CLASS_DEF) {
+            typecheck_class_methods(info, payload, &global_scope);
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
@@ -774,6 +877,17 @@ void free_semantic_info(SemanticInfo *info)
         free(functions->param_types);
         free(functions);
         functions = next;
+    }
+
+    {
+        MethodInfo *methods = info->methods;
+        while (methods != NULL) {
+            MethodInfo *next = methods->next;
+            free(methods->c_name);
+            free(methods->param_types);
+            free(methods);
+            methods = next;
+        }
     }
 
     free(info);

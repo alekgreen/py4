@@ -747,18 +747,39 @@ static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters
     }
 }
 
+static ValueType codegen_method_owner_type(CodegenContext *ctx, const ParseNode *function_def)
+{
+    for (size_t i = 0; i < ctx->root->child_count; i++) {
+        const ParseNode *payload = codegen_statement_payload(ctx->root->children[i]);
+
+        if (payload->kind != NODE_CLASS_DEF) {
+            continue;
+        }
+        for (size_t j = 2; j < payload->child_count; j++) {
+            if (payload->children[j] == function_def) {
+                return semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value);
+            }
+        }
+    }
+
+    return 0;
+}
+
 static void emit_function_signature(CodegenContext *ctx, const ParseNode *function_def, int prototype_only)
 {
     const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
     const ParseNode *parameters = codegen_function_parameters(function_def);
-    int is_c_main = codegen_is_main_function(function_def);
+    ValueType owner_type = codegen_method_owner_type(ctx, function_def);
+    int is_c_main = owner_type == 0 && codegen_is_main_function(function_def);
     ValueType return_type = codegen_function_return_type(ctx, function_def);
 
     if (is_c_main) {
         fputs("int main(", ctx->out);
     } else {
         codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", name->value);
+        fprintf(ctx->out, " %s(", owner_type != 0
+            ? semantic_method_c_name(ctx->semantic, owner_type, name->value)
+            : name->value);
     }
     emit_parameter_list(ctx, parameters, is_c_main);
     fputc(')', ctx->out);
@@ -769,7 +790,8 @@ static void emit_function_signature(CodegenContext *ctx, const ParseNode *functi
 
 static void emit_function_definition(CodegenContext *ctx, const ParseNode *function_def)
 {
-    int is_c_main = codegen_is_main_function(function_def);
+    ValueType owner_type = codegen_method_owner_type(ctx, function_def);
+    int is_c_main = owner_type == 0 && codegen_is_main_function(function_def);
     ValueType return_type = codegen_function_return_type(ctx, function_def);
     int prev_is_main = ctx->current_function_is_main;
     ValueType prev_return_type = ctx->current_function_return_type;
@@ -903,6 +925,12 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
         } else if (payload->kind == NODE_CLASS_DEF) {
+            for (size_t j = 2; j < payload->child_count; j++) {
+                if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
+                    emit_function_signature(ctx, payload->children[j], 1);
+                    wrote_any = 1;
+                }
+            }
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_signature(ctx, payload, 1);
@@ -1040,6 +1068,12 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
         } else if (payload->kind == NODE_CLASS_DEF) {
+            for (size_t j = 2; j < payload->child_count; j++) {
+                if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
+                    emit_function_definition(ctx, payload->children[j]);
+                    fputc('\n', ctx->out);
+                }
+            }
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_definition(ctx, payload);

@@ -2,16 +2,16 @@ class Point:
     x: int
     y: int
 
+    def sum(self: Point) -> int:
+        return self.x + self.y
+
 class Metrics:
     label: str
     ok: bool
     sample: (int,float)
 
-def point_sum(p: Point) -> int:
-    return p.x + p.y
-
-def metric_sample_sum(m: Metrics) -> float:
-    return m.sample[0] + m.sample[1]
+    def sample_sum(self: Metrics) -> float:
+        return self.sample[0] + self.sample[1]
 
 def main() -> None:
     p: Point = Point(3, 4)
@@ -19,6 +19,6 @@ def main() -> None:
     p.x = 10
     m.ok = False
     print(p.x)
-    print(point_sum(p))
+    print(p.sum())
     print(m.ok)
-    print(metric_sample_sum(m))
+    print(m.sample_sum())

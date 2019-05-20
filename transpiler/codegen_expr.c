@@ -376,6 +376,34 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
     receiver = call->children[0];
     receiver_type = semantic_type_of(ctx->semantic, receiver);
+    if (semantic_type_is_class(receiver_type)) {
+        size_t arg_count = (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))
+            ? 0
+            : arguments->child_count;
+        char *receiver_text = codegen_primary_to_c_string(ctx, receiver);
+        char *args = codegen_dup_printf("%s", receiver_text);
+        char *result;
+
+        for (size_t i = 0; i < arg_count; i++) {
+            char *arg = codegen_wrapped_expression_to_c_string(
+                ctx,
+                arguments->children[i],
+                semantic_method_parameter_type(ctx->semantic, receiver_type, method->value, i));
+            char *joined = codegen_dup_printf("%s, %s", args, arg);
+
+            free(args);
+            free(arg);
+            args = joined;
+        }
+
+        result = codegen_dup_printf("%s(%s)",
+            semantic_method_c_name(ctx->semantic, receiver_type, method->value),
+            args);
+        free(receiver_text);
+        free(args);
+        return result;
+    }
+
     receiver_name = materialize_ref_node(ctx, receiver, receiver_type, 1, &needs_cleanup);
 
     if (!is_list_method_name(method->value)) {

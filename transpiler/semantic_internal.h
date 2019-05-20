@@ -23,6 +23,17 @@ typedef struct FunctionInfo {
     struct FunctionInfo *next;
 } FunctionInfo;
 
+typedef struct MethodInfo {
+    ValueType owner_type;
+    const char *name;
+    char *c_name;
+    ValueType return_type;
+    size_t param_count;
+    ValueType *param_types;
+    const ParseNode *node;
+    struct MethodInfo *next;
+} MethodInfo;
+
 typedef struct {
     const char *name;
     ValueType return_type;
@@ -37,6 +48,7 @@ typedef struct NodeTypeInfo {
 
 struct SemanticInfo {
     FunctionInfo *functions;
+    MethodInfo *methods;
     NodeTypeInfo *node_types;
 };
 
@@ -55,6 +67,7 @@ ValueType semantic_find_class_type(const char *name);
 ValueType semantic_register_class(const ParseNode *class_def);
 void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def);
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);
+MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name);
 VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);
 void semantic_free_scope_bindings(VariableBinding *vars);

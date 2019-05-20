@@ -52,5 +52,12 @@ size_t semantic_class_field_count(ValueType type);
 const char *semantic_class_field_name(ValueType type, size_t index);
 ValueType semantic_class_field_type(ValueType type, size_t index);
 ValueType semantic_find_class_type(const char *name);
+const char *semantic_method_c_name(const SemanticInfo *info, ValueType owner_type, const char *method_name);
+size_t semantic_method_arity(const SemanticInfo *info, ValueType owner_type, const char *method_name);
+ValueType semantic_method_parameter_type(
+    const SemanticInfo *info,
+    ValueType owner_type,
+    const char *method_name,
+    size_t index);
 
 #endif

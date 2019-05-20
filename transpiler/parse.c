@@ -426,7 +426,11 @@ static ParseNode *parse_CLASS_DEF(TokenStream *ts)
     parse_skip_newlines(ts);
 
     while (peek_ts(ts).type != TOKEN_DEDENT && peek_ts(ts).type != TOKEN_EOF) {
-        add_child(node, parse_FIELD_DECL(ts));
+        if (parse_is_keyword_token(peek_ts(ts), "def")) {
+            add_child(node, parse_FUNCTION_DEF(ts));
+        } else {
+            add_child(node, parse_FIELD_DECL(ts));
+        }
         if (peek_ts(ts).type == TOKEN_NEWLINE) {
             get_from_ts(ts);
         }

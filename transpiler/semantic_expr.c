@@ -241,8 +241,49 @@ static ValueType infer_method_call_type(
 
     receiver = call->children[0];
     receiver_type = semantic_infer_primary_type(info, receiver, scope);
+    if (semantic_type_is_class(receiver_type)) {
+        MethodInfo *method_info = semantic_find_method(info->methods, receiver_type, method->value);
+
+        if (method_info == NULL) {
+            semantic_error_at_node(method, "class '%s' has no method '%s'",
+                semantic_class_name(receiver_type),
+                method->value);
+        }
+
+        if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+            if (method_info->param_count != 1) {
+                semantic_error_at_node(call, "method '%s' expects %zu arguments",
+                    method->value,
+                    method_info->param_count - 1);
+            }
+        } else if (arguments->child_count != method_info->param_count - 1) {
+            semantic_error_at_node(call, "method '%s' expects %zu arguments",
+                method->value,
+                method_info->param_count - 1);
+        }
+
+        for (size_t i = 0; i + 1 < method_info->param_count; i++) {
+            ValueType actual = semantic_infer_expression_type_with_hint(
+                info,
+                arguments->children[i],
+                scope,
+                method_info->param_types[i + 1]);
+            if (!semantic_is_assignable(method_info->param_types[i + 1], actual)) {
+                semantic_error_at_node(arguments->children[i],
+                    "method '%s' argument %zu expects %s but got %s",
+                    method->value,
+                    i + 1,
+                    semantic_type_name(method_info->param_types[i + 1]),
+                    semantic_type_name(actual));
+            }
+        }
+
+        semantic_record_node_type(info, call, method_info->return_type);
+        return method_info->return_type;
+    }
+
     if (!semantic_type_is_list(receiver_type)) {
-        semantic_error_at_node(receiver, "method '%s' requires list receiver", method->value);
+        semantic_error_at_node(receiver, "method '%s' requires list or class receiver", method->value);
     }
     element_type = semantic_list_element_type(receiver_type);
 
