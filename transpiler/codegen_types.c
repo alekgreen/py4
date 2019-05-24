@@ -52,6 +52,11 @@ void codegen_build_tuple_print_name(char *buffer, size_t size, ValueType type)
     snprintf(buffer, size, "py4_print_%s", trimmed);
 }
 
+void codegen_build_class_print_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_print_%s", semantic_class_name(type));
+}
+
 void codegen_error(const char *message, ...)
 {
     va_list args;
@@ -662,6 +667,11 @@ static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_
         fprintf(out, "            %s(%s);\n", helper_name, value_expr);
         return;
     }
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "            %s(%s);\n", helper_name, value_expr);
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:
@@ -801,6 +811,8 @@ void codegen_emit_tuple_runtime(CodegenContext *ctx)
 
 void codegen_emit_class_types(CodegenContext *ctx)
 {
+    char helper_name[MAX_NAME_LEN];
+
     for (size_t i = 0; i < semantic_class_type_count(); i++) {
         ValueType class_type = semantic_class_type_at(i);
 
@@ -810,6 +822,43 @@ void codegen_emit_class_types(CodegenContext *ctx)
             fprintf(ctx->out, " %s;\n", semantic_class_field_name(class_type, j));
         }
         fprintf(ctx->out, "} %s;\n\n", semantic_class_name(class_type));
+    }
+
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        ValueType class_type = semantic_class_type_at(i);
+
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s value);\n",
+            helper_name,
+            semantic_class_name(class_type));
+    }
+
+    if (semantic_class_type_count() > 0) {
+        fputc('\n', ctx->out);
+    }
+
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        ValueType class_type = semantic_class_type_at(i);
+
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s value)\n{\n",
+            helper_name,
+            semantic_class_name(class_type));
+        fputs("    printf(\"", ctx->out);
+        fputs(semantic_class_name(class_type), ctx->out);
+        fputs("(\");\n", ctx->out);
+        for (size_t j = 0; j < semantic_class_field_count(class_type); j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            if (j > 0) {
+                fputs("    printf(\", \");\n", ctx->out);
+            }
+            fprintf(ctx->out, "    printf(\"%s=\");\n", semantic_class_field_name(class_type, j));
+            snprintf(value_expr, sizeof(value_expr), "value.%s", semantic_class_field_name(class_type, j));
+            emit_tuple_value_print(ctx->out, semantic_class_field_type(class_type, j), value_expr);
+        }
+        fputs("    printf(\")\");\n", ctx->out);
+        fputs("}\n\n", ctx->out);
     }
 }
 

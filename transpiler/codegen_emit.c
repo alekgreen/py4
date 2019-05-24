@@ -48,6 +48,14 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         free(arg_text);
         return;
     }
+    if (semantic_type_is_class(arg_type)) {
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), arg_type);
+        fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
+        codegen_emit_indent(ctx);
+        fputs("printf(\"\\n\");\n", ctx->out);
+        free(arg_text);
+        return;
+    }
 
     switch (arg_type) {
         case TYPE_INT:

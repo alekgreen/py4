@@ -22,3 +22,5 @@ def main() -> None:
     print(p.sum())
     print(m.ok)
     print(m.sample_sum())
+    print(p)
+    print(m)
