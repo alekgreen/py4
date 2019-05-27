@@ -2,5 +2,8 @@
 14
 False
 3.5
+10
+2
 Point(x=10, y=4)
 Metrics(label=load, ok=False, sample=(2, 1.5))
+Segment(start=Point(x=2, y=2), end=Point(x=5, y=9))
