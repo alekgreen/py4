@@ -862,6 +862,239 @@ void codegen_emit_class_types(CodegenContext *ctx)
     }
 }
 
+static size_t tuple_type_index(ValueType type)
+{
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        if (semantic_tuple_type_at(i) == type) {
+            return i;
+        }
+    }
+    codegen_error("unknown tuple type index for %s", semantic_type_name(type));
+    return 0;
+}
+
+static size_t class_type_index(ValueType type)
+{
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        if (semantic_class_type_at(i) == type) {
+            return i;
+        }
+    }
+    codegen_error("unknown class type index for %s", semantic_type_name(type));
+    return 0;
+}
+
+static void emit_struct_definition_recursive(
+    CodegenContext *ctx,
+    ValueType type,
+    unsigned char *emitted_tuples,
+    unsigned char *visiting_tuples,
+    unsigned char *emitted_classes,
+    unsigned char *visiting_classes);
+
+static void emit_tuple_definition_recursive(
+    CodegenContext *ctx,
+    ValueType tuple_type,
+    unsigned char *emitted_tuples,
+    unsigned char *visiting_tuples,
+    unsigned char *emitted_classes,
+    unsigned char *visiting_classes)
+{
+    size_t index = tuple_type_index(tuple_type);
+    char tuple_name[MAX_NAME_LEN];
+    size_t element_count = semantic_tuple_element_count(tuple_type);
+
+    if (emitted_tuples[index]) {
+        return;
+    }
+    if (visiting_tuples[index]) {
+        codegen_error("recursive tuple type dependency is not supported for %s", semantic_type_name(tuple_type));
+    }
+    visiting_tuples[index] = 1;
+
+    for (size_t i = 0; i < element_count; i++) {
+        emit_struct_definition_recursive(
+            ctx,
+            semantic_tuple_element_type(tuple_type, i),
+            emitted_tuples,
+            visiting_tuples,
+            emitted_classes,
+            visiting_classes);
+    }
+
+    codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+    fprintf(ctx->out, "typedef struct {\n");
+    for (size_t i = 0; i < element_count; i++) {
+        codegen_emit_scalar_c_type(ctx->out, semantic_tuple_element_type(tuple_type, i));
+        fprintf(ctx->out, " item%zu;\n", i);
+    }
+    fprintf(ctx->out, "} %s;\n\n", tuple_name);
+
+    visiting_tuples[index] = 0;
+    emitted_tuples[index] = 1;
+}
+
+static void emit_class_definition_recursive(
+    CodegenContext *ctx,
+    ValueType class_type,
+    unsigned char *emitted_tuples,
+    unsigned char *visiting_tuples,
+    unsigned char *emitted_classes,
+    unsigned char *visiting_classes)
+{
+    size_t index = class_type_index(class_type);
+
+    if (emitted_classes[index]) {
+        return;
+    }
+    if (visiting_classes[index]) {
+        codegen_error("recursive class field dependency is not supported for %s", semantic_type_name(class_type));
+    }
+    visiting_classes[index] = 1;
+
+    for (size_t i = 0; i < semantic_class_field_count(class_type); i++) {
+        emit_struct_definition_recursive(
+            ctx,
+            semantic_class_field_type(class_type, i),
+            emitted_tuples,
+            visiting_tuples,
+            emitted_classes,
+            visiting_classes);
+    }
+
+    fprintf(ctx->out, "typedef struct {\n");
+    for (size_t i = 0; i < semantic_class_field_count(class_type); i++) {
+        codegen_emit_scalar_c_type(ctx->out, semantic_class_field_type(class_type, i));
+        fprintf(ctx->out, " %s;\n", semantic_class_field_name(class_type, i));
+    }
+    fprintf(ctx->out, "} %s;\n\n", semantic_class_name(class_type));
+
+    visiting_classes[index] = 0;
+    emitted_classes[index] = 1;
+}
+
+static void emit_struct_definition_recursive(
+    CodegenContext *ctx,
+    ValueType type,
+    unsigned char *emitted_tuples,
+    unsigned char *visiting_tuples,
+    unsigned char *emitted_classes,
+    unsigned char *visiting_classes)
+{
+    if (semantic_type_is_tuple(type)) {
+        emit_tuple_definition_recursive(
+            ctx,
+            type,
+            emitted_tuples,
+            visiting_tuples,
+            emitted_classes,
+            visiting_classes);
+    } else if (semantic_type_is_class(type)) {
+        emit_class_definition_recursive(
+            ctx,
+            type,
+            emitted_tuples,
+            visiting_tuples,
+            emitted_classes,
+            visiting_classes);
+    }
+}
+
+void codegen_emit_struct_types(CodegenContext *ctx)
+{
+    unsigned char emitted_tuples[MAX_TUPLE_TYPES] = {0};
+    unsigned char visiting_tuples[MAX_TUPLE_TYPES] = {0};
+    unsigned char emitted_classes[MAX_CLASS_TYPES] = {0};
+    unsigned char visiting_classes[MAX_CLASS_TYPES] = {0};
+    char helper_name[MAX_NAME_LEN];
+
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        emit_class_definition_recursive(
+            ctx,
+            semantic_class_type_at(i),
+            emitted_tuples,
+            visiting_tuples,
+            emitted_classes,
+            visiting_classes);
+    }
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        emit_tuple_definition_recursive(
+            ctx,
+            semantic_tuple_type_at(i),
+            emitted_tuples,
+            visiting_tuples,
+            emitted_classes,
+            visiting_classes);
+    }
+
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        ValueType class_type = semantic_class_type_at(i);
+
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s value);\n",
+            helper_name,
+            semantic_class_name(class_type));
+    }
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        ValueType tuple_type = semantic_tuple_type_at(i);
+        char tuple_name[MAX_NAME_LEN];
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s value);\n", helper_name, tuple_name);
+    }
+
+    if (semantic_class_type_count() > 0 || semantic_tuple_type_count() > 0) {
+        fputc('\n', ctx->out);
+    }
+
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        ValueType class_type = semantic_class_type_at(i);
+
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s value)\n{\n",
+            helper_name,
+            semantic_class_name(class_type));
+        fputs("    printf(\"", ctx->out);
+        fputs(semantic_class_name(class_type), ctx->out);
+        fputs("(\");\n", ctx->out);
+        for (size_t j = 0; j < semantic_class_field_count(class_type); j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            if (j > 0) {
+                fputs("    printf(\", \");\n", ctx->out);
+            }
+            fprintf(ctx->out, "    printf(\"%s=\");\n", semantic_class_field_name(class_type, j));
+            snprintf(value_expr, sizeof(value_expr), "value.%s", semantic_class_field_name(class_type, j));
+            emit_tuple_value_print(ctx->out, semantic_class_field_type(class_type, j), value_expr);
+        }
+        fputs("    printf(\")\");\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+    }
+
+    for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+        ValueType tuple_type = semantic_tuple_type_at(i);
+        char tuple_name[MAX_NAME_LEN];
+        size_t element_count = semantic_tuple_element_count(tuple_type);
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s value)\n{\n", helper_name, tuple_name);
+        fputs("    printf(\"(\");\n", ctx->out);
+        for (size_t j = 0; j < element_count; j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            if (j > 0) {
+                fputs("    printf(\", \");\n", ctx->out);
+            }
+            snprintf(value_expr, sizeof(value_expr), "value.item%zu", j);
+            emit_tuple_value_print(ctx->out, semantic_tuple_element_type(tuple_type, j), value_expr);
+        }
+        fputs("    printf(\")\");\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+    }
+}
+
 static void emit_union_print_helper(CodegenContext *ctx, ValueType type)
 {
     char base_name[MAX_NAME_LEN];

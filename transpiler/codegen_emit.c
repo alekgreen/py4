@@ -1123,8 +1123,7 @@ void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n\n", out);
     codegen_emit_container_runtime(&ctx);
-    codegen_emit_tuple_runtime(&ctx);
-    codegen_emit_class_types(&ctx);
+    codegen_emit_struct_types(&ctx);
     codegen_emit_union_runtime(&ctx);
     emit_global_declarations(&ctx, root);
     emit_function_prototypes(&ctx, root);
