@@ -21,7 +21,7 @@ typedef struct {
 typedef struct {
     const char *name;
     ValueType type;
-} RefLocal;
+} ManagedLocal;
 
 typedef struct {
     FILE *out;
@@ -39,8 +39,8 @@ typedef struct {
     size_t printable_union_type_count;
     UnionConversion conversions[MAX_UNION_CONVERSIONS];
     size_t conversion_count;
-    RefLocal ref_locals[MAX_REF_LOCALS];
-    size_t ref_local_count;
+    ManagedLocal managed_locals[MAX_REF_LOCALS];
+    size_t managed_local_count;
     size_t cleanup_scope_starts[MAX_SCOPE_DEPTH];
     size_t cleanup_scope_count;
     int loop_ids[MAX_LOOP_DEPTH];
@@ -71,7 +71,12 @@ const char *codegen_type_suffix(ValueType type);
 const char *codegen_type_field(ValueType type);
 void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type);
 void codegen_build_tuple_print_name(char *buffer, size_t size, ValueType type);
+void codegen_build_tuple_retain_name(char *buffer, size_t size, ValueType type);
+void codegen_build_tuple_release_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_print_name(char *buffer, size_t size, ValueType type);
+void codegen_build_class_retain_name(char *buffer, size_t size, ValueType type);
+void codegen_build_class_release_name(char *buffer, size_t size, ValueType type);
+void codegen_build_list_print_name(char *buffer, size_t size, ValueType type);
 const char *codegen_list_struct_name(ValueType type);
 const char *codegen_list_runtime_prefix(ValueType type);
 const char *codegen_list_element_c_type(ValueType type);
@@ -109,6 +114,8 @@ char *codegen_next_temp_name(CodegenContext *ctx);
 void codegen_push_cleanup_scope(CodegenContext *ctx);
 void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *name);
 void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *name);
+void codegen_emit_value_retain(CodegenContext *ctx, ValueType type, const char *name);
+void codegen_emit_value_release(CodegenContext *ctx, ValueType type, const char *name);
 void codegen_register_ref_local(CodegenContext *ctx, const char *name, ValueType type);
 void codegen_emit_live_ref_cleanup(CodegenContext *ctx);
 void codegen_pop_cleanup_scope(CodegenContext *ctx);

@@ -101,7 +101,7 @@ static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr
     }
 
     expr_text = codegen_expression_to_c_string(ctx, expr);
-    if (semantic_type_is_ref(expr_type) && codegen_expression_is_owned_ref(ctx, expr)) {
+    if (semantic_type_needs_management(expr_type) && codegen_expression_is_owned_ref(ctx, expr)) {
         char *temp_name = codegen_next_temp_name(ctx);
         char *type_name = codegen_type_to_c_string(expr_type);
 
@@ -109,7 +109,7 @@ static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr
         fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
         free(type_name);
         free(expr_text);
-        codegen_emit_ref_decref(ctx, expr_type, temp_name);
+        codegen_emit_value_release(ctx, expr_type, temp_name);
         free(temp_name);
         return;
     }
@@ -145,7 +145,7 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
         ValueType return_type = ctx->current_function_return_type;
         char *expr_text;
 
-        if (semantic_type_is_ref(return_type)) {
+        if (semantic_type_needs_management(return_type)) {
             char *temp_name = codegen_next_temp_name(ctx);
             char *type_name = codegen_type_to_c_string(return_type);
 
@@ -153,7 +153,7 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
             codegen_emit_indent(ctx);
             fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
             if (!codegen_expression_is_owned_ref(ctx, expr)) {
-                codegen_emit_ref_incref(ctx, return_type, temp_name);
+                codegen_emit_value_retain(ctx, return_type, temp_name);
             }
             free(type_name);
             free(expr_text);
@@ -211,7 +211,25 @@ static void emit_tuple_destructuring_from_base(
 {
     if (target->kind == NODE_PRIMARY) {
         codegen_emit_indent(ctx);
-        if (declare) {
+        if (semantic_type_needs_management(tuple_type)) {
+            if (declare) {
+                codegen_emit_type_name(ctx, tuple_type);
+                fprintf(ctx->out, " %s = %s;\n", target->value, base_expr);
+                codegen_emit_value_retain(ctx, tuple_type, target->value);
+                codegen_register_ref_local(ctx, target->value, tuple_type);
+            } else {
+                char *temp_name = codegen_next_temp_name(ctx);
+                char *type_name = codegen_type_to_c_string(tuple_type);
+
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, base_expr);
+                codegen_emit_value_retain(ctx, tuple_type, temp_name);
+                codegen_emit_value_release(ctx, tuple_type, target->value);
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s = %s;\n", target->value, temp_name);
+                free(type_name);
+                free(temp_name);
+            }
+        } else if (declare) {
             codegen_emit_type_name(ctx, tuple_type);
             fprintf(ctx->out, " %s = %s;\n", target->value, base_expr);
         } else {
@@ -259,6 +277,51 @@ static void emit_tuple_destructuring_assignment(
     free(tuple_temp);
     free(tuple_type_name);
     free(expr_text);
+}
+
+static void emit_managed_assignment(
+    CodegenContext *ctx,
+    ValueType target_type,
+    const char *target_name,
+    const char *expr_text,
+    int declare,
+    int is_owned)
+{
+    char *temp_name;
+    char *type_name;
+
+    if (!semantic_type_needs_management(target_type)) {
+        codegen_emit_indent(ctx);
+        if (declare) {
+            codegen_emit_type_name(ctx, target_type);
+            fprintf(ctx->out, " %s = %s;\n", target_name, expr_text);
+        } else {
+            fprintf(ctx->out, "%s = %s;\n", target_name, expr_text);
+        }
+        return;
+    }
+
+    temp_name = codegen_next_temp_name(ctx);
+    type_name = codegen_type_to_c_string(target_type);
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
+    if (!is_owned) {
+        codegen_emit_value_retain(ctx, target_type, temp_name);
+    }
+
+    if (declare) {
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s %s = %s;\n", type_name, target_name, temp_name);
+        codegen_register_ref_local(ctx, target_name, target_type);
+    } else {
+        codegen_emit_value_release(ctx, target_type, target_name);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s = %s;\n", target_name, temp_name);
+    }
+
+    free(type_name);
+    free(temp_name);
 }
 
 static void emit_tuple_target_declarations(CodegenContext *ctx, const ParseNode *target, ValueType tuple_type)
@@ -330,9 +393,9 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             ValueType field_type = semantic_type_of(ctx->semantic, target);
             char *target_text = codegen_primary_to_c_string(ctx, target);
             char *value_text = codegen_wrapped_expression_to_c_string(ctx, expr, field_type);
+            int is_owned = codegen_expression_is_owned_ref(ctx, expr);
 
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "%s = %s;\n", target_text, value_text);
+            emit_managed_assignment(ctx, field_type, target_text, value_text, 0, is_owned);
             free(target_text);
             free(value_text);
             return;
@@ -349,42 +412,14 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             target_type = semantic_type_of(ctx->semantic, target);
         }
 
-        if (semantic_type_is_ref(target_type)) {
-            char *temp_name = codegen_next_temp_name(ctx);
-            char *type_name = codegen_type_to_c_string(target_type);
-            int is_owned = codegen_expression_is_owned_ref(ctx, expr);
-
-            expr_text = codegen_wrapped_expression_to_c_string(ctx, expr, target_type);
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
-            if (!is_owned) {
-                codegen_emit_ref_incref(ctx, target_type, temp_name);
-            }
-
-            if (codegen_is_type_assignment(statement_tail)) {
-                codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s %s = %s;\n", type_name, target->value, temp_name);
-                codegen_register_ref_local(ctx, target->value, target_type);
-            } else {
-                codegen_emit_ref_decref(ctx, target_type, target->value);
-                codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s = %s;\n", target->value, temp_name);
-            }
-
-            free(type_name);
-            free(temp_name);
-            free(expr_text);
-            return;
-        }
-
         expr_text = codegen_wrapped_expression_to_c_string(ctx, expr, target_type);
-        codegen_emit_indent(ctx);
-        if (codegen_is_type_assignment(statement_tail)) {
-            codegen_emit_type_name(ctx, target_type);
-            fprintf(ctx->out, " %s = %s;\n", target->value, expr_text);
-        } else {
-            fprintf(ctx->out, "%s = %s;\n", target->value, expr_text);
-        }
+        emit_managed_assignment(
+            ctx,
+            target_type,
+            target->value,
+            expr_text,
+            codegen_is_type_assignment(statement_tail),
+            codegen_expression_is_owned_ref(ctx, expr));
         free(expr_text);
     }
 }
@@ -801,6 +836,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     ValueType owner_type = codegen_method_owner_type(ctx, function_def);
     int is_c_main = owner_type == 0 && codegen_is_main_function(function_def);
     ValueType return_type = codegen_function_return_type(ctx, function_def);
+    const ParseNode *parameters = codegen_function_parameters(function_def);
     int prev_is_main = ctx->current_function_is_main;
     ValueType prev_return_type = ctx->current_function_return_type;
 
@@ -810,6 +846,20 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     ctx->current_function_is_main = is_c_main;
     ctx->current_function_return_type = return_type;
     codegen_push_cleanup_scope(ctx);
+
+    if (!(parameters->child_count == 1 && codegen_is_epsilon_node(parameters->children[0]))) {
+        for (size_t i = 0; i < parameters->child_count; i++) {
+            const ParseNode *param = parameters->children[i];
+            ValueType param_type = semantic_type_of(ctx->semantic, codegen_expect_child(param, 0, NODE_TYPE));
+
+            if (!semantic_type_needs_management(param_type)) {
+                continue;
+            }
+
+            codegen_emit_value_retain(ctx, param_type, param->value);
+            codegen_register_ref_local(ctx, param->value, param_type);
+        }
+    }
 
     if (is_c_main && ctx->has_top_level_executable_statements) {
         codegen_emit_indent(ctx);
@@ -1018,9 +1068,9 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
                 ValueType field_type = semantic_type_of(ctx->semantic, name);
                 char *target_text = codegen_primary_to_c_string(ctx, name);
                 char *value_text = codegen_wrapped_expression_to_c_string(ctx, expr, field_type);
+                int is_owned = codegen_expression_is_owned_ref(ctx, expr);
 
-                codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s = %s;\n", target_text, value_text);
+                emit_managed_assignment(ctx, field_type, target_text, value_text, 0, is_owned);
                 free(target_text);
                 free(value_text);
                 continue;
@@ -1028,30 +1078,13 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
             target_type = semantic_type_of(ctx->semantic, name);
             expr_text = codegen_wrapped_expression_to_c_string(ctx, expr, target_type);
-
-            if (semantic_type_is_ref(target_type)) {
-                char *temp_name = codegen_next_temp_name(ctx);
-                char *type_name = codegen_type_to_c_string(target_type);
-                int is_owned = codegen_expression_is_owned_ref(ctx, expr);
-
-                codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
-                if (!is_owned) {
-                    codegen_emit_ref_incref(ctx, target_type, temp_name);
-                }
-                if (!codegen_is_type_assignment(statement_tail)) {
-                    codegen_emit_ref_decref(ctx, target_type, name->value);
-                }
-                codegen_emit_indent(ctx);
-                fprintf(ctx->out, "%s = %s;\n", name->value, temp_name);
-                free(type_name);
-                free(temp_name);
-                free(expr_text);
-                continue;
-            }
-
-            codegen_emit_indent(ctx);
-            fprintf(ctx->out, "%s = %s;\n", name->value, expr_text);
+            emit_managed_assignment(
+                ctx,
+                target_type,
+                name->value,
+                expr_text,
+                0,
+                codegen_expression_is_owned_ref(ctx, expr));
             free(expr_text);
             continue;
         }

@@ -37,6 +37,7 @@ int semantic_type_is_union(ValueType type);
 int semantic_type_is_tuple(ValueType type);
 int semantic_type_is_class(ValueType type);
 int semantic_type_is_ref(ValueType type);
+int semantic_type_needs_management(ValueType type);
 int semantic_type_is_list(ValueType type);
 ValueType semantic_list_element_type(ValueType type);
 ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count);

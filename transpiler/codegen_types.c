@@ -52,9 +52,44 @@ void codegen_build_tuple_print_name(char *buffer, size_t size, ValueType type)
     snprintf(buffer, size, "py4_print_%s", trimmed);
 }
 
+void codegen_build_tuple_retain_name(char *buffer, size_t size, ValueType type)
+{
+    char base_name[MAX_NAME_LEN];
+    const char *trimmed;
+
+    codegen_build_tuple_base_name(base_name, sizeof(base_name), type);
+    trimmed = strncmp(base_name, "py4_", 4) == 0 ? base_name + 4 : base_name;
+    snprintf(buffer, size, "py4_retain_%s", trimmed);
+}
+
+void codegen_build_tuple_release_name(char *buffer, size_t size, ValueType type)
+{
+    char base_name[MAX_NAME_LEN];
+    const char *trimmed;
+
+    codegen_build_tuple_base_name(base_name, sizeof(base_name), type);
+    trimmed = strncmp(base_name, "py4_", 4) == 0 ? base_name + 4 : base_name;
+    snprintf(buffer, size, "py4_release_%s", trimmed);
+}
+
 void codegen_build_class_print_name(char *buffer, size_t size, ValueType type)
 {
     snprintf(buffer, size, "py4_print_%s", semantic_class_name(type));
+}
+
+void codegen_build_class_retain_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_retain_%s", semantic_class_name(type));
+}
+
+void codegen_build_class_release_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_release_%s", semantic_class_name(type));
+}
+
+void codegen_build_list_print_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));
 }
 
 void codegen_error(const char *message, ...)
@@ -672,6 +707,11 @@ static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_
         fprintf(out, "            %s(%s);\n", helper_name, value_expr);
         return;
     }
+    if (semantic_type_is_list(type)) {
+        codegen_build_list_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "            %s(%s);\n", helper_name, value_expr);
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:
@@ -884,6 +924,103 @@ static size_t class_type_index(ValueType type)
     return 0;
 }
 
+static void emit_managed_field_retain(FILE *out, ValueType type, const char *value_expr)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (!semantic_type_needs_management(type)) {
+        return;
+    }
+
+    if (semantic_type_is_ref(type)) {
+        fprintf(out, "    %s_incref(%s);\n", codegen_list_runtime_prefix(type), value_expr);
+        return;
+    }
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
+        return;
+    }
+
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_retain_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
+        return;
+    }
+
+    codegen_error("unsupported managed type %s", semantic_type_name(type));
+}
+
+static void emit_managed_field_release(FILE *out, ValueType type, const char *value_expr)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (!semantic_type_needs_management(type)) {
+        return;
+    }
+
+    if (semantic_type_is_ref(type)) {
+        fprintf(out, "    %s_decref(%s);\n", codegen_list_runtime_prefix(type), value_expr);
+        return;
+    }
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
+        return;
+    }
+
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_release_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
+        return;
+    }
+
+    codegen_error("unsupported managed type %s", semantic_type_name(type));
+}
+
+static void emit_list_print_definitions(CodegenContext *ctx)
+{
+    for (size_t i = 0; i < CODEGEN_ORDERED_TYPE_COUNT; i++) {
+        ValueType type = CODEGEN_ORDERED_TYPES[i];
+        char helper_name[MAX_NAME_LEN];
+
+        if (!semantic_type_is_list(type)) {
+            continue;
+        }
+
+        codegen_build_list_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, codegen_list_struct_name(type));
+        fputs("    printf(\"[\");\n", ctx->out);
+        fputs("    if (value != NULL) {\n", ctx->out);
+        fputs("        for (size_t i = 0; i < value->len; i++) {\n", ctx->out);
+        fputs("            if (i > 0) {\n", ctx->out);
+        fputs("                printf(\", \");\n", ctx->out);
+        fputs("            }\n", ctx->out);
+        switch (type) {
+            case TYPE_LIST_INT:
+                fputs("            printf(\"%d\", value->items[i]);\n", ctx->out);
+                break;
+            case TYPE_LIST_FLOAT:
+                fputs("            printf(\"%g\", value->items[i]);\n", ctx->out);
+                break;
+            case TYPE_LIST_BOOL:
+                fputs("            printf(\"%s\", value->items[i] ? \"True\" : \"False\");\n", ctx->out);
+                break;
+            case TYPE_LIST_CHAR:
+                fputs("            printf(\"%c\", value->items[i]);\n", ctx->out);
+                break;
+            default:
+                codegen_error("unsupported list print type %s", semantic_type_name(type));
+        }
+        fputs("        }\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        fputs("    printf(\"]\");\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+    }
+}
+
 static void emit_struct_definition_recursive(
     CodegenContext *ctx,
     ValueType type,
@@ -1030,6 +1167,14 @@ void codegen_emit_struct_types(CodegenContext *ctx)
     for (size_t i = 0; i < semantic_class_type_count(); i++) {
         ValueType class_type = semantic_class_type_at(i);
 
+        codegen_build_class_retain_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n",
+            helper_name,
+            semantic_class_name(class_type));
+        codegen_build_class_release_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n",
+            helper_name,
+            semantic_class_name(class_type));
         codegen_build_class_print_name(helper_name, sizeof(helper_name), class_type);
         fprintf(ctx->out, "static void %s(%s value);\n",
             helper_name,
@@ -1048,8 +1193,34 @@ void codegen_emit_struct_types(CodegenContext *ctx)
         fputc('\n', ctx->out);
     }
 
+    emit_list_print_definitions(ctx);
+
     for (size_t i = 0; i < semantic_class_type_count(); i++) {
         ValueType class_type = semantic_class_type_at(i);
+
+        codegen_build_class_retain_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n",
+            helper_name,
+            semantic_class_name(class_type));
+        for (size_t j = 0; j < semantic_class_field_count(class_type); j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            snprintf(value_expr, sizeof(value_expr), "value->%s", semantic_class_field_name(class_type, j));
+            emit_managed_field_retain(ctx->out, semantic_class_field_type(class_type, j), value_expr);
+        }
+        fputs("}\n\n", ctx->out);
+
+        codegen_build_class_release_name(helper_name, sizeof(helper_name), class_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n",
+            helper_name,
+            semantic_class_name(class_type));
+        for (size_t j = semantic_class_field_count(class_type); j > 0; j--) {
+            char value_expr[MAX_NAME_LEN];
+
+            snprintf(value_expr, sizeof(value_expr), "value->%s", semantic_class_field_name(class_type, j - 1));
+            emit_managed_field_release(ctx->out, semantic_class_field_type(class_type, j - 1), value_expr);
+        }
+        fputs("}\n\n", ctx->out);
 
         codegen_build_class_print_name(helper_name, sizeof(helper_name), class_type);
         fprintf(ctx->out, "static void %s(%s value)\n{\n",

@@ -209,6 +209,33 @@ int semantic_type_is_ref(ValueType type)
         type == TYPE_LIST_CHAR);
 }
 
+int semantic_type_needs_management(ValueType type)
+{
+    if (semantic_type_is_ref(type)) {
+        return 1;
+    }
+
+    if (semantic_type_is_tuple(type)) {
+        for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+            if (semantic_type_needs_management(semantic_tuple_element_type(type, i))) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    if (semantic_type_is_class(type)) {
+        for (size_t i = 0; i < semantic_class_field_count(type); i++) {
+            if (semantic_type_needs_management(semantic_class_field_type(type, i))) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    return 0;
+}
+
 int semantic_type_is_list(ValueType type)
 {
     return type == TYPE_LIST_INT ||
@@ -433,8 +460,8 @@ ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_cou
         if (semantic_type_is_union(elements[i])) {
             semantic_error("tuple elements cannot be union types yet");
         }
-        if (semantic_type_is_ref(elements[i])) {
-            semantic_error("tuple elements cannot be list types yet");
+        if (semantic_type_needs_management(elements[i])) {
+            semantic_error("tuple elements cannot contain managed types yet");
         }
         if (elements[i] == TYPE_NONE) {
             semantic_error("tuple elements cannot be None");
@@ -588,9 +615,6 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         }
         if (semantic_type_is_union(field_type)) {
             semantic_error_at_node(field, "class fields cannot use union types yet");
-        }
-        if (semantic_type_is_ref(field_type)) {
-            semantic_error_at_node(field, "class fields cannot use list types yet");
         }
         if (field_type == TYPE_NONE) {
             semantic_error_at_node(field, "class fields cannot use None");

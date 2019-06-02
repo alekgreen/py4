@@ -35,6 +35,10 @@ static int is_direct_tuple_literal_expression(const ParseNode *expr)
 
 static int tuple_element_type_supported(ValueType type)
 {
+    if (semantic_type_needs_management(type)) {
+        return 0;
+    }
+
     return type == TYPE_INT ||
         type == TYPE_FLOAT ||
         type == TYPE_BOOL ||

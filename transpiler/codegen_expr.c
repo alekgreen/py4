@@ -72,7 +72,69 @@ void codegen_push_cleanup_scope(CodegenContext *ctx)
     if (ctx->cleanup_scope_count >= MAX_SCOPE_DEPTH) {
         codegen_error("cleanup scope nesting too deep");
     }
-    ctx->cleanup_scope_starts[ctx->cleanup_scope_count++] = ctx->ref_local_count;
+    ctx->cleanup_scope_starts[ctx->cleanup_scope_count++] = ctx->managed_local_count;
+}
+
+void codegen_emit_value_retain(CodegenContext *ctx, ValueType type, const char *name)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (!semantic_type_needs_management(type)) {
+        codegen_error("unsupported managed type %s", semantic_type_name(type));
+    }
+
+    if (semantic_type_is_ref(type)) {
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s_incref(%s);\n", codegen_list_runtime_prefix(type), name);
+        return;
+    }
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), type);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
+        return;
+    }
+
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_retain_name(helper_name, sizeof(helper_name), type);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
+        return;
+    }
+
+    codegen_error("unsupported managed type %s", semantic_type_name(type));
+}
+
+void codegen_emit_value_release(CodegenContext *ctx, ValueType type, const char *name)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (!semantic_type_needs_management(type)) {
+        codegen_error("unsupported managed type %s", semantic_type_name(type));
+    }
+
+    if (semantic_type_is_ref(type)) {
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s_decref(%s);\n", codegen_list_runtime_prefix(type), name);
+        return;
+    }
+
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), type);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
+        return;
+    }
+
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_release_name(helper_name, sizeof(helper_name), type);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
+        return;
+    }
+
+    codegen_error("unsupported managed type %s", semantic_type_name(type));
 }
 
 void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *name)
@@ -80,8 +142,7 @@ void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *na
     if (!semantic_type_is_ref(type)) {
         codegen_error("unsupported refcounted type %s", semantic_type_name(type));
     }
-    codegen_emit_indent(ctx);
-    fprintf(ctx->out, "%s_incref(%s);\n", codegen_list_runtime_prefix(type), name);
+    codegen_emit_value_retain(ctx, type, name);
 }
 
 void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *name)
@@ -89,29 +150,28 @@ void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *na
     if (!semantic_type_is_ref(type)) {
         codegen_error("unsupported refcounted type %s", semantic_type_name(type));
     }
-    codegen_emit_indent(ctx);
-    fprintf(ctx->out, "%s_decref(%s);\n", codegen_list_runtime_prefix(type), name);
+    codegen_emit_value_release(ctx, type, name);
 }
 
 void codegen_register_ref_local(CodegenContext *ctx, const char *name, ValueType type)
 {
-    if (!semantic_type_is_ref(type)) {
+    if (!semantic_type_needs_management(type)) {
         return;
     }
 
-    if (ctx->ref_local_count >= MAX_REF_LOCALS) {
-        codegen_error("too many live refcounted locals");
+    if (ctx->managed_local_count >= MAX_REF_LOCALS) {
+        codegen_error("too many live managed locals");
     }
 
-    ctx->ref_locals[ctx->ref_local_count].name = name;
-    ctx->ref_locals[ctx->ref_local_count].type = type;
-    ctx->ref_local_count++;
+    ctx->managed_locals[ctx->managed_local_count].name = name;
+    ctx->managed_locals[ctx->managed_local_count].type = type;
+    ctx->managed_local_count++;
 }
 
 void codegen_emit_live_ref_cleanup(CodegenContext *ctx)
 {
-    for (size_t i = ctx->ref_local_count; i > 0; i--) {
-        codegen_emit_ref_decref(ctx, ctx->ref_locals[i - 1].type, ctx->ref_locals[i - 1].name);
+    for (size_t i = ctx->managed_local_count; i > 0; i--) {
+        codegen_emit_value_release(ctx, ctx->managed_locals[i - 1].type, ctx->managed_locals[i - 1].name);
     }
 }
 
@@ -124,17 +184,17 @@ void codegen_pop_cleanup_scope(CodegenContext *ctx)
     }
 
     start = ctx->cleanup_scope_starts[--ctx->cleanup_scope_count];
-    for (size_t i = ctx->ref_local_count; i > start; i--) {
-        codegen_emit_ref_decref(ctx, ctx->ref_locals[i - 1].type, ctx->ref_locals[i - 1].name);
+    for (size_t i = ctx->managed_local_count; i > start; i--) {
+        codegen_emit_value_release(ctx, ctx->managed_locals[i - 1].type, ctx->managed_locals[i - 1].name);
     }
-    ctx->ref_local_count = start;
+    ctx->managed_local_count = start;
 }
 
 int codegen_expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
 {
     const ParseNode *child;
 
-    if (!semantic_type_is_ref(semantic_type_of(ctx->semantic, expr))) {
+    if (!semantic_type_needs_management(semantic_type_of(ctx->semantic, expr))) {
         return 0;
     }
     if (expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
@@ -142,7 +202,10 @@ int codegen_expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
     }
 
     child = expr->children[0];
-    return child->kind == NODE_CALL || child->kind == NODE_LIST_LITERAL || child->kind == NODE_METHOD_CALL;
+    return child->kind == NODE_CALL ||
+        child->kind == NODE_LIST_LITERAL ||
+        child->kind == NODE_METHOD_CALL ||
+        child->kind == NODE_TUPLE_LITERAL;
 }
 
 static int node_is_borrowed_ref_value(const ParseNode *node)
@@ -164,7 +227,10 @@ static int node_is_owned_ref_value(const ParseNode *node)
     if (node == NULL) {
         return 0;
     }
-    if (node->kind == NODE_CALL || node->kind == NODE_LIST_LITERAL || node->kind == NODE_METHOD_CALL) {
+    if (node->kind == NODE_CALL ||
+        node->kind == NODE_LIST_LITERAL ||
+        node->kind == NODE_METHOD_CALL ||
+        node->kind == NODE_TUPLE_LITERAL) {
         return 1;
     }
     if (node->kind == NODE_EXPRESSION && node->child_count == 1) {
@@ -220,6 +286,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     ValueType return_type = semantic_type_of(ctx->semantic, call);
     ValueType class_type = 0;
     char *arg_parts[32];
+    int arg_owned[32] = {0};
     ValueType cleanup_types[32];
     char *cleanup_names[32];
     size_t arg_count = 0;
@@ -286,7 +353,8 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             char *part = materialize_ref_node(ctx, arg_node, target_type, 0, &needs_cleanup);
 
             arg_parts[i] = part;
-            if (needs_cleanup) {
+            arg_owned[i] = node_is_owned_ref_value(arg_node);
+            if (needs_cleanup && !(class_type != 0 && arg_owned[i])) {
                 cleanup_names[cleanup_count] = codegen_dup_printf("%s", part);
                 cleanup_types[cleanup_count] = target_type;
                 cleanup_count++;
@@ -294,9 +362,28 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             continue;
         }
 
+        if (semantic_type_needs_management(target_type) && semantic_type_needs_management(arg_type) &&
+            node_is_owned_ref_value(arg_node) && class_type == 0) {
+            char *temp_name = codegen_next_temp_name(ctx);
+            char *type_name = codegen_type_to_c_string(target_type);
+            char *part = codegen_wrapped_expression_to_c_string(ctx, arg_node, target_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, part);
+            free(type_name);
+            free(part);
+            arg_parts[i] = temp_name;
+            arg_owned[i] = 1;
+            cleanup_names[cleanup_count] = codegen_dup_printf("%s", temp_name);
+            cleanup_types[cleanup_count] = target_type;
+            cleanup_count++;
+            continue;
+        }
+
         arg_parts[i] = is_list_builtin_name(callee->value)
             ? codegen_expression_to_c_string(ctx, arg_node)
             : codegen_wrapped_expression_to_c_string(ctx, arg_node, target_type);
+        arg_owned[i] = node_is_owned_ref_value(arg_node);
     }
 
     args = codegen_dup_printf("");
@@ -317,9 +404,41 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     } else if (strcmp(callee->value, "list_set") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
     } else if (class_type != 0) {
-        char *type_name = codegen_type_to_c_string(class_type);
-        result = codegen_dup_printf("((%s){%s})", type_name, args);
-        free(type_name);
+        if (semantic_type_needs_management(class_type)) {
+            char *temp_name = codegen_next_temp_name(ctx);
+            char *type_name = codegen_type_to_c_string(class_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = ((%s){%s});\n", type_name, temp_name, type_name, args);
+            for (size_t i = 0; i < arg_count; i++) {
+                ValueType field_type = semantic_class_field_type(class_type, i);
+
+                if (!semantic_type_needs_management(field_type) || arg_owned[i]) {
+                    continue;
+                }
+                {
+                    char *field_name = codegen_dup_printf("%s.%s", temp_name, semantic_class_field_name(class_type, i));
+
+                    codegen_emit_value_retain(ctx, field_type, field_name);
+                    free(field_name);
+                }
+            }
+            result = temp_name;
+            free(type_name);
+            free(args);
+            for (size_t i = 0; i < arg_count; i++) {
+                free(arg_parts[i]);
+            }
+            for (size_t i = cleanup_count; i > 0; i--) {
+                codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                free(cleanup_names[i - 1]);
+            }
+            return result;
+        } else {
+            char *type_name = codegen_type_to_c_string(class_type);
+            result = codegen_dup_printf("((%s){%s})", type_name, args);
+            free(type_name);
+        }
     } else {
         result = codegen_dup_printf("%s(%s)", callee->value, args);
     }
@@ -380,15 +499,54 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         size_t arg_count = (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))
             ? 0
             : arguments->child_count;
+        ValueType return_type = semantic_type_of(ctx->semantic, call);
+        int receiver_owned = node_is_owned_ref_value(receiver);
+        ValueType cleanup_types[32];
+        char *cleanup_names[32];
+        size_t cleanup_count = 0;
         char *receiver_text = codegen_primary_to_c_string(ctx, receiver);
         char *args = codegen_dup_printf("%s", receiver_text);
         char *result;
 
+        if (semantic_type_needs_management(receiver_type) && receiver_owned) {
+            char *temp_name = codegen_next_temp_name(ctx);
+            char *type_name = codegen_type_to_c_string(receiver_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, receiver_text);
+            free(type_name);
+            free(receiver_text);
+            receiver_text = temp_name;
+            free(args);
+            args = codegen_dup_printf("%s", receiver_text);
+            cleanup_names[cleanup_count] = codegen_dup_printf("%s", receiver_text);
+            cleanup_types[cleanup_count] = receiver_type;
+            cleanup_count++;
+        }
+
         for (size_t i = 0; i < arg_count; i++) {
-            char *arg = codegen_wrapped_expression_to_c_string(
-                ctx,
-                arguments->children[i],
-                semantic_method_parameter_type(ctx->semantic, receiver_type, method->value, i));
+            ValueType target_type = semantic_method_parameter_type(ctx->semantic, receiver_type, method->value, i);
+            ValueType arg_type = semantic_type_of(ctx->semantic, arguments->children[i]);
+            char *arg;
+
+            if (semantic_type_needs_management(target_type) &&
+                semantic_type_needs_management(arg_type) &&
+                node_is_owned_ref_value(arguments->children[i])) {
+                char *temp_name = codegen_next_temp_name(ctx);
+                char *type_name = codegen_type_to_c_string(target_type);
+                char *part = codegen_wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, part);
+                free(type_name);
+                free(part);
+                cleanup_names[cleanup_count] = codegen_dup_printf("%s", temp_name);
+                cleanup_types[cleanup_count] = target_type;
+                cleanup_count++;
+                arg = temp_name;
+            } else {
+                arg = codegen_wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
+            }
             char *joined = codegen_dup_printf("%s, %s", args, arg);
 
             free(args);
@@ -401,7 +559,34 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             args);
         free(receiver_text);
         free(args);
-        return result;
+        if (cleanup_count == 0) {
+            return result;
+        }
+        if (return_type == TYPE_NONE) {
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s;\n", result);
+            free(result);
+            for (size_t i = cleanup_count; i > 0; i--) {
+                codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                free(cleanup_names[i - 1]);
+            }
+            return codegen_dup_printf("(void)0");
+        }
+
+        {
+            char *result_name = codegen_next_temp_name(ctx);
+            char *type_name = codegen_type_to_c_string(return_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, result);
+            free(type_name);
+            free(result);
+            for (size_t i = cleanup_count; i > 0; i--) {
+                codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                free(cleanup_names[i - 1]);
+            }
+            return result_name;
+        }
     }
 
     receiver_name = materialize_ref_node(ctx, receiver, receiver_type, 1, &needs_cleanup);

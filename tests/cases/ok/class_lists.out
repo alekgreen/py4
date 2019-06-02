@@ -1,0 +1,6 @@
+3
+6
+17
+3
+Bucket(name=tools, values=[8, 9])
+Shelf(bucket=Bucket(name=tools, values=[1, 2, 3]), slot=7)
