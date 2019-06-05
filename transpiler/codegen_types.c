@@ -693,6 +693,9 @@ static void emit_scalar_print_case(FILE *out, ValueType type, const char *value_
     }
 }
 
+static void emit_managed_field_retain(FILE *out, ValueType type, const char *value_expr);
+static void emit_managed_field_release(FILE *out, ValueType type, const char *value_expr);
+
 static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_expr)
 {
     char helper_name[MAX_NAME_LEN];
@@ -818,6 +821,10 @@ void codegen_emit_tuple_runtime(CodegenContext *ctx)
         char tuple_name[MAX_NAME_LEN];
 
         codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n", helper_name, tuple_name);
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n", helper_name, tuple_name);
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
         fprintf(ctx->out, "static void %s(%s value);\n", helper_name, tuple_name);
     }
@@ -832,6 +839,26 @@ void codegen_emit_tuple_runtime(CodegenContext *ctx)
         size_t element_count = semantic_tuple_element_count(tuple_type);
 
         codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, tuple_name);
+        for (size_t j = 0; j < element_count; j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            snprintf(value_expr, sizeof(value_expr), "value->item%zu", j);
+            emit_managed_field_retain(ctx->out, semantic_tuple_element_type(tuple_type, j), value_expr);
+        }
+        fputs("}\n\n", ctx->out);
+
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, tuple_name);
+        for (size_t j = element_count; j > 0; j--) {
+            char value_expr[MAX_NAME_LEN];
+
+            snprintf(value_expr, sizeof(value_expr), "value->item%zu", j - 1);
+            emit_managed_field_release(ctx->out, semantic_tuple_element_type(tuple_type, j - 1), value_expr);
+        }
+        fputs("}\n\n", ctx->out);
+
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
         fprintf(ctx->out, "static void %s(%s value)\n{\n", helper_name, tuple_name);
         fputs("    printf(\"(\");\n", ctx->out);
@@ -1185,6 +1212,10 @@ void codegen_emit_struct_types(CodegenContext *ctx)
         char tuple_name[MAX_NAME_LEN];
 
         codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n", helper_name, tuple_name);
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n", helper_name, tuple_name);
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
         fprintf(ctx->out, "static void %s(%s value);\n", helper_name, tuple_name);
     }
@@ -1249,6 +1280,26 @@ void codegen_emit_struct_types(CodegenContext *ctx)
         size_t element_count = semantic_tuple_element_count(tuple_type);
 
         codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, tuple_name);
+        for (size_t j = 0; j < element_count; j++) {
+            char value_expr[MAX_NAME_LEN];
+
+            snprintf(value_expr, sizeof(value_expr), "value->item%zu", j);
+            emit_managed_field_retain(ctx->out, semantic_tuple_element_type(tuple_type, j), value_expr);
+        }
+        fputs("}\n\n", ctx->out);
+
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), tuple_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, tuple_name);
+        for (size_t j = element_count; j > 0; j--) {
+            char value_expr[MAX_NAME_LEN];
+
+            snprintf(value_expr, sizeof(value_expr), "value->item%zu", j - 1);
+            emit_managed_field_release(ctx->out, semantic_tuple_element_type(tuple_type, j - 1), value_expr);
+        }
+        fputs("}\n\n", ctx->out);
+
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
         fprintf(ctx->out, "static void %s(%s value)\n{\n", helper_name, tuple_name);
         fputs("    printf(\"(\");\n", ctx->out);

@@ -715,7 +715,28 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         }
 
         type_name = codegen_type_to_c_string(tuple_type);
-        result = codegen_dup_printf("((%s){%s})", type_name, values);
+        if (semantic_type_needs_management(tuple_type)) {
+            char *temp_name = codegen_next_temp_name(ctx);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = ((%s){%s});\n", type_name, temp_name, type_name, values);
+            for (size_t i = 0; i < element_count; i++) {
+                ValueType element_type = semantic_tuple_element_type(tuple_type, i);
+
+                if (!semantic_type_needs_management(element_type) || node_is_owned_ref_value(primary->children[i])) {
+                    continue;
+                }
+                {
+                    char *field_name = codegen_dup_printf("%s.item%zu", temp_name, i);
+
+                    codegen_emit_value_retain(ctx, element_type, field_name);
+                    free(field_name);
+                }
+            }
+            result = temp_name;
+        } else {
+            result = codegen_dup_printf("((%s){%s})", type_name, values);
+        }
         free(type_name);
         free(values);
         return result;

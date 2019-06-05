@@ -460,9 +460,6 @@ ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_cou
         if (semantic_type_is_union(elements[i])) {
             semantic_error("tuple elements cannot be union types yet");
         }
-        if (semantic_type_needs_management(elements[i])) {
-            semantic_error("tuple elements cannot contain managed types yet");
-        }
         if (elements[i] == TYPE_NONE) {
             semantic_error("tuple elements cannot be None");
         }

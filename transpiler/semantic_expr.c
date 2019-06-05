@@ -35,15 +35,12 @@ static int is_direct_tuple_literal_expression(const ParseNode *expr)
 
 static int tuple_element_type_supported(ValueType type)
 {
-    if (semantic_type_needs_management(type)) {
-        return 0;
-    }
-
     return type == TYPE_INT ||
         type == TYPE_FLOAT ||
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_list(type) ||
         semantic_type_is_tuple(type) ||
         semantic_type_is_class(type);
 }
@@ -581,7 +578,7 @@ ValueType semantic_infer_primary_type(
 
             if (!tuple_element_type_supported(item_type)) {
                 semantic_error_at_node(node->children[i],
-                    "tuple elements currently support only int, float, bool, char, str, classes, and tuples");
+                    "tuple elements currently support only int, float, bool, char, str, lists, classes, and tuples");
             }
             element_types[i] = item_type;
         }
