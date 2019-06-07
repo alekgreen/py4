@@ -457,9 +457,6 @@ static ValueType infer_call_type(
         if (arg_type == TYPE_NONE) {
             semantic_error_at_node(arguments->children[0], "print cannot print None");
         }
-        if (semantic_type_is_ref(arg_type)) {
-            semantic_error_at_node(arguments->children[0], "print does not support %s yet", semantic_type_name(arg_type));
-        }
 
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;

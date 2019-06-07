@@ -56,6 +56,14 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         free(arg_text);
         return;
     }
+    if (semantic_type_is_list(arg_type)) {
+        codegen_build_list_print_name(helper_name, sizeof(helper_name), arg_type);
+        fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
+        codegen_emit_indent(ctx);
+        fputs("printf(\"\\n\");\n", ctx->out);
+        free(arg_text);
+        return;
+    }
 
     switch (arg_type) {
         case TYPE_INT:
@@ -76,13 +84,6 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         case TYPE_NONE:
             free(arg_text);
             codegen_error("cannot print None");
-            return;
-        case TYPE_LIST_INT:
-        case TYPE_LIST_FLOAT:
-        case TYPE_LIST_BOOL:
-        case TYPE_LIST_CHAR:
-            free(arg_text);
-            codegen_error("print does not support %s yet", semantic_type_name(arg_type));
             return;
     }
 
