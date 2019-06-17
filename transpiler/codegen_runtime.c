@@ -149,4 +149,5 @@ void codegen_emit_container_runtime(CodegenContext *ctx)
     emit_list_runtime(ctx, "Py4ListFloat", "py4_list_float", "list[float]", "double");
     emit_list_runtime(ctx, "Py4ListBool", "py4_list_bool", "list[bool]", "bool");
     emit_list_runtime(ctx, "Py4ListChar", "py4_list_char", "list[char]", "char");
+    emit_list_runtime(ctx, "Py4ListStr", "py4_list_str", "list[str]", "const char *");
 }

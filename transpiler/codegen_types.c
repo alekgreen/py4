@@ -15,7 +15,8 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
     TYPE_LIST_INT,
     TYPE_LIST_FLOAT,
     TYPE_LIST_BOOL,
-    TYPE_LIST_CHAR
+    TYPE_LIST_CHAR,
+    TYPE_LIST_STR
 };
 
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
@@ -254,6 +255,7 @@ const char *codegen_type_suffix(ValueType type)
         case TYPE_LIST_FLOAT: return "list_float";
         case TYPE_LIST_BOOL: return "list_bool";
         case TYPE_LIST_CHAR: return "list_char";
+        case TYPE_LIST_STR: return "list_str";
         default: return "unknown";
     }
 }
@@ -277,6 +279,7 @@ const char *codegen_type_field(ValueType type)
         case TYPE_LIST_FLOAT: return "as_list_float";
         case TYPE_LIST_BOOL: return "as_list_bool";
         case TYPE_LIST_CHAR: return "as_list_char";
+        case TYPE_LIST_STR: return "as_list_str";
         default: return "";
     }
 }
@@ -297,6 +300,7 @@ static int is_codegen_builtin_name(const char *name)
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
         strcmp(name, "list_char") == 0 ||
+        strcmp(name, "list_str") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -391,6 +395,7 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         case TYPE_LIST_FLOAT:
         case TYPE_LIST_BOOL:
         case TYPE_LIST_CHAR:
+        case TYPE_LIST_STR:
             fprintf(out, "%s *", codegen_list_struct_name(type));
             return;
         default:
@@ -414,6 +419,7 @@ char *codegen_type_to_c_string(ValueType type)
             case TYPE_LIST_FLOAT:
             case TYPE_LIST_BOOL:
             case TYPE_LIST_CHAR:
+            case TYPE_LIST_STR:
                 return codegen_dup_printf("%s *", codegen_list_struct_name(type));
         }
         if (semantic_type_is_tuple(type)) {
@@ -1037,6 +1043,9 @@ static void emit_list_print_definitions(CodegenContext *ctx)
                 break;
             case TYPE_LIST_CHAR:
                 fputs("            printf(\"%c\", value->items[i]);\n", ctx->out);
+                break;
+            case TYPE_LIST_STR:
+                fputs("            printf(\"%s\", value->items[i]);\n", ctx->out);
                 break;
             default:
                 codegen_error("unsupported list print type %s", semantic_type_name(type));

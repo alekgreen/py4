@@ -5,7 +5,7 @@
 
 typedef unsigned int ValueType;
 
-#define TYPE_ATOMIC_MASK ((1u << 10) - 1u)
+#define TYPE_ATOMIC_MASK ((1u << 11) - 1u)
 #define TYPE_TUPLE_BASE (1u << 16)
 #define TYPE_CLASS_BASE (1u << 24)
 #define MAX_TUPLE_TYPES 64
@@ -23,7 +23,8 @@ enum {
     TYPE_LIST_INT = 1u << 6,
     TYPE_LIST_FLOAT = 1u << 7,
     TYPE_LIST_BOOL = 1u << 8,
-    TYPE_LIST_CHAR = 1u << 9
+    TYPE_LIST_CHAR = 1u << 9,
+    TYPE_LIST_STR = 1u << 10
 };
 
 typedef struct SemanticInfo SemanticInfo;

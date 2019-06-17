@@ -43,6 +43,8 @@ const char *codegen_list_struct_name(ValueType type)
             return "Py4ListBool";
         case TYPE_LIST_CHAR:
             return "Py4ListChar";
+        case TYPE_LIST_STR:
+            return "Py4ListStr";
         default:
             codegen_error("%s is not a supported list type", semantic_type_name(type));
             return "";
@@ -60,6 +62,8 @@ const char *codegen_list_runtime_prefix(ValueType type)
             return "py4_list_bool";
         case TYPE_LIST_CHAR:
             return "py4_list_char";
+        case TYPE_LIST_STR:
+            return "py4_list_str";
         default:
             codegen_error("%s is not a supported list type", semantic_type_name(type));
             return "";
@@ -77,6 +81,8 @@ const char *codegen_list_element_c_type(ValueType type)
             return "bool";
         case TYPE_CHAR:
             return "char";
+        case TYPE_STR:
+            return "const char *";
         default:
             codegen_error("%s does not have a supported list element C type", semantic_type_name(type));
             return "";
