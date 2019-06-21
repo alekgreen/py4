@@ -49,6 +49,7 @@ static int is_list_builtin_name(const char *name)
         strcmp(name, "list_bool") == 0 ||
         strcmp(name, "list_char") == 0 ||
         strcmp(name, "list_str") == 0 ||
+        strcmp(name, "dict_str_str") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -59,6 +60,15 @@ static int is_list_method_name(const char *name)
 {
     return strcmp(name, "append") == 0 ||
         strcmp(name, "pop") == 0 ||
+        strcmp(name, "clear") == 0 ||
+        strcmp(name, "copy") == 0;
+}
+
+static int is_dict_method_name(const char *name)
+{
+    return strcmp(name, "set") == 0 ||
+        strcmp(name, "get") == 0 ||
+        strcmp(name, "contains") == 0 ||
         strcmp(name, "clear") == 0 ||
         strcmp(name, "copy") == 0;
 }
@@ -86,7 +96,7 @@ void codegen_emit_value_retain(CodegenContext *ctx, ValueType type, const char *
 
     if (semantic_type_is_ref(type)) {
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "%s_incref(%s);\n", codegen_list_runtime_prefix(type), name);
+        fprintf(ctx->out, "%s_incref(%s);\n", codegen_ref_runtime_prefix(type), name);
         return;
     }
 
@@ -117,7 +127,7 @@ void codegen_emit_value_release(CodegenContext *ctx, ValueType type, const char 
 
     if (semantic_type_is_ref(type)) {
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "%s_decref(%s);\n", codegen_list_runtime_prefix(type), name);
+        fprintf(ctx->out, "%s_decref(%s);\n", codegen_ref_runtime_prefix(type), name);
         return;
     }
 
@@ -311,6 +321,9 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         if (strcmp(callee->value, "list_str") == 0) {
             return codegen_list_new_call(TYPE_LIST_STR);
         }
+        if (strcmp(callee->value, "dict_str_str") == 0) {
+            return codegen_dict_new_call(TYPE_DICT_STR_STR);
+        }
     } else {
         class_type = semantic_find_class_type(callee->value);
         if (class_type == 0) {
@@ -343,6 +356,8 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             } else if ((strcmp(callee->value, "list_append") == 0 && i == 1) ||
                 (strcmp(callee->value, "list_set") == 0 && i == 2)) {
                 target_type = semantic_list_element_type(semantic_type_of(ctx->semantic, arguments->children[0]));
+            } else if (strcmp(callee->value, "len") == 0 && i == 0) {
+                target_type = arg_type;
             }
         } else if (function_def != NULL) {
             const ParseNode *parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
@@ -404,7 +419,13 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     } else if (strcmp(callee->value, "list_get") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "get", args);
     } else if (strcmp(callee->value, "list_len") == 0 || strcmp(callee->value, "len") == 0) {
-        result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "len", args);
+        ValueType container_type = semantic_type_of(ctx->semantic, arguments->children[0]);
+
+        if (semantic_type_is_dict(container_type)) {
+            result = codegen_dict_unary_call(container_type, "len", args);
+        } else {
+            result = codegen_list_unary_call(container_type, "len", args);
+        }
     } else if (strcmp(callee->value, "list_set") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
     } else if (class_type != 0) {
@@ -595,27 +616,60 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
     receiver_name = materialize_ref_node(ctx, receiver, receiver_type, 1, &needs_cleanup);
 
-    if (!is_list_method_name(method->value)) {
-        free(receiver_name);
-        codegen_error("unknown method '%s' during code generation", method->value);
-    }
+    if (semantic_type_is_dict(receiver_type)) {
+        if (!is_dict_method_name(method->value)) {
+            free(receiver_name);
+            codegen_error("unknown method '%s' during code generation", method->value);
+        }
 
-    if (strcmp(method->value, "append") == 0) {
-        char *value = codegen_wrapped_expression_to_c_string(
-            ctx,
-            arguments->children[0],
-            semantic_list_element_type(receiver_type));
-        result = codegen_list_binary_call(receiver_type, "append", receiver_name, value);
-        free(value);
-    } else if (strcmp(method->value, "pop") == 0) {
-        result = codegen_list_unary_call(receiver_type, "pop", receiver_name);
-    } else if (strcmp(method->value, "clear") == 0) {
-        result = codegen_list_unary_call(receiver_type, "clear", receiver_name);
-    } else if (strcmp(method->value, "copy") == 0) {
-        result = codegen_list_unary_call(receiver_type, "copy", receiver_name);
+        if (strcmp(method->value, "set") == 0) {
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+            char *value = codegen_wrapped_expression_to_c_string(ctx, arguments->children[1], TYPE_STR);
+
+            result = codegen_dict_ternary_call(receiver_type, "set", receiver_name, key, value);
+            free(key);
+            free(value);
+        } else if (strcmp(method->value, "get") == 0) {
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+
+            result = codegen_dict_binary_call(receiver_type, "get", receiver_name, key);
+            free(key);
+        } else if (strcmp(method->value, "contains") == 0) {
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+
+            result = codegen_dict_binary_call(receiver_type, "contains", receiver_name, key);
+            free(key);
+        } else if (strcmp(method->value, "clear") == 0) {
+            result = codegen_dict_unary_call(receiver_type, "clear", receiver_name);
+        } else if (strcmp(method->value, "copy") == 0) {
+            result = codegen_dict_unary_call(receiver_type, "copy", receiver_name);
+        } else {
+            free(receiver_name);
+            codegen_error("unknown method '%s' during code generation", method->value);
+        }
     } else {
-        free(receiver_name);
-        codegen_error("unknown method '%s' during code generation", method->value);
+        if (!is_list_method_name(method->value)) {
+            free(receiver_name);
+            codegen_error("unknown method '%s' during code generation", method->value);
+        }
+
+        if (strcmp(method->value, "append") == 0) {
+            char *value = codegen_wrapped_expression_to_c_string(
+                ctx,
+                arguments->children[0],
+                semantic_list_element_type(receiver_type));
+            result = codegen_list_binary_call(receiver_type, "append", receiver_name, value);
+            free(value);
+        } else if (strcmp(method->value, "pop") == 0) {
+            result = codegen_list_unary_call(receiver_type, "pop", receiver_name);
+        } else if (strcmp(method->value, "clear") == 0) {
+            result = codegen_list_unary_call(receiver_type, "clear", receiver_name);
+        } else if (strcmp(method->value, "copy") == 0) {
+            result = codegen_list_unary_call(receiver_type, "copy", receiver_name);
+        } else {
+            free(receiver_name);
+            codegen_error("unknown method '%s' during code generation", method->value);
+        }
     }
 
     if (needs_cleanup) {
@@ -761,12 +815,20 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             free(base);
             return result;
         } else {
-            ValueType element_type = semantic_list_element_type(base_type);
+            ValueType element_type;
             int needs_cleanup = 0;
             char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
             char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
-            char *call_text = codegen_list_binary_call(base_type, "get", base, index);
+            char *call_text;
             char *result;
+
+            if (semantic_type_is_dict(base_type)) {
+                element_type = TYPE_STR;
+                call_text = codegen_dict_binary_call(base_type, "get", base, index);
+            } else {
+                element_type = semantic_list_element_type(base_type);
+                call_text = codegen_list_binary_call(base_type, "get", base, index);
+            }
 
             if (needs_cleanup) {
                 char *result_name = codegen_next_temp_name(ctx);

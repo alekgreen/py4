@@ -77,13 +77,26 @@ void codegen_build_class_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_retain_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_release_name(char *buffer, size_t size, ValueType type);
 void codegen_build_list_print_name(char *buffer, size_t size, ValueType type);
+void codegen_build_dict_print_name(char *buffer, size_t size, ValueType type);
+const char *codegen_ref_runtime_prefix(ValueType type);
 const char *codegen_list_struct_name(ValueType type);
 const char *codegen_list_runtime_prefix(ValueType type);
 const char *codegen_list_element_c_type(ValueType type);
+const char *codegen_dict_struct_name(ValueType type);
+const char *codegen_dict_runtime_prefix(ValueType type);
 char *codegen_list_new_call(ValueType type);
 char *codegen_list_unary_call(ValueType type, const char *suffix, const char *arg);
 char *codegen_list_binary_call(ValueType type, const char *suffix, const char *arg0, const char *arg1);
 char *codegen_list_ternary_call(
+    ValueType type,
+    const char *suffix,
+    const char *arg0,
+    const char *arg1,
+    const char *arg2);
+char *codegen_dict_new_call(ValueType type);
+char *codegen_dict_unary_call(ValueType type, const char *suffix, const char *arg);
+char *codegen_dict_binary_call(ValueType type, const char *suffix, const char *arg0, const char *arg1);
+char *codegen_dict_ternary_call(
     ValueType type,
     const char *suffix,
     const char *arg0,

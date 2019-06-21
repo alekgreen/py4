@@ -64,6 +64,14 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         free(arg_text);
         return;
     }
+    if (semantic_type_is_dict(arg_type)) {
+        codegen_build_dict_print_name(helper_name, sizeof(helper_name), arg_type);
+        fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
+        codegen_emit_indent(ctx);
+        fputs("printf(\"\\n\");\n", ctx->out);
+        free(arg_text);
+        return;
+    }
 
     switch (arg_type) {
         case TYPE_INT:
@@ -374,12 +382,21 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
         char *expr_text;
 
         if (target->kind == NODE_INDEX) {
-            ValueType list_type = semantic_type_of(ctx->semantic, target->children[0]);
-            ValueType element_type = semantic_list_element_type(list_type);
+            ValueType container_type = semantic_type_of(ctx->semantic, target->children[0]);
             char *base = codegen_primary_to_c_string(ctx, target->children[0]);
             char *index = codegen_expression_to_c_string(ctx, target->children[1]);
-            char *value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
-            char *call = codegen_list_ternary_call(list_type, "set", base, index, value);
+            char *value;
+            char *call;
+
+            if (semantic_type_is_dict(container_type)) {
+                value = codegen_wrapped_expression_to_c_string(ctx, expr, TYPE_STR);
+                call = codegen_dict_ternary_call(container_type, "set", base, index, value);
+            } else {
+                ValueType element_type = semantic_list_element_type(container_type);
+
+                value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
+                call = codegen_list_ternary_call(container_type, "set", base, index, value);
+            }
 
             codegen_emit_indent(ctx);
             fprintf(ctx->out, "%s;\n", call);
@@ -1050,12 +1067,21 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
                 continue;
             }
             if (name->kind == NODE_INDEX) {
-                ValueType list_type = semantic_type_of(ctx->semantic, name->children[0]);
-                ValueType element_type = semantic_list_element_type(list_type);
+                ValueType container_type = semantic_type_of(ctx->semantic, name->children[0]);
                 char *base = codegen_primary_to_c_string(ctx, name->children[0]);
                 char *index = codegen_expression_to_c_string(ctx, name->children[1]);
-                char *value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
-                char *call = codegen_list_ternary_call(list_type, "set", base, index, value);
+                char *value;
+                char *call;
+
+                if (semantic_type_is_dict(container_type)) {
+                    value = codegen_wrapped_expression_to_c_string(ctx, expr, TYPE_STR);
+                    call = codegen_dict_ternary_call(container_type, "set", base, index, value);
+                } else {
+                    ValueType element_type = semantic_list_element_type(container_type);
+
+                    value = codegen_wrapped_expression_to_c_string(ctx, expr, element_type);
+                    call = codegen_list_ternary_call(container_type, "set", base, index, value);
+                }
 
                 codegen_emit_indent(ctx);
                 fprintf(ctx->out, "%s;\n", call);
@@ -1155,7 +1181,7 @@ void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
     ctx.semantic = info;
     codegen_collect_program_state(&ctx, root);
 
-    fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n\n", out);
+    fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
     codegen_emit_container_runtime(&ctx);
     codegen_emit_struct_types(&ctx);
     codegen_emit_union_runtime(&ctx);

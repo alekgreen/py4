@@ -41,6 +41,7 @@ static int tuple_element_type_supported(ValueType type)
         type == TYPE_CHAR ||
         type == TYPE_STR ||
         semantic_type_is_list(type) ||
+        semantic_type_is_dict(type) ||
         semantic_type_is_tuple(type) ||
         semantic_type_is_class(type);
 }
@@ -221,6 +222,7 @@ static int is_builtin_name(const char *name)
         strcmp(name, "list_bool") == 0 ||
         strcmp(name, "list_char") == 0 ||
         strcmp(name, "list_str") == 0 ||
+        strcmp(name, "dict_str_str") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -285,8 +287,65 @@ static ValueType infer_method_call_type(
         return method_info->return_type;
     }
 
+    if (semantic_type_is_dict(receiver_type)) {
+        if (strcmp(method->value, "set") == 0) {
+            ValueType key_type;
+            ValueType value_type;
+
+            expect_argument_count(method->value, arguments, 2);
+            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
+            value_type = semantic_infer_expression_type_with_hint(info, arguments->children[1], scope, TYPE_STR);
+            if (!semantic_is_assignable(TYPE_STR, key_type)) {
+                semantic_error_at_node(arguments->children[0], "method 'set' expects str key");
+            }
+            if (!semantic_is_assignable(TYPE_STR, value_type)) {
+                semantic_error_at_node(arguments->children[1], "method 'set' expects str value");
+            }
+            semantic_record_node_type(info, call, TYPE_NONE);
+            return TYPE_NONE;
+        }
+
+        if (strcmp(method->value, "get") == 0) {
+            ValueType key_type;
+
+            expect_argument_count(method->value, arguments, 1);
+            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
+            if (!semantic_is_assignable(TYPE_STR, key_type)) {
+                semantic_error_at_node(arguments->children[0], "method 'get' expects str key");
+            }
+            semantic_record_node_type(info, call, TYPE_STR);
+            return TYPE_STR;
+        }
+
+        if (strcmp(method->value, "contains") == 0) {
+            ValueType key_type;
+
+            expect_argument_count(method->value, arguments, 1);
+            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
+            if (!semantic_is_assignable(TYPE_STR, key_type)) {
+                semantic_error_at_node(arguments->children[0], "method 'contains' expects str key");
+            }
+            semantic_record_node_type(info, call, TYPE_BOOL);
+            return TYPE_BOOL;
+        }
+
+        if (strcmp(method->value, "clear") == 0) {
+            expect_argument_count(method->value, arguments, 0);
+            semantic_record_node_type(info, call, TYPE_NONE);
+            return TYPE_NONE;
+        }
+
+        if (strcmp(method->value, "copy") == 0) {
+            expect_argument_count(method->value, arguments, 0);
+            semantic_record_node_type(info, call, receiver_type);
+            return receiver_type;
+        }
+
+        semantic_error_at_node(method, "unknown dict method '%s'", method->value);
+    }
+
     if (!semantic_type_is_list(receiver_type)) {
-        semantic_error_at_node(receiver, "method '%s' requires list or class receiver", method->value);
+        semantic_error_at_node(receiver, "method '%s' requires list, dict, or class receiver", method->value);
     }
     element_type = semantic_list_element_type(receiver_type);
 
@@ -367,6 +426,12 @@ static ValueType infer_builtin_call_type(
         return TYPE_LIST_STR;
     }
 
+    if (strcmp(name, "dict_str_str") == 0) {
+        expect_argument_count(name, arguments, 0);
+        semantic_record_node_type(info, call, TYPE_DICT_STR_STR);
+        return TYPE_DICT_STR_STR;
+    }
+
     if (strcmp(name, "list_append") == 0) {
         ValueType list_type;
         ValueType arg_type;
@@ -405,9 +470,12 @@ static ValueType infer_builtin_call_type(
     }
 
     if (strcmp(name, "list_len") == 0 || strcmp(name, "len") == 0) {
+        ValueType container_type;
+
         expect_argument_count(name, arguments, 1);
-        if (!semantic_type_is_list(semantic_infer_expression_type(info, arguments->children[0], scope))) {
-            semantic_error_at_node(arguments->children[0], "function '%s' argument 1 expects list", name);
+        container_type = semantic_infer_expression_type(info, arguments->children[0], scope);
+        if (!semantic_type_is_list(container_type) && !semantic_type_is_dict(container_type)) {
+            semantic_error_at_node(arguments->children[0], "function '%s' argument 1 expects list or dict", name);
         }
         semantic_record_node_type(info, call, TYPE_INT);
         return TYPE_INT;
@@ -593,8 +661,8 @@ ValueType semantic_infer_primary_type(
             ValueType item_type = semantic_infer_expression_type(info, node->children[i], scope);
 
             if (!tuple_element_type_supported(item_type)) {
-                semantic_error_at_node(node->children[i],
-                    "tuple elements currently support only int, float, bool, char, str, lists, classes, and tuples");
+            semantic_error_at_node(node->children[i],
+                "tuple elements currently support only int, float, bool, char, str, lists, dicts, classes, and tuples");
             }
             element_types[i] = item_type;
         }
@@ -651,8 +719,16 @@ ValueType semantic_infer_primary_type(
             return semantic_tuple_element_type(container_type, tuple_index);
         }
 
+        if (semantic_type_is_dict(container_type)) {
+            if (index_type != TYPE_STR) {
+                semantic_error_at_node(node->children[1], "dict index must be str");
+            }
+            semantic_record_node_type(info, node, TYPE_STR);
+            return TYPE_STR;
+        }
+
         if (!semantic_type_is_list(container_type)) {
-            semantic_error_at_node(node->children[0], "indexing requires list or tuple but got %s",
+            semantic_error_at_node(node->children[0], "indexing requires list, dict, or tuple but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {

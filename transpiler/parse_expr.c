@@ -6,6 +6,7 @@
 
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_LIST_LITERAL(TokenStream *ts);
+static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok);
 static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok);
@@ -138,6 +139,10 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
         return node;
     }
 
+    if (parse_is_keyword_token(type_tok, "dict")) {
+        return parse_DICT_TYPE(ts, type_tok);
+    }
+
     if (type_tok.type == TOKEN_LPAREN) {
         return parse_TUPLE_TYPE(ts, type_tok);
     }
@@ -147,6 +152,42 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
     }
 
     return create_node_from_token(NODE_PRIMARY, type_tok);
+}
+
+static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok)
+{
+    ParseNode *node;
+    Token key_tok;
+    Token value_tok;
+    char *type_name;
+    size_t len;
+
+    expect(ts, TOKEN_LBRACKET);
+    key_tok = get_from_ts(ts);
+    if (!parse_is_type_token(key_tok) || strcmp(key_tok.value, "str") != 0) {
+        parse_error(key_tok, "only dict[str, str] is supported right now");
+    }
+    expect(ts, TOKEN_COMMA);
+    value_tok = get_from_ts(ts);
+    if (!parse_is_type_token(value_tok) || strcmp(value_tok.value, "str") != 0) {
+        parse_error(value_tok, "only dict[str, str] is supported right now");
+    }
+    expect(ts, TOKEN_RBRACKET);
+
+    len = strlen("dict[str, str]") + 1;
+    type_name = malloc(len);
+    if (type_name == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+    memcpy(type_name, "dict[str, str]", len);
+    node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
+    node->line = dict_tok.line;
+    node->column = dict_tok.column;
+    node->source_path = parse_dup_string(dict_tok.path);
+    node->source_line = parse_dup_string(dict_tok.line_text);
+    free(type_name);
+    return node;
 }
 
 static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok)

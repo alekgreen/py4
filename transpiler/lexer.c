@@ -32,6 +32,7 @@ static const char *KEYWORDS[] = {
     "str",
     "string",
     "list",
+    "dict",
     "None",
     "True",
     "False",

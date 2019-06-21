@@ -98,6 +98,7 @@ static const char *type_member_name(ValueType type)
         case TYPE_LIST_BOOL: return "list[bool]";
         case TYPE_LIST_CHAR: return "list[char]";
         case TYPE_LIST_STR: return "list[str]";
+        case TYPE_DICT_STR_STR: return "dict[str, str]";
         default: return "unknown";
     }
 }
@@ -136,6 +137,9 @@ static ValueType parse_named_type_atom(const char *name)
     }
     if (strcmp(name, "list[str]") == 0) {
         return TYPE_LIST_STR;
+    }
+    if (strcmp(name, "dict[str, str]") == 0) {
+        return TYPE_DICT_STR_STR;
     }
 
     return 0;
@@ -211,7 +215,8 @@ int semantic_type_is_ref(ValueType type)
         type == TYPE_LIST_FLOAT ||
         type == TYPE_LIST_BOOL ||
         type == TYPE_LIST_CHAR ||
-        type == TYPE_LIST_STR);
+        type == TYPE_LIST_STR ||
+        type == TYPE_DICT_STR_STR);
 }
 
 int semantic_type_needs_management(ValueType type)
@@ -248,6 +253,11 @@ int semantic_type_is_list(ValueType type)
         type == TYPE_LIST_BOOL ||
         type == TYPE_LIST_CHAR ||
         type == TYPE_LIST_STR;
+}
+
+int semantic_type_is_dict(ValueType type)
+{
+    return type == TYPE_DICT_STR_STR;
 }
 
 ValueType semantic_list_element_type(ValueType type)
@@ -287,7 +297,8 @@ const char *semantic_type_name(ValueType type)
         TYPE_LIST_FLOAT,
         TYPE_LIST_BOOL,
         TYPE_LIST_CHAR,
-        TYPE_LIST_STR
+        TYPE_LIST_STR,
+        TYPE_DICT_STR_STR
     };
 
     if (semantic_type_is_tuple(type) || semantic_type_is_class(type)) {
@@ -424,7 +435,8 @@ int semantic_is_assignable(ValueType target, ValueType value)
         TYPE_LIST_FLOAT,
         TYPE_LIST_BOOL,
         TYPE_LIST_CHAR,
-        TYPE_LIST_STR
+        TYPE_LIST_STR,
+        TYPE_DICT_STR_STR
     };
 
     if (target == 0 || value == 0) {
@@ -747,6 +759,9 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         semantic_type_is_union(type)) {
         semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
     }
+    if (semantic_type_contains(type, TYPE_DICT_STR_STR) && semantic_type_is_union(type)) {
+        semantic_error_at_node(type_node, "dict types cannot be used inside a union yet");
+    }
     if (semantic_type_is_union(type)) {
         for (size_t i = 0; i < type_node->child_count; i++) {
             ValueType member_type = parse_type_atom_node(info, type_node->children[i]);
@@ -769,7 +784,8 @@ int semantic_builtin_returns_owned_ref(const char *name)
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
         strcmp(name, "list_char") == 0 ||
-        strcmp(name, "list_str") == 0;
+        strcmp(name, "list_str") == 0 ||
+        strcmp(name, "dict_str_str") == 0;
 }
 
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name)

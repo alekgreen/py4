@@ -16,7 +16,8 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
     TYPE_LIST_FLOAT,
     TYPE_LIST_BOOL,
     TYPE_LIST_CHAR,
-    TYPE_LIST_STR
+    TYPE_LIST_STR,
+    TYPE_DICT_STR_STR
 };
 
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
@@ -89,6 +90,11 @@ void codegen_build_class_release_name(char *buffer, size_t size, ValueType type)
 }
 
 void codegen_build_list_print_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));
+}
+
+void codegen_build_dict_print_name(char *buffer, size_t size, ValueType type)
 {
     snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));
 }
@@ -256,6 +262,7 @@ const char *codegen_type_suffix(ValueType type)
         case TYPE_LIST_BOOL: return "list_bool";
         case TYPE_LIST_CHAR: return "list_char";
         case TYPE_LIST_STR: return "list_str";
+        case TYPE_DICT_STR_STR: return "dict_str_str";
         default: return "unknown";
     }
 }
@@ -280,6 +287,7 @@ const char *codegen_type_field(ValueType type)
         case TYPE_LIST_BOOL: return "as_list_bool";
         case TYPE_LIST_CHAR: return "as_list_char";
         case TYPE_LIST_STR: return "as_list_str";
+        case TYPE_DICT_STR_STR: return "as_dict_str_str";
         default: return "";
     }
 }
@@ -301,6 +309,7 @@ static int is_codegen_builtin_name(const char *name)
         strcmp(name, "list_bool") == 0 ||
         strcmp(name, "list_char") == 0 ||
         strcmp(name, "list_str") == 0 ||
+        strcmp(name, "dict_str_str") == 0 ||
         strcmp(name, "list_append") == 0 ||
         strcmp(name, "list_get") == 0 ||
         strcmp(name, "list_len") == 0 ||
@@ -398,6 +407,9 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         case TYPE_LIST_STR:
             fprintf(out, "%s *", codegen_list_struct_name(type));
             return;
+        case TYPE_DICT_STR_STR:
+            fprintf(out, "%s *", codegen_dict_struct_name(type));
+            return;
         default:
             codegen_error("unsupported scalar type %s", semantic_type_name(type));
     }
@@ -421,6 +433,8 @@ char *codegen_type_to_c_string(ValueType type)
             case TYPE_LIST_CHAR:
             case TYPE_LIST_STR:
                 return codegen_dup_printf("%s *", codegen_list_struct_name(type));
+            case TYPE_DICT_STR_STR:
+                return codegen_dup_printf("%s *", codegen_dict_struct_name(type));
         }
         if (semantic_type_is_tuple(type)) {
             char tuple_name[MAX_NAME_LEN];
@@ -721,6 +735,11 @@ static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_
         fprintf(out, "            %s(%s);\n", helper_name, value_expr);
         return;
     }
+    if (semantic_type_is_dict(type)) {
+        codegen_build_dict_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "            %s(%s);\n", helper_name, value_expr);
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:
@@ -966,7 +985,7 @@ static void emit_managed_field_retain(FILE *out, ValueType type, const char *val
     }
 
     if (semantic_type_is_ref(type)) {
-        fprintf(out, "    %s_incref(%s);\n", codegen_list_runtime_prefix(type), value_expr);
+        fprintf(out, "    %s_incref(%s);\n", codegen_ref_runtime_prefix(type), value_expr);
         return;
     }
 
@@ -994,7 +1013,7 @@ static void emit_managed_field_release(FILE *out, ValueType type, const char *va
     }
 
     if (semantic_type_is_ref(type)) {
-        fprintf(out, "    %s_decref(%s);\n", codegen_list_runtime_prefix(type), value_expr);
+        fprintf(out, "    %s_decref(%s);\n", codegen_ref_runtime_prefix(type), value_expr);
         return;
     }
 
@@ -1019,40 +1038,57 @@ static void emit_list_print_definitions(CodegenContext *ctx)
         ValueType type = CODEGEN_ORDERED_TYPES[i];
         char helper_name[MAX_NAME_LEN];
 
-        if (!semantic_type_is_list(type)) {
+        if (!semantic_type_is_list(type) && !semantic_type_is_dict(type)) {
             continue;
         }
 
-        codegen_build_list_print_name(helper_name, sizeof(helper_name), type);
-        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, codegen_list_struct_name(type));
-        fputs("    printf(\"[\");\n", ctx->out);
+        if (semantic_type_is_list(type)) {
+            codegen_build_list_print_name(helper_name, sizeof(helper_name), type);
+            fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, codegen_list_struct_name(type));
+            fputs("    printf(\"[\");\n", ctx->out);
+            fputs("    if (value != NULL) {\n", ctx->out);
+            fputs("        for (size_t i = 0; i < value->len; i++) {\n", ctx->out);
+            fputs("            if (i > 0) {\n", ctx->out);
+            fputs("                printf(\", \");\n", ctx->out);
+            fputs("            }\n", ctx->out);
+            switch (type) {
+                case TYPE_LIST_INT:
+                    fputs("            printf(\"%d\", value->items[i]);\n", ctx->out);
+                    break;
+                case TYPE_LIST_FLOAT:
+                    fputs("            printf(\"%g\", value->items[i]);\n", ctx->out);
+                    break;
+                case TYPE_LIST_BOOL:
+                    fputs("            printf(\"%s\", value->items[i] ? \"True\" : \"False\");\n", ctx->out);
+                    break;
+                case TYPE_LIST_CHAR:
+                    fputs("            printf(\"%c\", value->items[i]);\n", ctx->out);
+                    break;
+                case TYPE_LIST_STR:
+                    fputs("            printf(\"%s\", value->items[i]);\n", ctx->out);
+                    break;
+                default:
+                    codegen_error("unsupported list print type %s", semantic_type_name(type));
+            }
+            fputs("        }\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    printf(\"]\");\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+            continue;
+        }
+
+        codegen_build_dict_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, codegen_dict_struct_name(type));
+        fputs("    printf(\"{\");\n", ctx->out);
         fputs("    if (value != NULL) {\n", ctx->out);
         fputs("        for (size_t i = 0; i < value->len; i++) {\n", ctx->out);
         fputs("            if (i > 0) {\n", ctx->out);
         fputs("                printf(\", \");\n", ctx->out);
         fputs("            }\n", ctx->out);
-        switch (type) {
-            case TYPE_LIST_INT:
-                fputs("            printf(\"%d\", value->items[i]);\n", ctx->out);
-                break;
-            case TYPE_LIST_FLOAT:
-                fputs("            printf(\"%g\", value->items[i]);\n", ctx->out);
-                break;
-            case TYPE_LIST_BOOL:
-                fputs("            printf(\"%s\", value->items[i] ? \"True\" : \"False\");\n", ctx->out);
-                break;
-            case TYPE_LIST_CHAR:
-                fputs("            printf(\"%c\", value->items[i]);\n", ctx->out);
-                break;
-            case TYPE_LIST_STR:
-                fputs("            printf(\"%s\", value->items[i]);\n", ctx->out);
-                break;
-            default:
-                codegen_error("unsupported list print type %s", semantic_type_name(type));
-        }
+        fputs("            printf(\"%s: %s\", value->keys[i], value->values[i]);\n", ctx->out);
         fputs("        }\n", ctx->out);
         fputs("    }\n", ctx->out);
-        fputs("    printf(\"]\");\n", ctx->out);
+        fputs("    printf(\"}\");\n", ctx->out);
         fputs("}\n\n", ctx->out);
     }
 }

@@ -271,8 +271,19 @@ static int typecheck_simple_statement(
         if (semantic_type_is_tuple(container_type)) {
             semantic_error_at_node(target, "tuple elements are immutable");
         }
+        if (semantic_type_is_dict(container_type)) {
+            if (index_type != TYPE_STR) {
+                semantic_error_at_node(target->children[1], "dict index must be str");
+            }
+            if (!semantic_is_assignable(TYPE_STR, expr_type)) {
+                semantic_error_at_node(expr, "cannot assign %s to str dict value",
+                    semantic_type_name(expr_type));
+            }
+            semantic_record_node_type(info, target, TYPE_STR);
+            return 0;
+        }
         if (!semantic_type_is_list(container_type)) {
-            semantic_error_at_node(target->children[0], "indexed assignment requires list but got %s",
+            semantic_error_at_node(target->children[0], "indexed assignment requires list or dict but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {

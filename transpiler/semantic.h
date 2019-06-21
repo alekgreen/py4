@@ -5,7 +5,7 @@
 
 typedef unsigned int ValueType;
 
-#define TYPE_ATOMIC_MASK ((1u << 11) - 1u)
+#define TYPE_ATOMIC_MASK ((1u << 12) - 1u)
 #define TYPE_TUPLE_BASE (1u << 16)
 #define TYPE_CLASS_BASE (1u << 24)
 #define MAX_TUPLE_TYPES 64
@@ -24,7 +24,8 @@ enum {
     TYPE_LIST_FLOAT = 1u << 7,
     TYPE_LIST_BOOL = 1u << 8,
     TYPE_LIST_CHAR = 1u << 9,
-    TYPE_LIST_STR = 1u << 10
+    TYPE_LIST_STR = 1u << 10,
+    TYPE_DICT_STR_STR = 1u << 11
 };
 
 typedef struct SemanticInfo SemanticInfo;
@@ -40,6 +41,7 @@ int semantic_type_is_class(ValueType type);
 int semantic_type_is_ref(ValueType type);
 int semantic_type_needs_management(ValueType type);
 int semantic_type_is_list(ValueType type);
+int semantic_type_is_dict(ValueType type);
 ValueType semantic_list_element_type(ValueType type);
 ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count);
 size_t semantic_tuple_element_count(ValueType type);
