@@ -25,6 +25,14 @@ static int is_direct_list_literal_expression(const ParseNode *expr)
         expr->children[0]->kind == NODE_LIST_LITERAL;
 }
 
+static int is_direct_dict_literal_expression(const ParseNode *expr)
+{
+    return expr != NULL &&
+        expr->kind == NODE_EXPRESSION &&
+        expr->child_count == 1 &&
+        expr->children[0]->kind == NODE_DICT_LITERAL;
+}
+
 static int is_direct_tuple_literal_expression(const ParseNode *expr)
 {
     return expr != NULL &&
@@ -150,6 +158,30 @@ static ValueType infer_tuple_literal_with_hint(
 
     semantic_record_node_type(info, literal, expected_type);
     return expected_type;
+}
+
+static ValueType infer_dict_literal_with_hint(
+    SemanticInfo *info,
+    const ParseNode *literal,
+    Scope *scope,
+    ValueType expected_type)
+{
+    (void)expected_type;
+
+    for (size_t i = 0; i + 1 < literal->child_count; i += 2) {
+        ValueType key_type = semantic_infer_expression_type_with_hint(info, literal->children[i], scope, TYPE_STR);
+        ValueType value_type = semantic_infer_expression_type_with_hint(info, literal->children[i + 1], scope, TYPE_STR);
+
+        if (!semantic_is_assignable(TYPE_STR, key_type)) {
+            semantic_error_at_node(literal->children[i], "dict literal keys must be str");
+        }
+        if (!semantic_is_assignable(TYPE_STR, value_type)) {
+            semantic_error_at_node(literal->children[i + 1], "dict literal values must be str");
+        }
+    }
+
+    semantic_record_node_type(info, literal, TYPE_DICT_STR_STR);
+    return TYPE_DICT_STR_STR;
 }
 
 int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out)
@@ -647,6 +679,23 @@ ValueType semantic_infer_primary_type(
         return saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT;
     }
 
+    if (node->kind == NODE_DICT_LITERAL) {
+        for (size_t i = 0; i + 1 < node->child_count; i += 2) {
+            ValueType key_type = semantic_infer_expression_type_with_hint(info, node->children[i], scope, TYPE_STR);
+            ValueType value_type = semantic_infer_expression_type_with_hint(info, node->children[i + 1], scope, TYPE_STR);
+
+            if (!semantic_is_assignable(TYPE_STR, key_type)) {
+                semantic_error_at_node(node->children[i], "dict literal keys must be str");
+            }
+            if (!semantic_is_assignable(TYPE_STR, value_type)) {
+                semantic_error_at_node(node->children[i + 1], "dict literal values must be str");
+            }
+        }
+
+        semantic_record_node_type(info, node, TYPE_DICT_STR_STR);
+        return TYPE_DICT_STR_STR;
+    }
+
     if (node->kind == NODE_TUPLE_LITERAL) {
         ValueType element_types[MAX_TUPLE_ELEMENTS];
 
@@ -976,6 +1025,12 @@ ValueType semantic_infer_expression_type_with_hint(
 
     if (semantic_type_is_list(expected_type) && is_direct_list_literal_expression(expr)) {
         type = infer_list_literal_with_hint(info, expr->children[0], scope, expected_type);
+        semantic_record_node_type(info, expr, type);
+        return type;
+    }
+
+    if (semantic_type_is_dict(expected_type) && is_direct_dict_literal_expression(expr)) {
+        type = infer_dict_literal_with_hint(info, expr->children[0], scope, expected_type);
         semantic_record_node_type(info, expr, type);
         return type;
     }

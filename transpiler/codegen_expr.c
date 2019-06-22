@@ -215,6 +215,7 @@ int codegen_expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
     child = expr->children[0];
     return child->kind == NODE_CALL ||
         child->kind == NODE_LIST_LITERAL ||
+        child->kind == NODE_DICT_LITERAL ||
         child->kind == NODE_METHOD_CALL ||
         child->kind == NODE_TUPLE_LITERAL;
 }
@@ -240,6 +241,7 @@ static int node_is_owned_ref_value(const ParseNode *node)
     }
     if (node->kind == NODE_CALL ||
         node->kind == NODE_LIST_LITERAL ||
+        node->kind == NODE_DICT_LITERAL ||
         node->kind == NODE_METHOD_CALL ||
         node->kind == NODE_TUPLE_LITERAL) {
         return 1;
@@ -748,6 +750,45 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
                 primary->child_count,
                 codegen_list_element_c_type(list_type),
                 values);
+            free(values);
+            return result;
+        }
+    }
+
+    if (primary->kind == NODE_DICT_LITERAL) {
+        if (primary->child_count == 0) {
+            return codegen_dict_new_call(TYPE_DICT_STR_STR);
+        }
+
+        {
+            char *keys = codegen_dup_printf("");
+            char *values = codegen_dup_printf("");
+            char *result;
+
+            for (size_t i = 0; i + 1 < primary->child_count; i += 2) {
+                char *key = codegen_wrapped_expression_to_c_string(ctx, primary->children[i], TYPE_STR);
+                char *value = codegen_wrapped_expression_to_c_string(ctx, primary->children[i + 1], TYPE_STR);
+                char *joined_keys = i == 0
+                    ? codegen_dup_printf("%s", key)
+                    : codegen_dup_printf("%s, %s", keys, key);
+                char *joined_values = i == 0
+                    ? codegen_dup_printf("%s", value)
+                    : codegen_dup_printf("%s, %s", values, value);
+
+                free(keys);
+                free(values);
+                free(key);
+                free(value);
+                keys = joined_keys;
+                values = joined_values;
+            }
+
+            result = codegen_dup_printf("%s_from_pairs(%zu, (const char *[]){%s}, (const char *[]){%s})",
+                codegen_dict_runtime_prefix(TYPE_DICT_STR_STR),
+                primary->child_count / 2,
+                keys,
+                values);
+            free(keys);
             free(values);
             return result;
         }

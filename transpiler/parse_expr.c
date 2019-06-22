@@ -6,6 +6,7 @@
 
 static ParseNode *parse_ARGUMENTS(TokenStream *ts);
 static ParseNode *parse_LIST_LITERAL(TokenStream *ts);
+static ParseNode *parse_DICT_LITERAL(TokenStream *ts);
 static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok);
 static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
@@ -435,6 +436,8 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
         base = parse_TUPLE_LITERAL(ts, tok);
     } else if (tok.type == TOKEN_LBRACKET) {
         base = parse_LIST_LITERAL(ts);
+    } else if (tok.type == TOKEN_LBRACE) {
+        base = parse_DICT_LITERAL(ts);
     } else {
         parse_error(tok, "expected expression");
         return NULL;
@@ -542,6 +545,30 @@ static ParseNode *parse_LIST_LITERAL(TokenStream *ts)
     }
 
     expect(ts, TOKEN_RBRACKET);
+    return node;
+}
+
+static ParseNode *parse_DICT_LITERAL(TokenStream *ts)
+{
+    ParseNode *node = create_node(NODE_DICT_LITERAL, TOKEN_NULL, NULL);
+
+    expect(ts, TOKEN_LBRACE);
+    if (peek_ts(ts).type == TOKEN_RBRACE) {
+        expect(ts, TOKEN_RBRACE);
+        return node;
+    }
+
+    while (1) {
+        add_child(node, parse_EXPRESSION(ts));
+        expect(ts, TOKEN_COLON);
+        add_child(node, parse_EXPRESSION(ts));
+        if (peek_ts(ts).type != TOKEN_COMMA) {
+            break;
+        }
+        get_from_ts(ts);
+    }
+
+    expect(ts, TOKEN_RBRACE);
     return node;
 }
 

@@ -1,7 +1,5 @@
 def main() -> None:
-    colors: dict[str, str] = dict_str_str()
-    colors.set("apple", "red")
-    colors["sky"] = "blue"
+    colors: dict[str, str] = {"apple": "red", "sky": "blue"}
     print(colors)
     print(colors.get("apple"))
     print(colors["sky"])
@@ -12,5 +10,5 @@ def main() -> None:
     copy.set("grass", "green")
     print(copy)
 
-    colors.clear()
+    colors = {}
     print(colors)

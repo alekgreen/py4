@@ -355,6 +355,12 @@ static void tokenize_line(
             case ']':
                 append_token(ts, TOKEN_RBRACKET, "]", line, column, line_text);
                 break;
+            case '{':
+                append_token(ts, TOKEN_LBRACE, "{", line, column, line_text);
+                break;
+            case '}':
+                append_token(ts, TOKEN_RBRACE, "}", line, column, line_text);
+                break;
             case ':':
                 append_token(ts, TOKEN_COLON, ":", line, column, line_text);
                 break;
@@ -464,6 +470,8 @@ Token next_token(FILE *fp)
         case ')': return make_token(TOKEN_RPAREN, buffer);
         case '[': return make_token(TOKEN_LBRACKET, buffer);
         case ']': return make_token(TOKEN_RBRACKET, buffer);
+        case '{': return make_token(TOKEN_LBRACE, buffer);
+        case '}': return make_token(TOKEN_RBRACE, buffer);
         case ':': return make_token(TOKEN_COLON, buffer);
         case ',': return make_token(TOKEN_COMMA, buffer);
         case '.': return make_token(TOKEN_DOT, buffer);

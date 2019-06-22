@@ -241,6 +241,15 @@ static void emit_dict_runtime(
     fprintf(ctx->out, "    dict->len++;\n");
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static %s *%s_from_pairs(size_t count, const char **keys, const char **values)\n{\n",
+        struct_name, prefix);
+    fprintf(ctx->out, "    %s *dict = %s_new();\n", struct_name, prefix);
+    fprintf(ctx->out, "    for (size_t i = 0; i < count; i++) {\n");
+    fprintf(ctx->out, "        %s_set(dict, keys[i], values[i]);\n", prefix);
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    return dict;\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static const char *%s_get(%s *dict, const char *key)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    int index = %s_find_index(dict, key);\n", prefix);
     fprintf(ctx->out, "    if (index < 0) {\n");
