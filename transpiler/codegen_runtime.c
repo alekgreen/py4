@@ -259,6 +259,18 @@ static void emit_dict_runtime(
     fprintf(ctx->out, "    return dict->values[index];\n");
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static const char *%s_key_at(%s *dict, int index)\n{\n", prefix, struct_name);
+    fprintf(ctx->out, "    if (dict == NULL) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    if (index < 0 || (size_t)index >= dict->len) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s key index out of bounds\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    return dict->keys[index];\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static bool %s_contains(%s *dict, const char *key)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    return %s_find_index(dict, key) >= 0;\n", prefix);
     fprintf(ctx->out, "}\n\n");

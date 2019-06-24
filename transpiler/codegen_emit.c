@@ -695,7 +695,9 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     }
 
     iterable_type = semantic_type_of(ctx->semantic, iterable);
-    element_type = semantic_list_element_type(iterable_type);
+    element_type = semantic_type_is_dict(iterable_type)
+        ? TYPE_STR
+        : semantic_list_element_type(iterable_type);
     iterable_expr = codegen_wrapped_expression_to_c_string(ctx, iterable, iterable_type);
     iterable_name = codegen_next_temp_name(ctx);
     iterable_type_name = codegen_type_to_c_string(iterable_type);
@@ -713,7 +715,9 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     }
 
     {
-        char *len_call = codegen_list_unary_call(iterable_type, "len", iterable_name);
+        char *len_call = semantic_type_is_dict(iterable_type)
+            ? codegen_dict_unary_call(iterable_type, "len", iterable_name)
+            : codegen_list_unary_call(iterable_type, "len", iterable_name);
 
         codegen_emit_indent(ctx);
         fprintf(ctx->out,
@@ -727,7 +731,9 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     codegen_emit_indent(ctx);
     fprintf(ctx->out, "int py4_loop_action_%d = 0;\n", loop_id);
     {
-        char *get_call = codegen_list_binary_call(iterable_type, "get", iterable_name, index_name);
+        char *get_call = semantic_type_is_dict(iterable_type)
+            ? codegen_dict_binary_call(iterable_type, "key_at", iterable_name, index_name)
+            : codegen_list_binary_call(iterable_type, "get", iterable_name, index_name);
 
         codegen_emit_indent(ctx);
         codegen_emit_type_name(ctx, element_type);

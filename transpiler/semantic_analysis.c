@@ -563,11 +563,13 @@ static int typecheck_for_statement(
         target_type = TYPE_INT;
     } else {
         iterable_type = semantic_infer_expression_type(info, iterable, scope);
-        if (!semantic_type_is_list(iterable_type)) {
-            semantic_error_at_node(iterable, "for loop iterable must be list or range but got %s",
+        if (!semantic_type_is_list(iterable_type) && !semantic_type_is_dict(iterable_type)) {
+            semantic_error_at_node(iterable, "for loop iterable must be list, dict, or range but got %s",
                 semantic_type_name(iterable_type));
         }
-        target_type = semantic_list_element_type(iterable_type);
+        target_type = semantic_type_is_dict(iterable_type)
+            ? TYPE_STR
+            : semantic_list_element_type(iterable_type);
     }
 
     if (current_function == NULL) {
