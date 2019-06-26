@@ -995,8 +995,31 @@ char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr)
         codegen_error("malformed expression node");
     }
 
-    lhs = codegen_primary_to_c_string(ctx, expr->children[0]);
     operator_node = codegen_expect_child(expr, 1, NODE_OPERATOR);
+    if (strcmp(operator_node->value, "in") == 0) {
+        ValueType rhs_type = semantic_type_of(ctx->semantic, expr->children[2]);
+        int needs_cleanup = 0;
+        char *lhs_text = codegen_primary_to_c_string(ctx, expr->children[0]);
+        char *rhs_name = materialize_ref_node(ctx, expr->children[2], rhs_type, 1, &needs_cleanup);
+        char *call_text = codegen_dict_binary_call(rhs_type, "contains", rhs_name, lhs_text);
+
+        free(lhs_text);
+        if (needs_cleanup) {
+            char *result_name = codegen_next_temp_name(ctx);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "bool %s = %s;\n", result_name, call_text);
+            codegen_emit_ref_decref(ctx, rhs_type, rhs_name);
+            free(rhs_name);
+            free(call_text);
+            return result_name;
+        }
+
+        free(rhs_name);
+        return call_text;
+    }
+
+    lhs = codegen_primary_to_c_string(ctx, expr->children[0]);
     rhs = codegen_primary_to_c_string(ctx, expr->children[2]);
     result = codegen_dup_printf("(%s %s %s)", lhs, map_operator(operator_node->value), rhs);
     free(lhs);

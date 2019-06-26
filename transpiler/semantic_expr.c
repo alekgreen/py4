@@ -848,6 +848,11 @@ static int is_comparison_operator(const char *op)
         strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0;
 }
 
+static int is_membership_operator(const char *op)
+{
+    return strcmp(op, "in") == 0;
+}
+
 static int is_arithmetic_operator(const char *op)
 {
     return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
@@ -1007,6 +1012,17 @@ ValueType semantic_infer_expression_type(
 
     if (is_comparison_operator(operator_node->value) || is_equality_operator(operator_node->value)) {
         typecheck_comparison_operands(operator_node, lhs_type, rhs_type, operator_node->value);
+        semantic_record_node_type(info, expr, TYPE_BOOL);
+        return TYPE_BOOL;
+    }
+
+    if (is_membership_operator(operator_node->value)) {
+        if (rhs_type != TYPE_DICT_STR_STR) {
+            semantic_error_at_node(operator_node, "operator 'in' currently requires dict[str, str] on the right");
+        }
+        if (lhs_type != TYPE_STR) {
+            semantic_error_at_node(operator_node, "operator 'in' currently requires str on the left");
+        }
         semantic_record_node_type(info, expr, TYPE_BOOL);
         return TYPE_BOOL;
     }

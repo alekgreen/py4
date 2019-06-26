@@ -67,7 +67,8 @@ static int is_comparison_operator_token(Token tok)
 {
     return matches_operator(tok, "==") || matches_operator(tok, "!=") ||
         matches_operator(tok, "<") || matches_operator(tok, ">") ||
-        matches_operator(tok, "<=") || matches_operator(tok, ">=");
+        matches_operator(tok, "<=") || matches_operator(tok, ">=") ||
+        matches_keyword_operator(tok, "in");
 }
 
 static char *build_tuple_type_name(ParseNode *node)
@@ -350,6 +351,9 @@ static ParseNode *parse_COMPARISON(TokenStream *ts)
 
         add_child(node, create_node_from_token(NODE_OPERATOR, op));
         add_child(node, rhs);
+        if (matches_keyword_operator(op, "in")) {
+            break;
+        }
     }
 
     if (node->child_count == 1) {
