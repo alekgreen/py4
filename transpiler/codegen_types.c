@@ -204,6 +204,42 @@ const ParseNode *codegen_function_suite(const ParseNode *function_def)
     return function_def->children[function_def->child_count - 1];
 }
 
+int codegen_is_native_function(const ParseNode *function_def)
+{
+    return function_def->kind == NODE_NATIVE_FUNCTION_DEF;
+}
+
+const char *codegen_function_c_name(CodegenContext *ctx, const ParseNode *function_def)
+{
+    static char buffers[8][MAX_NAME_LEN];
+    static int next_buffer = 0;
+    char *buffer = buffers[next_buffer];
+    const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
+    const char *path;
+    const char *basename;
+    size_t module_len;
+
+    next_buffer = (next_buffer + 1) % 8;
+    if (!codegen_is_native_function(function_def)) {
+        return name->value;
+    }
+
+    path = function_def->source_path != NULL ? function_def->source_path : "";
+    basename = strrchr(path, '/');
+    basename = basename == NULL ? path : basename + 1;
+    module_len = strlen(basename);
+    if (module_len >= 3 && strcmp(basename + module_len - 3, ".p4") == 0) {
+        module_len -= 3;
+    }
+
+    if (module_len == 0) {
+        codegen_error("native function '%s' is missing module path information", name->value);
+    }
+    snprintf(buffer, MAX_NAME_LEN, "py4_stdlib_%.*s_%s", (int)module_len, basename, name->value);
+    (void)ctx;
+    return buffer;
+}
+
 int codegen_is_main_function(const ParseNode *function_def)
 {
     const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
@@ -225,7 +261,7 @@ const ParseNode *codegen_find_function_definition(const ParseNode *root, const c
         const ParseNode *payload = codegen_statement_payload(root->children[i]);
         const ParseNode *function_name;
 
-        if (payload->kind != NODE_FUNCTION_DEF) {
+        if (payload->kind != NODE_FUNCTION_DEF && payload->kind != NODE_NATIVE_FUNCTION_DEF) {
             continue;
         }
 
@@ -679,6 +715,13 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
             codegen_collect_required_conversions(ctx, node->children[i]);
         }
         ctx->current_function_return_type = previous;
+        return;
+    }
+
+    if (node->kind == NODE_NATIVE_FUNCTION_DEF) {
+        for (size_t i = 0; i < node->child_count; i++) {
+            codegen_collect_required_conversions(ctx, node->children[i]);
+        }
         return;
     }
 
@@ -1471,6 +1514,8 @@ void codegen_collect_program_state(CodegenContext *ctx, const ParseNode *root)
             if (codegen_is_main_function(payload)) {
                 ctx->has_user_main = 1;
             }
+        } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            continue;
         } else if (payload->kind != NODE_CLASS_DEF) {
             ctx->has_top_level_executable_statements = 1;
         }

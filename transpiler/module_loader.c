@@ -56,6 +56,17 @@ static char *dup_printf(const char *fmt, ...)
     return buffer;
 }
 
+static int file_exists(const char *path)
+{
+    FILE *fp = fopen(path, "r");
+
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
 static int is_import_statement(const ParseNode *statement)
 {
     return statement != NULL &&
@@ -82,8 +93,19 @@ static char *resolve_import_path(const char *current_path, const char *module_na
 {
     char *dir = dirname_of(current_path);
     char *resolved = dup_printf("%s/%s.p4", dir, module_name);
+    char *stdlib_path = dup_printf("stdlib/%s.p4", module_name);
 
     free(dir);
+    if (file_exists(resolved)) {
+        free(stdlib_path);
+        return resolved;
+    }
+    if (file_exists(stdlib_path)) {
+        free(resolved);
+        return stdlib_path;
+    }
+
+    free(stdlib_path);
     return resolved;
 }
 

@@ -614,7 +614,7 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         const ParseNode *type_node;
         ValueType field_type;
 
-        if (field->kind == NODE_FUNCTION_DEF) {
+        if (field->kind == NODE_FUNCTION_DEF || field->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         }
         if (field->kind != NODE_FIELD_DECL) {

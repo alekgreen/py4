@@ -467,7 +467,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             free(type_name);
         }
     } else {
-        result = codegen_dup_printf("%s(%s)", callee->value, args);
+        result = codegen_dup_printf("%s(%s)", codegen_function_c_name(ctx, function_def), args);
     }
 
     free(args);

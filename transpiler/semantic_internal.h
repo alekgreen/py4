@@ -19,6 +19,7 @@ typedef struct FunctionInfo {
     ValueType return_type;
     size_t param_count;
     ValueType *param_types;
+    int is_native;
     const ParseNode *node;
     struct FunctionInfo *next;
 } FunctionInfo;

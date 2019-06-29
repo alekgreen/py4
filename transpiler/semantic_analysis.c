@@ -703,7 +703,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = semantic_statement_payload(root->children[i]);
 
-        if (payload->kind != NODE_FUNCTION_DEF) {
+        if (payload->kind != NODE_FUNCTION_DEF && payload->kind != NODE_NATIVE_FUNCTION_DEF) {
             continue;
         }
 
@@ -728,6 +728,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         fn->return_type = semantic_function_return_type(info, payload);
         fn->param_count = count;
         fn->param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
+        fn->is_native = payload->kind == NODE_NATIVE_FUNCTION_DEF;
         fn->node = payload;
         fn->next = info->functions;
         info->functions = fn;
@@ -777,6 +778,9 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope)
 {
     for (size_t i = 2; i < class_def->child_count; i++) {
+        if (class_def->children[i]->kind == NODE_NATIVE_FUNCTION_DEF) {
+            semantic_error_at_node(class_def->children[i]->children[0], "native methods are not supported");
+        }
         if (class_def->children[i]->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, class_def->children[i], global_scope);
         }
@@ -797,6 +801,13 @@ static int typecheck_statement(
             semantic_error_at_node(payload->children[0], "nested function definitions are not supported");
         }
         typecheck_function(info, payload, scope);
+        return 0;
+    }
+
+    if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+        if (!allow_function_defs) {
+            semantic_error_at_node(payload->children[0], "native function declarations are only supported at module scope");
+        }
         return 0;
     }
 
@@ -858,6 +869,8 @@ SemanticInfo *analyze_program(const ParseNode *root)
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);
+        } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            continue;
         } else {
             module_context.loop_depth = 0;
             typecheck_statement(info, root->children[i], &global_scope, &module_context, 0);

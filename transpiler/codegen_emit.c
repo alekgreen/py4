@@ -4,12 +4,53 @@
 
 #include "codegen_internal.h"
 
+static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters, int is_c_main);
+
 static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_type, ValueType stored_type)
 {
     char ctor_name[MAX_NAME_LEN];
 
     codegen_build_union_ctor_name(ctor_name, sizeof(ctor_name), union_type, stored_type);
     fputs(ctor_name, ctx->out);
+}
+
+static void emit_native_function_definition(CodegenContext *ctx, const ParseNode *function_def)
+{
+    const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
+    const ParseNode *parameters = codegen_function_parameters(function_def);
+    const char *c_name = codegen_function_c_name(ctx, function_def);
+    ValueType return_type = codegen_function_return_type(ctx, function_def);
+
+    if (strcmp(name->value, "abs_int") == 0) {
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s < 0 ? -%s : %s;\n",
+            parameters->children[0]->value,
+            parameters->children[0]->value,
+            parameters->children[0]->value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    codegen_error("unsupported native stdlib function '%s'", name->value);
+}
+
+static void emit_native_function_runtime(CodegenContext *ctx, const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = codegen_statement_payload(root->children[i]);
+
+        if (payload->kind != NODE_NATIVE_FUNCTION_DEF) {
+            continue;
+        }
+
+        emit_native_function_definition(ctx, payload);
+    }
 }
 
 static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
@@ -916,6 +957,10 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+        return;
+    }
+
     if (payload->kind == NODE_CLASS_DEF) {
         codegen_error("class definitions are only supported at module scope");
     }
@@ -975,6 +1020,8 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
             continue;
         } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
@@ -1006,6 +1053,8 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
             for (size_t j = 2; j < payload->child_count; j++) {
                 if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
@@ -1043,6 +1092,8 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
             continue;
         } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
@@ -1141,6 +1192,8 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
             for (size_t j = 2; j < payload->child_count; j++) {
                 if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
@@ -1189,6 +1242,7 @@ void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
     codegen_emit_container_runtime(&ctx);
+    emit_native_function_runtime(&ctx, root);
     codegen_emit_struct_types(&ctx);
     codegen_emit_union_runtime(&ctx);
     emit_global_declarations(&ctx, root);

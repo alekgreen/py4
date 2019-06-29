@@ -64,6 +64,8 @@ const ParseNode *codegen_statement_tail_expression(const ParseNode *statement_ta
 const ParseNode *codegen_statement_tail_type_node(const ParseNode *statement_tail);
 const ParseNode *codegen_function_parameters(const ParseNode *function_def);
 const ParseNode *codegen_function_suite(const ParseNode *function_def);
+int codegen_is_native_function(const ParseNode *function_def);
+const char *codegen_function_c_name(CodegenContext *ctx, const ParseNode *function_def);
 int codegen_is_main_function(const ParseNode *function_def);
 ValueType codegen_function_return_type(CodegenContext *ctx, const ParseNode *function_def);
 const ParseNode *codegen_find_function_definition(const ParseNode *root, const char *name);
