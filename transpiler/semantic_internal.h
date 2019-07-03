@@ -16,6 +16,7 @@ typedef struct Scope {
 
 typedef struct FunctionInfo {
     const char *name;
+    char *c_name;
     ValueType return_type;
     size_t param_count;
     ValueType *param_types;
@@ -23,6 +24,12 @@ typedef struct FunctionInfo {
     const ParseNode *node;
     struct FunctionInfo *next;
 } FunctionInfo;
+
+typedef struct CallTargetInfo {
+    const ParseNode *call;
+    FunctionInfo *function;
+    struct CallTargetInfo *next;
+} CallTargetInfo;
 
 typedef struct MethodInfo {
     ValueType owner_type;
@@ -51,6 +58,7 @@ struct SemanticInfo {
     FunctionInfo *functions;
     MethodInfo *methods;
     NodeTypeInfo *node_types;
+    CallTargetInfo *call_targets;
 };
 
 void semantic_error(const char *message, ...);
@@ -68,6 +76,9 @@ ValueType semantic_find_class_type(const char *name);
 ValueType semantic_register_class(const ParseNode *class_def);
 void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def);
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);
+FunctionInfo *semantic_find_function_by_node(FunctionInfo *functions, const ParseNode *node);
+void semantic_record_call_target(SemanticInfo *info, const ParseNode *call, FunctionInfo *function);
+FunctionInfo *semantic_resolved_call_target(const SemanticInfo *info, const ParseNode *call);
 MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name);
 VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);

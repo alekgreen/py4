@@ -294,8 +294,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 {
     const ParseNode *callee = codegen_expect_child(call, 0, NODE_PRIMARY);
     const ParseNode *arguments = codegen_expect_child(call, 1, NODE_ARGUMENTS);
-    const ParseNode *function_def = NULL;
-    const ParseNode *parameters = NULL;
+    const char *function_c_name = NULL;
     ValueType return_type = semantic_type_of(ctx->semantic, call);
     ValueType class_type = 0;
     char *arg_parts[32];
@@ -329,13 +328,10 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     } else {
         class_type = semantic_find_class_type(callee->value);
         if (class_type == 0) {
-            function_def = codegen_find_function_definition(ctx->root, callee->value);
+            function_c_name = semantic_call_c_name(ctx->semantic, call);
         }
-        if (function_def == NULL && class_type == 0) {
+        if (function_c_name == NULL && class_type == 0) {
             codegen_error("unknown function '%s' during code generation", callee->value);
-        }
-        if (function_def != NULL) {
-            parameters = codegen_function_parameters(function_def);
         }
     }
 
@@ -361,10 +357,8 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             } else if (strcmp(callee->value, "len") == 0 && i == 0) {
                 target_type = arg_type;
             }
-        } else if (function_def != NULL) {
-            const ParseNode *parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
-            const ParseNode *type_node = codegen_expect_child(parameter, 0, NODE_TYPE);
-            target_type = semantic_type_of(ctx->semantic, type_node);
+        } else if (function_c_name != NULL) {
+            target_type = semantic_call_parameter_type(ctx->semantic, call, i);
         } else if (class_type != 0) {
             target_type = semantic_class_field_type(class_type, i);
         }
@@ -467,7 +461,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             free(type_name);
         }
     } else {
-        result = codegen_dup_printf("%s(%s)", codegen_function_c_name(ctx, function_def), args);
+        result = codegen_dup_printf("%s(%s)", function_c_name, args);
     }
 
     free(args);

@@ -578,39 +578,138 @@ static ValueType infer_call_type(
         return infer_class_constructor_type(info, class_type, call, arguments, scope);
     }
 
-    FunctionInfo *fn = semantic_find_function(info->functions, callee->value);
-    if (fn == NULL) {
-        semantic_error_at_node(callee, "unknown function '%s'", callee->value);
-    }
+    {
+        size_t actual_count = arguments->child_count;
+        FunctionInfo *best = NULL;
+        int best_score = 0;
+        int ambiguous = 0;
+        char actual_types[256];
+        size_t actual_len = 0;
+        int saw_name = 0;
+        int saw_arity = 0;
+        size_t arity_match_count = 0;
+        FunctionInfo *sole_arity_match = NULL;
 
-    if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
-        if (fn->param_count != 0) {
-            semantic_error_at_node(call, "function '%s' expects %zu arguments", fn->name, fn->param_count);
+        if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+            actual_count = 0;
         }
-        semantic_record_node_type(info, call, fn->return_type);
-        return fn->return_type;
-    }
 
-    if (arguments->child_count != fn->param_count) {
-        semantic_error_at_node(call, "function '%s' expects %zu arguments", fn->name, fn->param_count);
-    }
+        for (FunctionInfo *fn = info->functions; fn != NULL; fn = fn->next) {
+            int score = 0;
+            int compatible = 1;
 
-    for (size_t i = 0; i < arguments->child_count; i++) {
-        ValueType actual = semantic_infer_expression_type_with_hint(
-            info,
-            arguments->children[i],
-            scope,
-            fn->param_types[i]);
-        if (!semantic_is_assignable(fn->param_types[i], actual)) {
-            semantic_error_at_node(arguments->children[i], "function '%s' argument %zu expects %s but got %s",
-                fn->name, i + 1,
-                semantic_type_name(fn->param_types[i]),
-                semantic_type_name(actual));
+            if (strcmp(fn->name, callee->value) != 0) {
+                continue;
+            }
+            saw_name = 1;
+            if (fn->param_count != actual_count) {
+                continue;
+            }
+            saw_arity = 1;
+            arity_match_count++;
+            sole_arity_match = fn;
+
+            for (size_t i = 0; i < actual_count; i++) {
+                ValueType actual = semantic_infer_expression_type_with_hint(
+                    info,
+                    arguments->children[i],
+                    scope,
+                    fn->param_types[i]);
+
+                if (!semantic_is_assignable(fn->param_types[i], actual)) {
+                    compatible = 0;
+                    break;
+                }
+                if (actual == fn->param_types[i]) {
+                    continue;
+                }
+                if (actual == TYPE_INT && fn->param_types[i] == TYPE_FLOAT) {
+                    score += 1;
+                    continue;
+                }
+                score += 1;
+            }
+
+            if (!compatible) {
+                continue;
+            }
+
+            if (best == NULL || score < best_score) {
+                best = fn;
+                best_score = score;
+                ambiguous = 0;
+            } else if (score == best_score) {
+                ambiguous = 1;
+            }
         }
-    }
 
-    semantic_record_node_type(info, call, fn->return_type);
-    return fn->return_type;
+        if (!saw_name) {
+            semantic_error_at_node(callee, "unknown function '%s'", callee->value);
+        }
+        if (best == NULL) {
+            if (!saw_arity) {
+                semantic_error_at_node(call, "no overload of function '%s' expects %zu arguments",
+                    callee->value, actual_count);
+            }
+            if (arity_match_count == 1 && sole_arity_match != NULL) {
+                for (size_t i = 0; i < actual_count; i++) {
+                    ValueType actual = semantic_infer_expression_type_with_hint(
+                        info,
+                        arguments->children[i],
+                        scope,
+                        sole_arity_match->param_types[i]);
+                    if (!semantic_is_assignable(sole_arity_match->param_types[i], actual)) {
+                        semantic_error_at_node(arguments->children[i],
+                            "function '%s' argument %zu expects %s but got %s",
+                            sole_arity_match->name,
+                            i + 1,
+                            semantic_type_name(sole_arity_match->param_types[i]),
+                            semantic_type_name(actual));
+                    }
+                }
+            }
+            for (size_t i = 0; i < actual_count; i++) {
+                ValueType actual = semantic_infer_expression_type(info, arguments->children[i], scope);
+                if (i != 0) {
+                    actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len, ", ");
+                }
+                actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len,
+                    "%s", semantic_type_name(actual));
+            }
+            semantic_error_at_node(call, "no overload of function '%s' matches argument types (%s)",
+                callee->value, actual_count == 0 ? "" : actual_types);
+        }
+        if (ambiguous) {
+            for (size_t i = 0; i < actual_count; i++) {
+                ValueType actual = semantic_infer_expression_type(info, arguments->children[i], scope);
+                if (i != 0) {
+                    actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len, ", ");
+                }
+                actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len,
+                    "%s", semantic_type_name(actual));
+            }
+            semantic_error_at_node(call, "call to function '%s' is ambiguous for argument types (%s)",
+                callee->value, actual_count == 0 ? "" : actual_types);
+        }
+
+        for (size_t i = 0; i < actual_count; i++) {
+            ValueType actual = semantic_infer_expression_type_with_hint(
+                info,
+                arguments->children[i],
+                scope,
+                best->param_types[i]);
+            if (!semantic_is_assignable(best->param_types[i], actual)) {
+                semantic_error_at_node(arguments->children[i], "function '%s' argument %zu expects %s but got %s",
+                    best->name, i + 1,
+                    semantic_type_name(best->param_types[i]),
+                    semantic_type_name(actual));
+            }
+        }
+
+        semantic_record_call_target(info, call, best);
+        semantic_record_node_type(info, call, best->return_type);
+        return best->return_type;
+    }
 }
 
 ValueType semantic_infer_primary_type(

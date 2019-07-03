@@ -211,33 +211,7 @@ int codegen_is_native_function(const ParseNode *function_def)
 
 const char *codegen_function_c_name(CodegenContext *ctx, const ParseNode *function_def)
 {
-    static char buffers[8][MAX_NAME_LEN];
-    static int next_buffer = 0;
-    char *buffer = buffers[next_buffer];
-    const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
-    const char *path;
-    const char *basename;
-    size_t module_len;
-
-    next_buffer = (next_buffer + 1) % 8;
-    if (!codegen_is_native_function(function_def)) {
-        return name->value;
-    }
-
-    path = function_def->source_path != NULL ? function_def->source_path : "";
-    basename = strrchr(path, '/');
-    basename = basename == NULL ? path : basename + 1;
-    module_len = strlen(basename);
-    if (module_len >= 3 && strcmp(basename + module_len - 3, ".p4") == 0) {
-        module_len -= 3;
-    }
-
-    if (module_len == 0) {
-        codegen_error("native function '%s' is missing module path information", name->value);
-    }
-    snprintf(buffer, MAX_NAME_LEN, "py4_stdlib_%.*s_%s", (int)module_len, basename, name->value);
-    (void)ctx;
-    return buffer;
+    return semantic_function_c_name(ctx->semantic, function_def);
 }
 
 int codegen_is_main_function(const ParseNode *function_def)
@@ -637,8 +611,6 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
     if (node->kind == NODE_CALL) {
         const ParseNode *callee = codegen_expect_child(node, 0, NODE_PRIMARY);
         const ParseNode *arguments = codegen_expect_child(node, 1, NODE_ARGUMENTS);
-        const ParseNode *function_def;
-        const ParseNode *parameters;
         ValueType class_type;
 
         if (strcmp(callee->value, "print") == 0) {
@@ -652,25 +624,16 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
             if (class_type != 0) {
                 return;
             }
-
-            function_def = codegen_find_function_definition(ctx->root, callee->value);
-            if (function_def == NULL) {
-                codegen_error("unknown function '%s' during conversion collection", callee->value);
-            }
-
-            parameters = codegen_function_parameters(function_def);
             for (size_t i = 0; i < arguments->child_count; i++) {
                 ValueType expr_type;
                 ValueType target_type;
-                const ParseNode *parameter;
 
                 if (codegen_is_epsilon_node(arguments->children[i])) {
                     continue;
                 }
 
-                parameter = codegen_expect_child(parameters, i, NODE_PARAMETER);
                 expr_type = semantic_type_of(ctx->semantic, arguments->children[i]);
-                target_type = semantic_type_of(ctx->semantic, codegen_expect_child(parameter, 0, NODE_TYPE));
+                target_type = semantic_call_parameter_type(ctx->semantic, node, i);
                 if (semantic_type_is_union(target_type) &&
                     semantic_type_is_union(expr_type) &&
                     target_type != expr_type) {

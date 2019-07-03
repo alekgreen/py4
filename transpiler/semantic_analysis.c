@@ -49,6 +49,165 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root);
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope);
 
+static char *dup_string(const char *value)
+{
+    size_t len;
+    char *copy;
+
+    len = strlen(value) + 1;
+    copy = malloc(len);
+    if (copy == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+    memcpy(copy, value, len);
+    return copy;
+}
+
+static void append_text(char *buffer, size_t size, size_t *length, const char *text)
+{
+    size_t remaining;
+    int written;
+
+    if (*length >= size) {
+        semantic_error("generated function name is too long");
+    }
+
+    remaining = size - *length;
+    written = snprintf(buffer + *length, remaining, "%s", text);
+    if (written < 0 || (size_t) written >= remaining) {
+        semantic_error("generated function name is too long");
+    }
+    *length += (size_t) written;
+}
+
+static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueType type)
+{
+    if (semantic_type_is_tuple(type)) {
+        append_text(buffer, size, length, "tuple");
+        for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+            append_text(buffer, size, length, "_");
+            append_type_mangle(buffer, size, length, semantic_tuple_element_type(type, i));
+        }
+        return;
+    }
+
+    if (semantic_type_is_class(type)) {
+        append_text(buffer, size, length, "class_");
+        append_text(buffer, size, length, semantic_class_name(type));
+        return;
+    }
+
+    if (semantic_type_is_union(type)) {
+        static const ValueType ordered_members[] = {
+            TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_CHAR, TYPE_STR, TYPE_NONE
+        };
+
+        append_text(buffer, size, length, "union");
+        for (size_t i = 0; i < sizeof(ordered_members) / sizeof(ordered_members[0]); i++) {
+            if (!semantic_type_contains(type, ordered_members[i])) {
+                continue;
+            }
+            append_text(buffer, size, length, "_");
+            append_type_mangle(buffer, size, length, ordered_members[i]);
+        }
+        return;
+    }
+
+    switch (type) {
+        case TYPE_INT: append_text(buffer, size, length, "int"); return;
+        case TYPE_FLOAT: append_text(buffer, size, length, "float"); return;
+        case TYPE_BOOL: append_text(buffer, size, length, "bool"); return;
+        case TYPE_CHAR: append_text(buffer, size, length, "char"); return;
+        case TYPE_STR: append_text(buffer, size, length, "str"); return;
+        case TYPE_NONE: append_text(buffer, size, length, "none"); return;
+        case TYPE_LIST_INT: append_text(buffer, size, length, "list_int"); return;
+        case TYPE_LIST_FLOAT: append_text(buffer, size, length, "list_float"); return;
+        case TYPE_LIST_BOOL: append_text(buffer, size, length, "list_bool"); return;
+        case TYPE_LIST_CHAR: append_text(buffer, size, length, "list_char"); return;
+        case TYPE_LIST_STR: append_text(buffer, size, length, "list_str"); return;
+        case TYPE_DICT_STR_STR: append_text(buffer, size, length, "dict_str_str"); return;
+        default:
+            semantic_error("unsupported function overload type %s", semantic_type_name(type));
+    }
+}
+
+static int same_function_signature(
+    FunctionInfo *fn,
+    size_t param_count,
+    const ValueType *param_types)
+{
+    if (fn->param_count != param_count) {
+        return 0;
+    }
+    for (size_t i = 0; i < param_count; i++) {
+        if (fn->param_types[i] != param_types[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static char *build_function_c_name(
+    const ParseNode *function_def,
+    const char *name,
+    size_t param_count,
+    const ValueType *param_types,
+    int is_native)
+{
+    char buffer[512];
+    size_t length = 0;
+
+    if (!is_native && strcmp(name, "main") == 0) {
+        return dup_string("main");
+    }
+
+    if (is_native) {
+        const char *path = function_def->source_path != NULL ? function_def->source_path : "";
+        const char *basename = strrchr(path, '/');
+        size_t module_len;
+
+        basename = basename == NULL ? path : basename + 1;
+        module_len = strlen(basename);
+        if (module_len >= 3 && strcmp(basename + module_len - 3, ".p4") == 0) {
+            module_len -= 3;
+        }
+        if (module_len == 0) {
+            semantic_error_at_node(function_def->children[0], "native function '%s' is missing module path information", name);
+        }
+
+        append_text(buffer, sizeof(buffer), &length, "py4_stdlib_");
+        {
+            char module_name[256];
+            if (module_len >= sizeof(module_name)) {
+                semantic_error("native module name is too long");
+            }
+            memcpy(module_name, basename, module_len);
+            module_name[module_len] = '\0';
+            append_text(buffer, sizeof(buffer), &length, module_name);
+        }
+        append_text(buffer, sizeof(buffer), &length, "_");
+        append_text(buffer, sizeof(buffer), &length, name);
+    } else {
+        append_text(buffer, sizeof(buffer), &length, "py4_fn_");
+        append_text(buffer, sizeof(buffer), &length, name);
+    }
+
+    append_text(buffer, sizeof(buffer), &length, "__");
+    if (param_count == 0) {
+        append_text(buffer, sizeof(buffer), &length, "void");
+    } else {
+        for (size_t i = 0; i < param_count; i++) {
+            if (i != 0) {
+                append_text(buffer, sizeof(buffer), &length, "_");
+            }
+            append_type_mangle(buffer, sizeof(buffer), &length, param_types[i]);
+        }
+    }
+
+    return dup_string(buffer);
+}
+
 static size_t tuple_target_leaf_count(const ParseNode *target)
 {
     size_t count = 0;
@@ -702,45 +861,68 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = semantic_statement_payload(root->children[i]);
+        const ParseNode *parameters;
+        size_t count;
+        ValueType *param_types;
+        const char *name;
+        FunctionInfo *existing;
+        FunctionInfo *fn;
 
         if (payload->kind != NODE_FUNCTION_DEF && payload->kind != NODE_NATIVE_FUNCTION_DEF) {
             continue;
         }
 
-        const char *name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
+        name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
         if (semantic_find_class_type(name) != 0) {
             semantic_error_at_node(payload->children[0], "function name '%s' conflicts with class", name);
         }
-        if (semantic_find_function(info->functions, name) != NULL) {
-            semantic_error_at_node(payload->children[0], "duplicate function '%s'", name);
+
+        parameters = semantic_function_parameters(payload);
+        count = semantic_parameter_count(parameters);
+        if (strcmp(name, "main") == 0) {
+            if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+                semantic_error_at_node(payload->children[0], "main cannot be declared as native");
+            }
+            if (count != 0 || semantic_function_return_type(info, payload) != TYPE_NONE) {
+                semantic_error_at_node(payload->children[0], "main must have no parameters and return None");
+            }
+            if (semantic_find_function(info->functions, name) != NULL) {
+                semantic_error_at_node(payload->children[0], "duplicate function 'main'");
+            }
         }
 
-        const ParseNode *parameters = semantic_function_parameters(payload);
-        size_t count = semantic_parameter_count(parameters);
+        param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
+        if (count > 0 && param_types == NULL) {
+            perror("malloc");
+            exit(1);
+        }
+        for (size_t j = 0; j < count; j++) {
+            param_types[j] = semantic_parameter_type(info, semantic_expect_child(parameters, j, NODE_PARAMETER));
+        }
+        for (existing = info->functions; existing != NULL; existing = existing->next) {
+            if (strcmp(existing->name, name) != 0) {
+                continue;
+            }
+            if (same_function_signature(existing, count, param_types)) {
+                semantic_error_at_node(payload->children[0], "duplicate overload '%s' with the same parameter types", name);
+            }
+        }
 
-        FunctionInfo *fn = malloc(sizeof(FunctionInfo));
+        fn = malloc(sizeof(FunctionInfo));
         if (fn == NULL) {
             perror("malloc");
             exit(1);
         }
 
         fn->name = name;
+        fn->c_name = build_function_c_name(payload, name, count, param_types, payload->kind == NODE_NATIVE_FUNCTION_DEF);
         fn->return_type = semantic_function_return_type(info, payload);
         fn->param_count = count;
-        fn->param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
+        fn->param_types = param_types;
         fn->is_native = payload->kind == NODE_NATIVE_FUNCTION_DEF;
         fn->node = payload;
         fn->next = info->functions;
         info->functions = fn;
-
-        if (count > 0 && fn->param_types == NULL) {
-            perror("malloc");
-            exit(1);
-        }
-
-        for (size_t j = 0; j < count; j++) {
-            fn->param_types[j] = semantic_parameter_type(info, semantic_expect_child(parameters, j, NODE_PARAMETER));
-        }
     }
 }
 
@@ -900,9 +1082,19 @@ void free_semantic_info(SemanticInfo *info)
     functions = info->functions;
     while (functions != NULL) {
         FunctionInfo *next = functions->next;
+        free(functions->c_name);
         free(functions->param_types);
         free(functions);
         functions = next;
+    }
+
+    {
+        CallTargetInfo *call_targets = info->call_targets;
+        while (call_targets != NULL) {
+            CallTargetInfo *next = call_targets->next;
+            free(call_targets);
+            call_targets = next;
+        }
     }
 
     {

@@ -798,6 +798,92 @@ FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name)
     return NULL;
 }
 
+FunctionInfo *semantic_find_function_by_node(FunctionInfo *functions, const ParseNode *node)
+{
+    for (FunctionInfo *fn = functions; fn != NULL; fn = fn->next) {
+        if (fn->node == node) {
+            return fn;
+        }
+    }
+    return NULL;
+}
+
+void semantic_record_call_target(SemanticInfo *info, const ParseNode *call, FunctionInfo *function)
+{
+    CallTargetInfo *target;
+
+    for (target = info->call_targets; target != NULL; target = target->next) {
+        if (target->call == call) {
+            target->function = function;
+            return;
+        }
+    }
+
+    target = malloc(sizeof(CallTargetInfo));
+    if (target == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    target->call = call;
+    target->function = function;
+    target->next = info->call_targets;
+    info->call_targets = target;
+}
+
+FunctionInfo *semantic_resolved_call_target(const SemanticInfo *info, const ParseNode *call)
+{
+    for (CallTargetInfo *target = info->call_targets; target != NULL; target = target->next) {
+        if (target->call == call) {
+            return target->function;
+        }
+    }
+    return NULL;
+}
+
+const char *semantic_function_c_name(const SemanticInfo *info, const ParseNode *function_def)
+{
+    FunctionInfo *fn = semantic_find_function_by_node(info->functions, function_def);
+
+    if (fn == NULL) {
+        semantic_error("unknown function definition during code generation");
+    }
+    return fn->c_name;
+}
+
+const char *semantic_call_c_name(const SemanticInfo *info, const ParseNode *call)
+{
+    FunctionInfo *fn = semantic_resolved_call_target(info, call);
+
+    if (fn == NULL) {
+        semantic_error("unresolved function call during code generation");
+    }
+    return fn->c_name;
+}
+
+size_t semantic_call_arity(const SemanticInfo *info, const ParseNode *call)
+{
+    FunctionInfo *fn = semantic_resolved_call_target(info, call);
+
+    if (fn == NULL) {
+        semantic_error("unresolved function call during code generation");
+    }
+    return fn->param_count;
+}
+
+ValueType semantic_call_parameter_type(const SemanticInfo *info, const ParseNode *call, size_t index)
+{
+    FunctionInfo *fn = semantic_resolved_call_target(info, call);
+
+    if (fn == NULL) {
+        semantic_error("unresolved function call during code generation");
+    }
+    if (index >= fn->param_count) {
+        semantic_error("call parameter index out of range");
+    }
+    return fn->param_types[index];
+}
+
 MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name)
 {
     for (MethodInfo *method = methods; method != NULL; method = method->next) {

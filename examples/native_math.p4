@@ -1,5 +1,6 @@
 import math
 
 def main() -> None:
-    print(abs_int(-5))
-    print(abs_int(7))
+    print(abs(-5))
+    print(abs(7))
+    print(abs(-2.5))

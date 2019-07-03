@@ -20,8 +20,25 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
     const ParseNode *parameters = codegen_function_parameters(function_def);
     const char *c_name = codegen_function_c_name(ctx, function_def);
     ValueType return_type = codegen_function_return_type(ctx, function_def);
+    ValueType first_param_type = semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[0], 0, NODE_TYPE));
 
-    if (strcmp(name->value, "abs_int") == 0) {
+    if (strcmp(name->value, "abs") == 0 && parameters->child_count == 1 && first_param_type == TYPE_INT) {
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s < 0 ? -%s : %s;\n",
+            parameters->children[0]->value,
+            parameters->children[0]->value,
+            parameters->children[0]->value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (strcmp(name->value, "abs") == 0 && parameters->child_count == 1 && first_param_type == TYPE_FLOAT) {
         codegen_emit_type_name(ctx, return_type);
         fprintf(ctx->out, " %s(", c_name);
         emit_parameter_list(ctx, parameters, 0);
@@ -887,7 +904,7 @@ static void emit_function_signature(CodegenContext *ctx, const ParseNode *functi
         codegen_emit_type_name(ctx, return_type);
         fprintf(ctx->out, " %s(", owner_type != 0
             ? semantic_method_c_name(ctx->semantic, owner_type, name->value)
-            : name->value);
+            : semantic_function_c_name(ctx->semantic, function_def));
     }
     emit_parameter_list(ctx, parameters, is_c_main);
     fputc(')', ctx->out);
