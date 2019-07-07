@@ -58,6 +58,7 @@ ValueType semantic_class_field_type(ValueType type, size_t index);
 ValueType semantic_find_class_type(const char *name);
 const char *semantic_function_c_name(const SemanticInfo *info, const ParseNode *function_def);
 const char *semantic_call_c_name(const SemanticInfo *info, const ParseNode *call);
+int semantic_has_call_target(const SemanticInfo *info, const ParseNode *call);
 size_t semantic_call_arity(const SemanticInfo *info, const ParseNode *call);
 ValueType semantic_call_parameter_type(const SemanticInfo *info, const ParseNode *call, size_t index);
 const char *semantic_method_c_name(const SemanticInfo *info, ValueType owner_type, const char *method_name);

@@ -10,8 +10,8 @@ def widen(x: float) -> float:
     return x + 0.5
 
 def main() -> None:
-    print(abs(-5))
-    print(abs(-3.5))
+    print(math.abs(-5))
+    print(math.abs(-3.5))
     print(twice(4))
     print(twice(1.25))
     print(widen(2))

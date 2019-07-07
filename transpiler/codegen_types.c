@@ -644,6 +644,28 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
     }
 
     if (node->kind == NODE_METHOD_CALL) {
+        if (semantic_has_call_target(ctx->semantic, node)) {
+            const ParseNode *arguments = codegen_expect_child(node, 2, NODE_ARGUMENTS);
+
+            for (size_t i = 0; i < arguments->child_count; i++) {
+                ValueType expr_type;
+                ValueType target_type;
+
+                if (codegen_is_epsilon_node(arguments->children[i])) {
+                    continue;
+                }
+
+                expr_type = semantic_type_of(ctx->semantic, arguments->children[i]);
+                target_type = semantic_call_parameter_type(ctx->semantic, node, i);
+                if (semantic_type_is_union(target_type) &&
+                    semantic_type_is_union(expr_type) &&
+                    target_type != expr_type) {
+                    codegen_add_union_conversion(ctx, expr_type, target_type);
+                }
+            }
+            return;
+        }
+
         const ParseNode *receiver = node->children[0];
         const ParseNode *method = codegen_expect_child(node, 1, NODE_PRIMARY);
         const ParseNode *arguments = codegen_expect_child(node, 2, NODE_ARGUMENTS);

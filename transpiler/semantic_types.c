@@ -861,6 +861,11 @@ const char *semantic_call_c_name(const SemanticInfo *info, const ParseNode *call
     return fn->c_name;
 }
 
+int semantic_has_call_target(const SemanticInfo *info, const ParseNode *call)
+{
+    return semantic_resolved_call_target(info, call) != NULL;
+}
+
 size_t semantic_call_arity(const SemanticInfo *info, const ParseNode *call)
 {
     FunctionInfo *fn = semantic_resolved_call_target(info, call);
