@@ -75,6 +75,26 @@ static int is_import_statement(const ParseNode *statement)
         statement->children[0]->kind == NODE_IMPORT_STATEMENT;
 }
 
+static int is_exported_top_level(const ParseNode *statement, const char *name)
+{
+    const ParseNode *payload;
+    const ParseNode *symbol;
+
+    if (statement == NULL || statement->kind != NODE_STATEMENT || statement->child_count != 1) {
+        return 0;
+    }
+
+    payload = statement->children[0];
+    if (payload->kind != NODE_FUNCTION_DEF &&
+        payload->kind != NODE_NATIVE_FUNCTION_DEF &&
+        payload->kind != NODE_CLASS_DEF) {
+        return 0;
+    }
+
+    symbol = payload->children[0];
+    return symbol != NULL && symbol->value != NULL && strcmp(symbol->value, name) == 0;
+}
+
 static char *dirname_of(const char *path)
 {
     const char *slash = strrchr(path, '/');
@@ -176,6 +196,31 @@ static void free_root_shell(ParseNode *root)
     free(root);
 }
 
+static void ensure_module_exports_symbol(const char *path, const char *symbol_name)
+{
+    ParseNode *root = parse_file(path, 0);
+    int found = 0;
+
+    if (root->kind != NODE_S) {
+        fprintf(stderr, "Import error: malformed module root for '%s'\n", path);
+        exit(1);
+    }
+
+    for (size_t i = 0; i < root->child_count; i++) {
+        if (is_exported_top_level(root->children[i], symbol_name)) {
+            found = 1;
+            break;
+        }
+    }
+
+    free_tree(root);
+
+    if (!found) {
+        fprintf(stderr, "Import error: module '%s' has no export '%s'\n", path, symbol_name);
+        exit(1);
+    }
+}
+
 static void load_file(LoadContext *ctx, const char *path, int show_tokens)
 {
     ParseNode *root;
@@ -207,8 +252,12 @@ static void load_file(LoadContext *ctx, const char *path, int show_tokens)
         if (is_import_statement(child)) {
             const ParseNode *import_stmt = child->children[0];
             const ParseNode *module_name = import_stmt->children[0];
+            const ParseNode *imported_name = import_stmt->child_count > 1 ? import_stmt->children[1] : NULL;
             char *import_path = resolve_import_path(path, module_name->value);
 
+            if (imported_name != NULL) {
+                ensure_module_exports_symbol(import_path, imported_name->value);
+            }
             load_file(ctx, import_path, 0);
             free(import_path);
             free_tree(child);

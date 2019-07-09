@@ -312,7 +312,7 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
         add_child(node, parse_FUNCTION_DEF(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "native")) {
         add_child(node, parse_NATIVE_FUNCTION_DEF(ts));
-    } else if (parse_is_keyword_token(peek_ts(ts), "import")) {
+    } else if (parse_is_keyword_token(peek_ts(ts), "import") || parse_is_keyword_token(peek_ts(ts), "from")) {
         add_child(node, parse_IMPORT_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "if")) {
         add_child(node, parse_IF_STATEMENT(ts));
@@ -359,13 +359,29 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
 
 static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
 {
-    Token import_tok = parse_expect_keyword(ts, "import");
-    ParseNode *node = create_node_from_token(NODE_IMPORT_STATEMENT, import_tok);
+    Token first_tok = expect(ts, TOKEN_KEYWORD);
+    ParseNode *node = create_node_from_token(NODE_IMPORT_STATEMENT, first_tok);
     Token module_name;
 
-    module_name = expect(ts, TOKEN_IDENTIFIER);
-    add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
-    return node;
+    if (strcmp(first_tok.value, "import") == 0) {
+        module_name = expect(ts, TOKEN_IDENTIFIER);
+        add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
+        return node;
+    }
+
+    if (strcmp(first_tok.value, "from") == 0) {
+        Token imported_name;
+
+        module_name = expect(ts, TOKEN_IDENTIFIER);
+        add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
+        parse_expect_keyword(ts, "import");
+        imported_name = expect(ts, TOKEN_IDENTIFIER);
+        add_child(node, create_node_from_token(NODE_PRIMARY, imported_name));
+        return node;
+    }
+
+    parse_error(first_tok, "unexpected keyword");
+    return NULL;
 }
 
 static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts)
