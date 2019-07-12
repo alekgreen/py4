@@ -371,12 +371,18 @@ static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
 
     if (strcmp(first_tok.value, "from") == 0) {
         Token imported_name;
+        Token alias_name;
 
         module_name = expect(ts, TOKEN_IDENTIFIER);
         add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
         parse_expect_keyword(ts, "import");
         imported_name = expect(ts, TOKEN_IDENTIFIER);
         add_child(node, create_node_from_token(NODE_PRIMARY, imported_name));
+        if (parse_is_keyword_token(peek_ts(ts), "as")) {
+            get_from_ts(ts);
+            alias_name = expect(ts, TOKEN_IDENTIFIER);
+            add_child(node, create_node_from_token(NODE_PRIMARY, alias_name));
+        }
         return node;
     }
 

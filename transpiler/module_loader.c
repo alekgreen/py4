@@ -196,7 +196,137 @@ static void free_root_shell(ParseNode *root)
     free(root);
 }
 
-static void ensure_module_exports_symbol(const char *path, const char *symbol_name)
+static void load_file(LoadContext *ctx, const char *path, int show_tokens);
+
+static ParseNode *clone_tree(const ParseNode *node)
+{
+    ParseNode *copy;
+
+    if (node == NULL) {
+        return NULL;
+    }
+
+    copy = create_node(node->kind, node->token_type, node->value);
+    copy->source_path = dup_string(node->source_path);
+    copy->source_line = dup_string(node->source_line);
+    copy->line = node->line;
+    copy->column = node->column;
+    for (size_t i = 0; i < node->child_count; i++) {
+        add_child(copy, clone_tree(node->children[i]));
+    }
+    return copy;
+}
+
+static void load_import_from_node(LoadContext *ctx, const char *current_path, const ParseNode *import_stmt);
+
+static ParseNode *make_alias_wrapper(const ParseNode *statement, const char *original_name, const char *alias_name)
+{
+    const ParseNode *payload;
+    const ParseNode *parameters;
+    ParseNode *statement_node;
+    ParseNode *function_def;
+    ParseNode *arguments;
+    ParseNode *call;
+    ParseNode *expr_stmt;
+    ParseNode *simple_stmt;
+    ParseNode *suite;
+    ParseNode *inner_stmt;
+    size_t param_count;
+
+    if (statement == NULL || statement->kind != NODE_STATEMENT || statement->child_count != 1) {
+        return NULL;
+    }
+
+    payload = statement->children[0];
+    if (payload->kind != NODE_NATIVE_FUNCTION_DEF && payload->kind != NODE_FUNCTION_DEF) {
+        return NULL;
+    }
+
+    statement_node = create_node(NODE_STATEMENT, TOKEN_NULL, NULL);
+    function_def = create_node(NODE_FUNCTION_DEF, payload->token_type, NULL);
+    function_def->source_path = dup_string(payload->source_path);
+    function_def->source_line = dup_string(payload->source_line);
+    function_def->line = payload->line;
+    function_def->column = payload->column;
+
+    add_child(function_def, create_node(NODE_PRIMARY, TOKEN_IDENTIFIER, alias_name));
+    function_def->children[0]->source_path = dup_string(payload->children[0]->source_path);
+    function_def->children[0]->source_line = dup_string(payload->children[0]->source_line);
+    function_def->children[0]->line = payload->children[0]->line;
+    function_def->children[0]->column = payload->children[0]->column;
+
+    parameters = payload->children[1];
+    {
+        ParseNode *params_copy = create_node(NODE_PARAMETERS, TOKEN_NULL, NULL);
+        param_count = parameters->child_count;
+        for (size_t i = 0; i < param_count; i++) {
+            ParseNode *param = parameters->children[i];
+
+            if (param->kind == NODE_EPSILON) {
+                add_child(params_copy, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+                continue;
+            }
+
+            {
+                ParseNode *param_copy = create_node(NODE_PARAMETER, TOKEN_NULL, param->value);
+                add_child(param_copy, clone_tree(param->children[0]));
+                add_child(params_copy, param_copy);
+            }
+        }
+        add_child(function_def, params_copy);
+    }
+
+    if (payload->child_count >= 3 && payload->children[2]->kind == NODE_RETURN_TYPE) {
+        add_child(function_def, clone_tree(payload->children[2]));
+    }
+
+    suite = create_node(NODE_SUITE, TOKEN_NULL, NULL);
+    inner_stmt = create_node(NODE_STATEMENT, TOKEN_NULL, NULL);
+    simple_stmt = create_node(NODE_SIMPLE_STATEMENT, TOKEN_NULL, NULL);
+    if (payload->child_count >= 3 &&
+        payload->children[2]->kind == NODE_RETURN_TYPE &&
+        payload->children[2]->child_count == 1 &&
+        payload->children[2]->children[0]->kind == NODE_TYPE &&
+        payload->children[2]->children[0]->child_count == 1 &&
+        payload->children[2]->children[0]->children[0]->value != NULL &&
+        strcmp(payload->children[2]->children[0]->children[0]->value, "None") != 0) {
+        expr_stmt = create_node(NODE_RETURN_STATEMENT, TOKEN_NULL, NULL);
+    } else {
+        expr_stmt = create_node(NODE_EXPRESSION_STATEMENT, TOKEN_NULL, NULL);
+    }
+
+    call = create_node(NODE_CALL, TOKEN_NULL, NULL);
+    add_child(call, create_node(NODE_PRIMARY, TOKEN_IDENTIFIER, original_name));
+    arguments = create_node(NODE_ARGUMENTS, TOKEN_NULL, NULL);
+    for (size_t i = 0; i < param_count; i++) {
+        if (parameters->children[i]->kind == NODE_EPSILON) {
+            add_child(arguments, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+            break;
+        }
+        add_child(arguments, create_node(NODE_EXPRESSION, TOKEN_NULL, NULL));
+        add_child(arguments->children[i], create_node(NODE_PRIMARY, TOKEN_IDENTIFIER, parameters->children[i]->value));
+    }
+    if (param_count == 0) {
+        add_child(arguments, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+    }
+    add_child(call, arguments);
+
+    if (expr_stmt->kind == NODE_RETURN_STATEMENT) {
+        add_child(expr_stmt, create_node(NODE_EXPRESSION, TOKEN_NULL, NULL));
+        add_child(expr_stmt->children[0], call);
+    } else {
+        add_child(expr_stmt, create_node(NODE_EXPRESSION, TOKEN_NULL, NULL));
+        add_child(expr_stmt->children[0], call);
+    }
+    add_child(simple_stmt, expr_stmt);
+    add_child(inner_stmt, simple_stmt);
+    add_child(suite, inner_stmt);
+    add_child(function_def, suite);
+    add_child(statement_node, function_def);
+    return statement_node;
+}
+
+static void import_module_symbol(LoadContext *ctx, const char *path, const char *symbol_name, const char *alias_name)
 {
     ParseNode *root = parse_file(path, 0);
     int found = 0;
@@ -207,18 +337,63 @@ static void ensure_module_exports_symbol(const char *path, const char *symbol_na
     }
 
     for (size_t i = 0; i < root->child_count; i++) {
-        if (is_exported_top_level(root->children[i], symbol_name)) {
+        ParseNode *child = root->children[i];
+
+        if (child == NULL) {
+            continue;
+        }
+
+        if (is_import_statement(child)) {
+            load_import_from_node(ctx, path, child->children[0]);
+            free_tree(child);
+            root->children[i] = NULL;
+            continue;
+        }
+
+        if (is_exported_top_level(child, symbol_name)) {
+            ParseNode *selected = child;
+            root->children[i] = NULL;
             found = 1;
-            break;
+            add_child(ctx->merged_root, selected);
+            if (alias_name != NULL && strcmp(alias_name, symbol_name) != 0) {
+                ParseNode *wrapper = make_alias_wrapper(selected, symbol_name, alias_name);
+
+                if (wrapper == NULL) {
+                    fprintf(stderr, "Import error: unsupported alias target '%s'\n", symbol_name);
+                    exit(1);
+                }
+                add_child(ctx->merged_root, wrapper);
+            }
         }
     }
 
-    free_tree(root);
-
     if (!found) {
+        free_tree(root);
         fprintf(stderr, "Import error: module '%s' has no export '%s'\n", path, symbol_name);
         exit(1);
     }
+    free_root_shell(root);
+}
+
+static void load_import_from_node(LoadContext *ctx, const char *current_path, const ParseNode *import_stmt)
+{
+    const ParseNode *module_name = import_stmt->children[0];
+    const ParseNode *imported_name = import_stmt->child_count > 1 ? import_stmt->children[1] : NULL;
+    const ParseNode *alias_name = import_stmt->child_count > 2 ? import_stmt->children[2] : NULL;
+    char *import_path = resolve_import_path(current_path, module_name->value);
+
+    if (imported_name != NULL) {
+        import_module_symbol(
+            ctx,
+            import_path,
+            imported_name->value,
+            alias_name != NULL ? alias_name->value : NULL);
+        free(import_path);
+        return;
+    }
+
+    load_file(ctx, import_path, 0);
+    free(import_path);
 }
 
 static void load_file(LoadContext *ctx, const char *path, int show_tokens)
@@ -250,16 +425,7 @@ static void load_file(LoadContext *ctx, const char *path, int show_tokens)
         }
 
         if (is_import_statement(child)) {
-            const ParseNode *import_stmt = child->children[0];
-            const ParseNode *module_name = import_stmt->children[0];
-            const ParseNode *imported_name = import_stmt->child_count > 1 ? import_stmt->children[1] : NULL;
-            char *import_path = resolve_import_path(path, module_name->value);
-
-            if (imported_name != NULL) {
-                ensure_module_exports_symbol(import_path, imported_name->value);
-            }
-            load_file(ctx, import_path, 0);
-            free(import_path);
+            load_import_from_node(ctx, path, child->children[0]);
             free_tree(child);
             continue;
         }
