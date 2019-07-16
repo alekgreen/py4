@@ -12,7 +12,7 @@ int main(int argc, char **argv)
     int show_tokens = 0;
     int show_tree = 0;
     SemanticInfo *semantic;
-    ParseNode *root;
+    LoadedProgram *program;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--tokens") == 0) {
@@ -24,15 +24,15 @@ int main(int argc, char **argv)
         }
     }
 
-    root = load_program_from_entry(input_path, show_tokens);
+    program = load_program_from_entry(input_path, show_tokens);
     if (show_tree) {
-        print_tree(root, 0);
+        print_tree(program->emission_root, 0);
     }
 
-    semantic = analyze_program(root);
-    emit_c_program(stdout, root, semantic);
+    semantic = analyze_program(program);
+    emit_c_program(stdout, program, semantic);
 
     free_semantic_info(semantic);
-    free_tree(root);
+    free_loaded_program(program);
     return 0;
 }

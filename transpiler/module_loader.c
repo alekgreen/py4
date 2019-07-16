@@ -10,7 +10,7 @@ typedef struct {
     char **visited_paths;
     size_t visited_count;
     size_t visited_capacity;
-    ParseNode *merged_root;
+    LoadedProgram *program;
 } LoadContext;
 
 static char *dup_string(const char *value)
@@ -109,6 +109,19 @@ static char *dirname_of(const char *path)
     return dup_printf("%.*s", (int)(slash - path), path);
 }
 
+static char *module_name_from_path(const char *path)
+{
+    const char *basename = strrchr(path, '/');
+    size_t len;
+
+    basename = basename == NULL ? path : basename + 1;
+    len = strlen(basename);
+    if (len >= 3 && strcmp(basename + len - 3, ".p4") == 0) {
+        len -= 3;
+    }
+    return dup_printf("%.*s", (int) len, basename);
+}
+
 static char *resolve_import_path(const char *current_path, const char *module_name)
 {
     char *dir = dirname_of(current_path);
@@ -161,6 +174,28 @@ static void mark_visited(LoadContext *ctx, const char *path)
     ctx->visited_paths[ctx->visited_count++] = dup_string(path);
 }
 
+static void add_loaded_module(LoadContext *ctx, const char *path, ParseNode *root)
+{
+    LoadedProgram *program = ctx->program;
+
+    if (program->module_count == program->module_capacity) {
+        size_t next_capacity = program->module_capacity == 0 ? 8 : program->module_capacity * 2;
+        LoadedModule *modules = realloc(program->modules, sizeof(LoadedModule) * next_capacity);
+
+        if (modules == NULL) {
+            perror("realloc");
+            exit(1);
+        }
+        program->modules = modules;
+        program->module_capacity = next_capacity;
+    }
+
+    program->modules[program->module_count].name = module_name_from_path(path);
+    program->modules[program->module_count].path = dup_string(path);
+    program->modules[program->module_count].root = root;
+    program->module_count++;
+}
+
 static ParseNode *parse_file(const char *path, int show_tokens)
 {
     FILE *fp = fopen(path, "r");
@@ -185,17 +220,6 @@ static ParseNode *parse_file(const char *path, int show_tokens)
     return root;
 }
 
-static void free_root_shell(ParseNode *root)
-{
-    if (root == NULL) {
-        return;
-    }
-
-    free(root->children);
-    free(root->value);
-    free(root);
-}
-
 static void load_file(LoadContext *ctx, const char *path, int show_tokens);
 
 static ParseNode *clone_tree(const ParseNode *node)
@@ -207,8 +231,10 @@ static ParseNode *clone_tree(const ParseNode *node)
     }
 
     copy = create_node(node->kind, node->token_type, node->value);
-    copy->source_path = dup_string(node->source_path);
-    copy->source_line = dup_string(node->source_line);
+    free(copy->source_path);
+    free(copy->source_line);
+    copy->source_path = node->source_path != NULL ? dup_string(node->source_path) : NULL;
+    copy->source_line = node->source_line != NULL ? dup_string(node->source_line) : NULL;
     copy->line = node->line;
     copy->column = node->column;
     for (size_t i = 0; i < node->child_count; i++) {
@@ -354,7 +380,7 @@ static void import_module_symbol(LoadContext *ctx, const char *path, const char 
             ParseNode *selected = child;
             root->children[i] = NULL;
             found = 1;
-            add_child(ctx->merged_root, selected);
+            add_child(ctx->program->emission_root, clone_tree(selected));
             if (alias_name != NULL && strcmp(alias_name, symbol_name) != 0) {
                 ParseNode *wrapper = make_alias_wrapper(selected, symbol_name, alias_name);
 
@@ -362,7 +388,7 @@ static void import_module_symbol(LoadContext *ctx, const char *path, const char 
                     fprintf(stderr, "Import error: unsupported alias target '%s'\n", symbol_name);
                     exit(1);
                 }
-                add_child(ctx->merged_root, wrapper);
+                add_child(ctx->program->emission_root, wrapper);
             }
         }
     }
@@ -372,7 +398,7 @@ static void import_module_symbol(LoadContext *ctx, const char *path, const char 
         fprintf(stderr, "Import error: module '%s' has no export '%s'\n", path, symbol_name);
         exit(1);
     }
-    free_root_shell(root);
+    free_tree(root);
 }
 
 static void load_import_from_node(LoadContext *ctx, const char *current_path, const ParseNode *import_stmt)
@@ -411,40 +437,54 @@ static void load_file(LoadContext *ctx, const char *path, int show_tokens)
         exit(1);
     }
 
+    add_loaded_module(ctx, path, root);
+
     for (size_t i = 0; i < root->child_count; i++) {
         ParseNode *child = root->children[i];
-
-        root->children[i] = NULL;
         if (child == NULL) {
             continue;
         }
 
         if (child->kind == NODE_EPSILON) {
-            free_tree(child);
             continue;
         }
 
         if (is_import_statement(child)) {
             load_import_from_node(ctx, path, child->children[0]);
-            free_tree(child);
             continue;
         }
 
-        add_child(ctx->merged_root, child);
+        add_child(ctx->program->emission_root, clone_tree(child));
     }
-
-    free_root_shell(root);
 }
 
-ParseNode *load_program_from_entry(const char *input_path, int show_tokens)
+LoadedProgram *load_program_from_entry(const char *input_path, int show_tokens)
 {
     LoadContext ctx = {0};
+    LoadedProgram *program = calloc(1, sizeof(LoadedProgram));
 
-    ctx.merged_root = create_node(NODE_S, TOKEN_NULL, NULL);
+    if (program == NULL) {
+        perror("calloc");
+        exit(1);
+    }
+    program->emission_root = create_node(NODE_S, TOKEN_NULL, NULL);
+    ctx.program = program;
     load_file(&ctx, input_path, show_tokens);
 
-    if (ctx.merged_root->child_count == 0) {
-        add_child(ctx.merged_root, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
+    if (program->module_count == 0) {
+        fprintf(stderr, "Import error: no modules were loaded\n");
+        exit(1);
+    }
+
+    for (size_t i = 0; i < program->module_count; i++) {
+        if (strcmp(program->modules[i].path, input_path) == 0) {
+            program->entry_index = i;
+            break;
+        }
+    }
+
+    if (program->emission_root->child_count == 0) {
+        add_child(program->emission_root, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
     }
 
     for (size_t i = 0; i < ctx.visited_count; i++) {
@@ -452,5 +492,21 @@ ParseNode *load_program_from_entry(const char *input_path, int show_tokens)
     }
     free(ctx.visited_paths);
 
-    return ctx.merged_root;
+    return program;
+}
+
+void free_loaded_program(LoadedProgram *program)
+{
+    if (program == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < program->module_count; i++) {
+        free(program->modules[i].name);
+        free(program->modules[i].path);
+        free_tree(program->modules[i].root);
+    }
+    free(program->modules);
+    free_tree(program->emission_root);
+    free(program);
 }

@@ -2,6 +2,7 @@
 #define SEMANTIC_H
 
 #include "parse.h"
+#include "module_loader.h"
 
 typedef unsigned int ValueType;
 
@@ -30,7 +31,7 @@ enum {
 
 typedef struct SemanticInfo SemanticInfo;
 
-SemanticInfo *analyze_program(const ParseNode *root);
+SemanticInfo *analyze_program(const LoadedProgram *program);
 void free_semantic_info(SemanticInfo *info);
 ValueType semantic_type_of(const SemanticInfo *info, const ParseNode *node);
 const char *semantic_type_name(ValueType type);

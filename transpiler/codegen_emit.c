@@ -1244,10 +1244,15 @@ static void emit_auto_main(CodegenContext *ctx)
     fputs("}\n", ctx->out);
 }
 
-void emit_c_program(FILE *out, const ParseNode *root, const SemanticInfo *info)
+void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo *info)
 {
     CodegenContext ctx = {0};
+    const ParseNode *root;
 
+    if (program == NULL) {
+        codegen_error("expected loaded program");
+    }
+    root = program->emission_root;
     if (root == NULL || root->kind != NODE_S) {
         codegen_error("expected program root");
     }

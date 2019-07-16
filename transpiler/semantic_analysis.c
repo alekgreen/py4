@@ -1020,11 +1020,16 @@ static int typecheck_statement(
     return typecheck_simple_statement(info, payload, scope, current_function);
 }
 
-SemanticInfo *analyze_program(const ParseNode *root)
+SemanticInfo *analyze_program(const LoadedProgram *program)
 {
+    const ParseNode *root;
     Scope global_scope = {0};
     SemanticInfo *info;
 
+    if (program == NULL) {
+        semantic_error("expected loaded program");
+    }
+    root = program->emission_root;
     if (root == NULL || root->kind != NODE_S) {
         semantic_error("expected program root");
     }
