@@ -889,6 +889,16 @@ ValueType semantic_call_parameter_type(const SemanticInfo *info, const ParseNode
     return fn->param_types[index];
 }
 
+ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name)
+{
+    for (ModuleInfo *module = modules; module != NULL; module = module->next) {
+        if (strcmp(module->name, name) == 0) {
+            return module;
+        }
+    }
+    return NULL;
+}
+
 MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name)
 {
     for (MethodInfo *method = methods; method != NULL; method = method->next) {

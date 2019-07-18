@@ -54,11 +54,29 @@ typedef struct NodeTypeInfo {
     struct NodeTypeInfo *next;
 } NodeTypeInfo;
 
+typedef struct ImportBinding {
+    const char *local_name;
+    const char *module_name;
+    const char *symbol_name;
+    int is_module_import;
+    struct ImportBinding *next;
+} ImportBinding;
+
+typedef struct ModuleInfo {
+    const char *name;
+    const char *path;
+    const ParseNode *root;
+    ImportBinding *imports;
+    struct ModuleInfo *next;
+} ModuleInfo;
+
 struct SemanticInfo {
     FunctionInfo *functions;
     MethodInfo *methods;
     NodeTypeInfo *node_types;
     CallTargetInfo *call_targets;
+    ModuleInfo *modules;
+    ModuleInfo *entry_module;
 };
 
 void semantic_error(const char *message, ...);
@@ -100,5 +118,6 @@ const ParseNode *semantic_simple_statement_tail(const ParseNode *simple_stmt);
 const ParseNode *semantic_statement_tail_expression(const ParseNode *statement_tail);
 const ParseNode *semantic_statement_tail_type_node(const ParseNode *statement_tail);
 int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
+ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name);
 
 #endif

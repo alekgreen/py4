@@ -46,6 +46,7 @@ static void collect_classes(const ParseNode *root);
 static void validate_class_definitions(SemanticInfo *info, const ParseNode *root);
 static void collect_methods(SemanticInfo *info, const ParseNode *root);
 static void collect_functions(SemanticInfo *info, const ParseNode *root);
+static void collect_module_bindings(SemanticInfo *info, const LoadedProgram *program);
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope);
 
@@ -62,6 +63,59 @@ static char *dup_string(const char *value)
     }
     memcpy(copy, value, len);
     return copy;
+}
+
+static ImportBinding *create_import_binding(
+    const char *local_name,
+    const char *module_name,
+    const char *symbol_name,
+    int is_module_import)
+{
+    ImportBinding *binding = malloc(sizeof(ImportBinding));
+
+    if (binding == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    binding->local_name = dup_string(local_name);
+    binding->module_name = dup_string(module_name);
+    binding->symbol_name = symbol_name != NULL ? dup_string(symbol_name) : NULL;
+    binding->is_module_import = is_module_import;
+    binding->next = NULL;
+    return binding;
+}
+
+static ModuleInfo *create_module_info(const LoadedModule *module)
+{
+    ModuleInfo *info = malloc(sizeof(ModuleInfo));
+
+    if (info == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    info->name = dup_string(module->name);
+    info->path = dup_string(module->path);
+    info->root = module->root;
+    info->imports = NULL;
+    info->next = NULL;
+    return info;
+}
+
+static void add_import_binding(ModuleInfo *module, ImportBinding *binding)
+{
+    ImportBinding *existing;
+
+    for (existing = module->imports; existing != NULL; existing = existing->next) {
+        if (strcmp(existing->local_name, binding->local_name) == 0) {
+            semantic_error_at_node(module->root, "duplicate import binding '%s' in module '%s'",
+                binding->local_name, module->name);
+        }
+    }
+
+    binding->next = module->imports;
+    module->imports = binding;
 }
 
 static void append_text(char *buffer, size_t size, size_t *length, const char *text)
@@ -926,6 +980,60 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
     }
 }
 
+static void collect_module_bindings(SemanticInfo *info, const LoadedProgram *program)
+{
+    ModuleInfo *tail = NULL;
+
+    for (size_t i = 0; i < program->module_count; i++) {
+        const LoadedModule *loaded = &program->modules[i];
+        ModuleInfo *module = create_module_info(loaded);
+
+        if (info->modules == NULL) {
+            info->modules = module;
+        } else {
+            tail->next = module;
+        }
+        tail = module;
+
+        if (i == program->entry_index) {
+            info->entry_module = module;
+        }
+
+        for (size_t j = 0; j < loaded->root->child_count; j++) {
+            const ParseNode *statement = loaded->root->children[j];
+            const ParseNode *payload;
+            const ParseNode *module_name;
+            const ParseNode *imported_name;
+            const ParseNode *alias_name;
+
+            if (statement == NULL || statement->kind != NODE_STATEMENT || statement->child_count != 1) {
+                continue;
+            }
+
+            payload = statement->children[0];
+            if (payload->kind != NODE_IMPORT_STATEMENT || payload->child_count == 0) {
+                continue;
+            }
+
+            module_name = payload->children[0];
+            imported_name = payload->child_count > 1 ? payload->children[1] : NULL;
+            alias_name = payload->child_count > 2 ? payload->children[2] : NULL;
+
+            if (imported_name == NULL) {
+                add_import_binding(module,
+                    create_import_binding(module_name->value, module_name->value, NULL, 1));
+            } else {
+                add_import_binding(module,
+                    create_import_binding(
+                        alias_name != NULL ? alias_name->value : imported_name->value,
+                        module_name->value,
+                        imported_name->value,
+                        0));
+            }
+        }
+    }
+}
+
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope)
 {
     const ParseNode *parameters = semantic_function_parameters(function_def);
@@ -1040,6 +1148,7 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
         exit(1);
     }
 
+    collect_module_bindings(info, program);
     collect_classes(root);
     validate_class_definitions(info, root);
     collect_methods(info, root);
@@ -1099,6 +1208,28 @@ void free_semantic_info(SemanticInfo *info)
             CallTargetInfo *next = call_targets->next;
             free(call_targets);
             call_targets = next;
+        }
+    }
+
+    {
+        ModuleInfo *modules = info->modules;
+        while (modules != NULL) {
+            ModuleInfo *next_module = modules->next;
+            ImportBinding *bindings = modules->imports;
+
+            while (bindings != NULL) {
+                ImportBinding *next_binding = bindings->next;
+                free((char *) bindings->local_name);
+                free((char *) bindings->module_name);
+                free((char *) bindings->symbol_name);
+                free(bindings);
+                bindings = next_binding;
+            }
+
+            free((char *) modules->name);
+            free((char *) modules->path);
+            free(modules);
+            modules = next_module;
         }
     }
 
