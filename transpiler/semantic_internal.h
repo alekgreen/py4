@@ -11,11 +11,13 @@ typedef struct VariableBinding {
 
 typedef struct Scope {
     VariableBinding *vars;
+    const struct ModuleInfo *module;
     struct Scope *parent;
 } Scope;
 
 typedef struct FunctionInfo {
     const char *name;
+    const char *module_name;
     char *c_name;
     ValueType return_type;
     size_t param_count;

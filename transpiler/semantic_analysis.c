@@ -65,6 +65,41 @@ static char *dup_string(const char *value)
     return copy;
 }
 
+static char *module_name_from_path(const char *path)
+{
+    const char *basename;
+    size_t module_len;
+    char *name;
+
+    if (path == NULL) {
+        return dup_string("");
+    }
+
+    basename = strrchr(path, '/');
+    basename = basename == NULL ? path : basename + 1;
+    module_len = strlen(basename);
+    if (module_len >= 3 && strcmp(basename + module_len - 3, ".p4") == 0) {
+        module_len -= 3;
+    }
+    name = malloc(module_len + 1);
+    if (name == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+    memcpy(name, basename, module_len);
+    name[module_len] = '\0';
+    return name;
+}
+
+static ModuleInfo *module_info_for_path(SemanticInfo *info, const char *path)
+{
+    char *module_name = module_name_from_path(path);
+    ModuleInfo *module = semantic_find_module_info(info->modules, module_name);
+
+    free(module_name);
+    return module;
+}
+
 static ImportBinding *create_import_binding(
     const char *local_name,
     const char *module_name,
@@ -188,9 +223,13 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
 
 static int same_function_signature(
     FunctionInfo *fn,
+    const char *module_name,
     size_t param_count,
     const ValueType *param_types)
 {
+    if (strcmp(fn->module_name, module_name) != 0) {
+        return 0;
+    }
     if (fn->param_count != param_count) {
         return 0;
     }
@@ -204,6 +243,7 @@ static int same_function_signature(
 
 static char *build_function_c_name(
     const ParseNode *function_def,
+    const char *module_name,
     const char *name,
     size_t param_count,
     const ValueType *param_types,
@@ -244,6 +284,8 @@ static char *build_function_c_name(
         append_text(buffer, sizeof(buffer), &length, name);
     } else {
         append_text(buffer, sizeof(buffer), &length, "py4_fn_");
+        append_text(buffer, sizeof(buffer), &length, module_name);
+        append_text(buffer, sizeof(buffer), &length, "_");
         append_text(buffer, sizeof(buffer), &length, name);
     }
 
@@ -381,6 +423,7 @@ static int typecheck_branch_suite(
     int returns = 0;
 
     branch_scope.parent = parent_scope;
+    branch_scope.module = parent_scope->module;
     if (!(suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0]))) {
         for (size_t i = 0; i < suite->child_count; i++) {
             if (!returns) {
@@ -790,6 +833,7 @@ static int typecheck_for_statement(
     }
 
     loop_scope.parent = scope;
+    loop_scope.module = scope->module;
     semantic_bind_variable(&loop_scope, target->value, target_type);
     semantic_record_node_type(info, target, target_type);
     current_function->loop_depth++;
@@ -919,6 +963,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         size_t count;
         ValueType *param_types;
         const char *name;
+        char *module_name;
         FunctionInfo *existing;
         FunctionInfo *fn;
 
@@ -927,6 +972,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
+        module_name = module_name_from_path(payload->source_path);
         if (semantic_find_class_type(name) != 0) {
             semantic_error_at_node(payload->children[0], "function name '%s' conflicts with class", name);
         }
@@ -957,7 +1003,7 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
             if (strcmp(existing->name, name) != 0) {
                 continue;
             }
-            if (same_function_signature(existing, count, param_types)) {
+            if (same_function_signature(existing, module_name, count, param_types)) {
                 semantic_error_at_node(payload->children[0], "duplicate overload '%s' with the same parameter types", name);
             }
         }
@@ -969,7 +1015,8 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         fn->name = name;
-        fn->c_name = build_function_c_name(payload, name, count, param_types, payload->kind == NODE_NATIVE_FUNCTION_DEF);
+        fn->module_name = module_name;
+        fn->c_name = build_function_c_name(payload, module_name, name, count, param_types, payload->kind == NODE_NATIVE_FUNCTION_DEF);
         fn->return_type = semantic_function_return_type(info, payload);
         fn->param_count = count;
         fn->param_types = param_types;
@@ -1042,6 +1089,7 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
     FunctionContext current = {0};
 
     local_scope.parent = global_scope;
+    local_scope.module = global_scope->module;
     current.name = semantic_expect_child(function_def, 0, NODE_PRIMARY)->value;
     current.return_type = semantic_function_return_type(info, function_def);
     current.loop_depth = 0;
@@ -1157,6 +1205,9 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = semantic_statement_payload(root->children[i]);
         FunctionContext module_context = {0};
+        ModuleInfo *module = module_info_for_path(info, payload->source_path);
+
+        global_scope.module = module;
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             semantic_error_at_node(payload, "imports should be resolved before semantic analysis");
@@ -1196,6 +1247,7 @@ void free_semantic_info(SemanticInfo *info)
     functions = info->functions;
     while (functions != NULL) {
         FunctionInfo *next = functions->next;
+        free((char *) functions->module_name);
         free(functions->c_name);
         free(functions->param_types);
         free(functions);

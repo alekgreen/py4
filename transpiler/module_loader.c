@@ -75,24 +75,36 @@ static int is_import_statement(const ParseNode *statement)
         statement->children[0]->kind == NODE_IMPORT_STATEMENT;
 }
 
-static int is_exported_top_level(const ParseNode *statement, const char *name)
+static const char *top_level_symbol_name(const ParseNode *statement)
 {
     const ParseNode *payload;
     const ParseNode *symbol;
 
     if (statement == NULL || statement->kind != NODE_STATEMENT || statement->child_count != 1) {
-        return 0;
+        return NULL;
     }
 
     payload = statement->children[0];
     if (payload->kind != NODE_FUNCTION_DEF &&
         payload->kind != NODE_NATIVE_FUNCTION_DEF &&
         payload->kind != NODE_CLASS_DEF) {
-        return 0;
+        if (payload->kind == NODE_SIMPLE_STATEMENT &&
+            payload->child_count == 2 &&
+            payload->children[0]->kind == NODE_PRIMARY) {
+            return payload->children[0]->value;
+        }
+        return NULL;
     }
 
     symbol = payload->children[0];
-    return symbol != NULL && symbol->value != NULL && strcmp(symbol->value, name) == 0;
+    return symbol != NULL ? symbol->value : NULL;
+}
+
+static int is_exported_top_level(const ParseNode *statement, const char *name)
+{
+    const char *symbol = top_level_symbol_name(statement);
+
+    return symbol != NULL && strcmp(symbol, name) == 0;
 }
 
 static char *dirname_of(const char *path)

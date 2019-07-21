@@ -263,24 +263,41 @@ static int is_builtin_name(const char *name)
 
 static int function_matches_module(FunctionInfo *fn, const char *module_name)
 {
-    const char *path;
-    const char *basename;
-    size_t module_len;
+    return fn->module_name != NULL && strcmp(fn->module_name, module_name) == 0;
+}
 
-    if (fn->node == NULL || fn->node->source_path == NULL) {
-        return 0;
+static const ModuleInfo *scope_module(Scope *scope)
+{
+    while (scope != NULL) {
+        if (scope->module != NULL) {
+            return scope->module;
+        }
+        scope = scope->parent;
+    }
+    return NULL;
+}
+
+static ImportBinding *find_import_binding(const ModuleInfo *module, const char *local_name, int module_import_only)
+{
+    ImportBinding *binding;
+
+    if (module == NULL) {
+        return NULL;
     }
 
-    path = fn->node->source_path;
-    basename = strrchr(path, '/');
-    basename = basename == NULL ? path : basename + 1;
-    module_len = strlen(basename);
-    if (module_len >= 3 && strcmp(basename + module_len - 3, ".p4") == 0) {
-        module_len -= 3;
+    for (binding = module->imports; binding != NULL; binding = binding->next) {
+        if (strcmp(binding->local_name, local_name) != 0) {
+            continue;
+        }
+        if (module_import_only && !binding->is_module_import) {
+            continue;
+        }
+        if (!module_import_only && binding->is_module_import) {
+            continue;
+        }
+        return binding;
     }
-
-    return strlen(module_name) == module_len &&
-        strncmp(basename, module_name, module_len) == 0;
+    return NULL;
 }
 
 static ValueType resolve_function_call_type(
@@ -302,6 +319,10 @@ static ValueType resolve_function_call_type(
     int saw_arity = 0;
     size_t arity_match_count = 0;
     FunctionInfo *sole_arity_match = NULL;
+    const ModuleInfo *current_module = scope_module(scope);
+    ImportBinding *import_binding = module_name == NULL && current_module != NULL
+        ? find_import_binding(current_module, function_name, 0)
+        : NULL;
 
     if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
         actual_count = 0;
@@ -312,10 +333,23 @@ static ValueType resolve_function_call_type(
         int compatible = 1;
 
         if (strcmp(fn->name, function_name) != 0) {
-            continue;
+            if (import_binding == NULL || strcmp(fn->name, import_binding->symbol_name) != 0) {
+                continue;
+            }
         }
         if (module_name != NULL && !function_matches_module(fn, module_name)) {
             continue;
+        }
+        if (module_name == NULL && current_module != NULL) {
+            if (function_matches_module(fn, current_module->name)) {
+                /* local function visible */
+            } else if (import_binding != NULL &&
+                function_matches_module(fn, import_binding->module_name) &&
+                strcmp(fn->name, import_binding->symbol_name) == 0) {
+                /* explicitly imported symbol visible */
+            } else {
+                continue;
+            }
         }
 
         saw_name = 1;
@@ -449,8 +483,10 @@ static ValueType infer_method_call_type(
     receiver = call->children[0];
     if (receiver->kind == NODE_PRIMARY && receiver->token_type == TOKEN_IDENTIFIER) {
         VariableBinding *var = semantic_find_variable(scope, receiver->value);
+        const ModuleInfo *current_module = scope_module(scope);
+        ImportBinding *module_binding = find_import_binding(current_module, receiver->value, 1);
 
-        if (var == NULL) {
+        if (var == NULL && module_binding != NULL) {
             char *qualified_name = malloc(strlen(receiver->value) + strlen(method->value) + 2);
 
             if (qualified_name == NULL) {
@@ -464,7 +500,7 @@ static ValueType infer_method_call_type(
                     call,
                     qualified_name,
                     method->value,
-                    receiver->value,
+                    module_binding->module_name,
                     arguments,
                     scope);
                 free(qualified_name);
