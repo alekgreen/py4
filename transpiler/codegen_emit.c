@@ -6,6 +6,41 @@
 
 static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters, int is_c_main);
 
+static void codegen_module_name_from_path(const char *path, char *buffer, size_t size)
+{
+    const char *basename;
+    size_t module_len;
+
+    if (size == 0) {
+        return;
+    }
+
+    if (path == NULL) {
+        buffer[0] = '\0';
+        return;
+    }
+
+    basename = strrchr(path, '/');
+    basename = basename == NULL ? path : basename + 1;
+    module_len = strlen(basename);
+    if (module_len >= 3 && strcmp(basename + module_len - 3, ".p4") == 0) {
+        module_len -= 3;
+    }
+    if (module_len >= size) {
+        codegen_error("module name is too long");
+    }
+    memcpy(buffer, basename, module_len);
+    buffer[module_len] = '\0';
+}
+
+static const char *codegen_global_name_for_node(CodegenContext *ctx, const ParseNode *node)
+{
+    char module_name[MAX_NAME_LEN];
+
+    codegen_module_name_from_path(node->source_path, module_name, sizeof(module_name));
+    return semantic_global_c_name(ctx->semantic, module_name, node->value);
+}
+
 static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_type, ValueType stored_type)
 {
     char ctor_name[MAX_NAME_LEN];
@@ -437,6 +472,7 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
         const ParseNode *statement_tail = codegen_simple_statement_tail(simple_stmt);
         const ParseNode *expr = codegen_statement_tail_expression(statement_tail);
         ValueType target_type;
+        const char *target_name;
         char *expr_text;
 
         if (target->kind == NODE_INDEX) {
@@ -488,11 +524,15 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             target_type = semantic_type_of(ctx->semantic, target);
         }
 
+        target_name = semantic_global_target_c_name(ctx->semantic, target);
+        if (target_name == NULL) {
+            target_name = target->value;
+        }
         expr_text = codegen_wrapped_expression_to_c_string(ctx, expr, target_type);
         emit_managed_assignment(
             ctx,
             target_type,
-            target->value,
+            target_name,
             expr_text,
             codegen_is_type_assignment(statement_tail),
             codegen_expression_is_owned_ref(ctx, expr));
@@ -1024,7 +1064,7 @@ static void emit_global_declaration(CodegenContext *ctx, const ParseNode *simple
         emit_tuple_target_declarations(ctx, name, type);
     } else {
         codegen_emit_type_name(ctx, type);
-        fprintf(ctx->out, " %s;\n", name->value);
+        fprintf(ctx->out, " %s;\n", codegen_global_name_for_node(ctx, name));
     }
 }
 
@@ -1182,7 +1222,7 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             emit_managed_assignment(
                 ctx,
                 target_type,
-                name->value,
+                codegen_global_name_for_node(ctx, name),
                 expr_text,
                 0,
                 codegen_expression_is_owned_ref(ctx, expr));

@@ -899,6 +899,76 @@ ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name)
     return NULL;
 }
 
+GlobalBinding *semantic_find_global(GlobalBinding *globals, const char *module_name, const char *name)
+{
+    for (GlobalBinding *global = globals; global != NULL; global = global->next) {
+        if (strcmp(global->module_name, module_name) == 0 && strcmp(global->name, name) == 0) {
+            return global;
+        }
+    }
+    return NULL;
+}
+
+void semantic_record_global_target(
+    SemanticInfo *info,
+    const ParseNode *node,
+    const char *module_name,
+    const char *name)
+{
+    GlobalTargetInfo *target;
+
+    for (target = info->global_targets; target != NULL; target = target->next) {
+        if (target->node == node) {
+            return;
+        }
+    }
+
+    target = malloc(sizeof(GlobalTargetInfo));
+    if (target == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    target->node = node;
+    target->module_name = module_name;
+    target->name = name;
+    target->next = info->global_targets;
+    info->global_targets = target;
+}
+
+GlobalTargetInfo *semantic_find_global_target(const SemanticInfo *info, const ParseNode *node)
+{
+    for (GlobalTargetInfo *target = info->global_targets; target != NULL; target = target->next) {
+        if (target->node == node) {
+            return target;
+        }
+    }
+    return NULL;
+}
+
+const char *semantic_global_c_name(const SemanticInfo *info, const char *module_name, const char *name)
+{
+    static char buffer[256];
+    GlobalBinding *global = semantic_find_global(info->globals, module_name, name);
+
+    if (global == NULL) {
+        semantic_error("unknown global '%s' in module '%s'", name, module_name);
+    }
+
+    snprintf(buffer, sizeof(buffer), "py4_global_%s_%s", module_name, name);
+    return buffer;
+}
+
+const char *semantic_global_target_c_name(const SemanticInfo *info, const ParseNode *node)
+{
+    GlobalTargetInfo *target = semantic_find_global_target(info, node);
+
+    if (target == NULL) {
+        return NULL;
+    }
+    return semantic_global_c_name(info, target->module_name, target->name);
+}
+
 MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name)
 {
     for (MethodInfo *method = methods; method != NULL; method = method->next) {
@@ -977,6 +1047,7 @@ void semantic_bind_variable(Scope *scope, const char *name, ValueType type)
     }
 
     binding->name = name;
+    binding->module_name = scope->parent == NULL && scope->module != NULL ? scope->module->name : NULL;
     binding->type = type;
     binding->next = scope->vars;
     scope->vars = binding;

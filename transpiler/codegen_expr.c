@@ -779,6 +779,12 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
 char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 {
+    const char *global_name = semantic_global_target_c_name(ctx->semantic, primary);
+
+    if (global_name != NULL) {
+        return codegen_dup_printf("%s", global_name);
+    }
+
     if (primary->kind == NODE_CALL) {
         return call_to_c_string(ctx, primary);
     }

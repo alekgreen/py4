@@ -300,6 +300,29 @@ static ImportBinding *find_import_binding(const ModuleInfo *module, const char *
     return NULL;
 }
 
+static GlobalBinding *resolve_visible_global(SemanticInfo *info, Scope *scope, const char *name)
+{
+    const ModuleInfo *current_module = scope_module(scope);
+    ImportBinding *import_binding;
+    GlobalBinding *binding;
+
+    if (current_module == NULL) {
+        return NULL;
+    }
+
+    binding = semantic_find_global(info->globals, current_module->name, name);
+    if (binding != NULL) {
+        return binding;
+    }
+
+    import_binding = find_import_binding(current_module, name, 0);
+    if (import_binding == NULL) {
+        return NULL;
+    }
+
+    return semantic_find_global(info->globals, import_binding->module_name, import_binding->symbol_name);
+}
+
 static ValueType resolve_function_call_type(
     SemanticInfo *info,
     const ParseNode *call,
@@ -929,6 +952,28 @@ ValueType semantic_infer_primary_type(
     if (node->kind == NODE_FIELD_ACCESS) {
         const ParseNode *base = node->children[0];
         const ParseNode *field = semantic_expect_child(node, 1, NODE_PRIMARY);
+        const ModuleInfo *current_module = scope_module(scope);
+        ImportBinding *module_binding = NULL;
+
+        if (base->kind == NODE_PRIMARY && base->token_type == TOKEN_IDENTIFIER && current_module != NULL) {
+            module_binding = find_import_binding(current_module, base->value, 1);
+            if (module_binding != NULL) {
+                GlobalBinding *global = semantic_find_global(info->globals, module_binding->module_name, field->value);
+
+                if (global == NULL) {
+                    semantic_error_at_node(field, "module '%s' has no exported value '%s'",
+                        module_binding->module_name,
+                        field->value);
+                }
+
+                type = global->type;
+                semantic_record_global_target(info, node, module_binding->module_name, field->value);
+                semantic_record_node_type(info, field, type);
+                semantic_record_node_type(info, node, type);
+                return type;
+            }
+        }
+
         ValueType base_type = semantic_infer_primary_type(info, base, scope);
 
         if (!semantic_type_is_class(base_type)) {
@@ -1023,7 +1068,17 @@ ValueType semantic_infer_primary_type(
         case TOKEN_IDENTIFIER: {
             VariableBinding *var = semantic_find_variable(scope, node->value);
             if (var == NULL) {
-                semantic_error_at_node(node, "unknown variable '%s'", node->value);
+                GlobalBinding *global = resolve_visible_global(info, scope, node->value);
+
+                if (global == NULL) {
+                    semantic_error_at_node(node, "unknown variable '%s'", node->value);
+                }
+                type = global->type;
+                semantic_record_global_target(info, node, global->module_name, global->name);
+                break;
+            }
+            if (var->module_name != NULL) {
+                semantic_record_global_target(info, node, var->module_name, var->name);
             }
             type = var->type;
             break;

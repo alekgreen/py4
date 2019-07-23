@@ -47,6 +47,7 @@ static void validate_class_definitions(SemanticInfo *info, const ParseNode *root
 static void collect_methods(SemanticInfo *info, const ParseNode *root);
 static void collect_functions(SemanticInfo *info, const ParseNode *root);
 static void collect_module_bindings(SemanticInfo *info, const LoadedProgram *program);
+static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *program);
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope);
 
@@ -151,6 +152,27 @@ static void add_import_binding(ModuleInfo *module, ImportBinding *binding)
 
     binding->next = module->imports;
     module->imports = binding;
+}
+
+static void add_global_binding(SemanticInfo *info, const char *module_name, const char *name, ValueType type)
+{
+    GlobalBinding *binding;
+
+    if (semantic_find_global(info->globals, module_name, name) != NULL) {
+        semantic_error("duplicate global binding '%s' in module '%s'", name, module_name);
+    }
+
+    binding = malloc(sizeof(GlobalBinding));
+    if (binding == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    binding->module_name = dup_string(module_name);
+    binding->name = dup_string(name);
+    binding->type = type;
+    binding->next = info->globals;
+    info->globals = binding;
 }
 
 static void append_text(char *buffer, size_t size, size_t *length, const char *text)
@@ -655,6 +677,9 @@ static int typecheck_simple_statement(
             target->value);
     }
 
+    if (var->module_name != NULL) {
+        semantic_record_global_target(info, target, var->module_name, var->name);
+    }
     semantic_record_node_type(info, target, var->type);
     return 0;
 }
@@ -1081,6 +1106,38 @@ static void collect_module_bindings(SemanticInfo *info, const LoadedProgram *pro
     }
 }
 
+static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *program)
+{
+    for (size_t module_index = 0; module_index < program->module_count; module_index++) {
+        const LoadedModule *module = &program->modules[module_index];
+
+        for (size_t i = 0; i < module->root->child_count; i++) {
+            const ParseNode *statement = module->root->children[i];
+            const ParseNode *payload = semantic_statement_payload(statement);
+            const ParseNode *target;
+            const ParseNode *statement_tail;
+            ValueType target_type;
+
+            if (payload->kind != NODE_SIMPLE_STATEMENT || payload->child_count != 2) {
+                continue;
+            }
+
+            target = semantic_simple_statement_target(payload);
+            if (target->kind != NODE_PRIMARY) {
+                continue;
+            }
+
+            statement_tail = semantic_simple_statement_tail(payload);
+            if (!semantic_is_type_assignment(statement_tail)) {
+                continue;
+            }
+
+            target_type = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
+            add_global_binding(info, module->name, target->value, target_type);
+        }
+    }
+}
+
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope)
 {
     const ParseNode *parameters = semantic_function_parameters(function_def);
@@ -1199,6 +1256,7 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
     collect_module_bindings(info, program);
     collect_classes(root);
     validate_class_definitions(info, root);
+    collect_global_bindings(info, program);
     collect_methods(info, root);
     collect_functions(info, root);
 
@@ -1282,6 +1340,26 @@ void free_semantic_info(SemanticInfo *info)
             free((char *) modules->path);
             free(modules);
             modules = next_module;
+        }
+    }
+
+    {
+        GlobalBinding *globals = info->globals;
+        while (globals != NULL) {
+            GlobalBinding *next = globals->next;
+            free((char *) globals->module_name);
+            free((char *) globals->name);
+            free(globals);
+            globals = next;
+        }
+    }
+
+    {
+        GlobalTargetInfo *targets = info->global_targets;
+        while (targets != NULL) {
+            GlobalTargetInfo *next = targets->next;
+            free(targets);
+            targets = next;
         }
     }
 

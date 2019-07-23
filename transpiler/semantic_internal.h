@@ -5,6 +5,7 @@
 
 typedef struct VariableBinding {
     const char *name;
+    const char *module_name;
     ValueType type;
     struct VariableBinding *next;
 } VariableBinding;
@@ -64,6 +65,20 @@ typedef struct ImportBinding {
     struct ImportBinding *next;
 } ImportBinding;
 
+typedef struct GlobalBinding {
+    const char *module_name;
+    const char *name;
+    ValueType type;
+    struct GlobalBinding *next;
+} GlobalBinding;
+
+typedef struct GlobalTargetInfo {
+    const ParseNode *node;
+    const char *module_name;
+    const char *name;
+    struct GlobalTargetInfo *next;
+} GlobalTargetInfo;
+
 typedef struct ModuleInfo {
     const char *name;
     const char *path;
@@ -79,6 +94,8 @@ struct SemanticInfo {
     CallTargetInfo *call_targets;
     ModuleInfo *modules;
     ModuleInfo *entry_module;
+    GlobalBinding *globals;
+    GlobalTargetInfo *global_targets;
 };
 
 void semantic_error(const char *message, ...);
@@ -121,5 +138,12 @@ const ParseNode *semantic_statement_tail_expression(const ParseNode *statement_t
 const ParseNode *semantic_statement_tail_type_node(const ParseNode *statement_tail);
 int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
 ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name);
+GlobalBinding *semantic_find_global(GlobalBinding *globals, const char *module_name, const char *name);
+void semantic_record_global_target(
+    SemanticInfo *info,
+    const ParseNode *node,
+    const char *module_name,
+    const char *name);
+GlobalTargetInfo *semantic_find_global_target(const SemanticInfo *info, const ParseNode *node);
 
 #endif

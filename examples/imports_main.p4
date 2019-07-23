@@ -1,6 +1,6 @@
-from imports_math import square
-from imports_values import seed
+import imports_math
+import imports_values
 
 def main() -> None:
-    print(square(5))
-    print(seed)
+    print(imports_math.square(5))
+    print(imports_values.seed)
