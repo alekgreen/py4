@@ -145,6 +145,55 @@ static ValueType parse_named_type_atom(const char *name)
     return 0;
 }
 
+static ModuleInfo *module_info_for_type_node(SemanticInfo *info, const ParseNode *node)
+{
+    char module_name[128];
+    const char *path;
+    const char *basename;
+    size_t len;
+
+    if (node == NULL || node->source_path == NULL) {
+        return NULL;
+    }
+
+    path = node->source_path;
+    basename = strrchr(path, '/');
+    basename = basename == NULL ? path : basename + 1;
+    len = strlen(basename);
+    if (len >= 3 && strcmp(basename + len - 3, ".p4") == 0) {
+        len -= 3;
+    }
+    if (len >= sizeof(module_name)) {
+        semantic_error("module name is too long");
+    }
+    memcpy(module_name, basename, len);
+    module_name[len] = '\0';
+    return semantic_find_module_info(info->modules, module_name);
+}
+
+static ImportBinding *find_type_import_binding(const ModuleInfo *module, const char *local_name, int module_import_only)
+{
+    ImportBinding *binding;
+
+    if (module == NULL) {
+        return NULL;
+    }
+
+    for (binding = module->imports; binding != NULL; binding = binding->next) {
+        if (strcmp(binding->local_name, local_name) != 0) {
+            continue;
+        }
+        if (module_import_only && !binding->is_module_import) {
+            continue;
+        }
+        if (!module_import_only && binding->is_module_import) {
+            continue;
+        }
+        return binding;
+    }
+    return NULL;
+}
+
 static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 {
     ValueType elements[MAX_TUPLE_ELEMENTS];
@@ -155,14 +204,77 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
     }
 
     if (node->child_count == 0) {
+        const ModuleInfo *current_module = module_info_for_type_node(info, node);
+        const char *dot = strchr(node->value, '.');
+
         named_type = parse_named_type_atom(node->value);
         if (named_type != 0) {
             return named_type;
         }
 
-        named_type = semantic_find_class_type(node->value);
-        if (named_type != 0) {
-            return named_type;
+        if (dot != NULL) {
+            char module_local_name[128];
+            char class_name[128];
+            size_t module_len = (size_t)(dot - node->value);
+            size_t class_len = strlen(dot + 1);
+            ImportBinding *binding;
+
+            if (module_len == 0 || class_len == 0 ||
+                module_len >= sizeof(module_local_name) ||
+                class_len >= sizeof(class_name)) {
+                semantic_error_at_node(node, "unsupported type '%s'", node->value);
+            }
+
+            memcpy(module_local_name, node->value, module_len);
+            module_local_name[module_len] = '\0';
+            memcpy(class_name, dot + 1, class_len + 1);
+
+            binding = find_type_import_binding(current_module, module_local_name, 1);
+            if (binding == NULL) {
+                semantic_error_at_node(node, "unknown module '%s' in type annotation", module_local_name);
+            }
+
+            {
+                ModuleInfo *target_module = semantic_find_module_info(info->modules, binding->module_name);
+
+                if (target_module != NULL) {
+                    for (size_t i = 0; i < target_module->root->child_count; i++) {
+                        const ParseNode *payload = semantic_statement_payload(target_module->root->children[i]);
+
+                        if (payload->kind == NODE_CLASS_DEF &&
+                            strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, class_name) == 0) {
+                            named_type = semantic_find_class_type(class_name);
+                            if (named_type != 0) {
+                                return named_type;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            named_type = semantic_find_class_type(node->value);
+            if (named_type != 0 && current_module != NULL) {
+                for (size_t i = 0; i < current_module->root->child_count; i++) {
+                    const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
+
+                    if (payload->kind == NODE_CLASS_DEF &&
+                        strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, node->value) == 0) {
+                        return named_type;
+                    }
+                }
+
+                {
+                    ImportBinding *binding = find_type_import_binding(current_module, node->value, 0);
+
+                    if (binding != NULL && binding->symbol_name != NULL &&
+                        strcmp(binding->symbol_name, node->value) == 0) {
+                        return named_type;
+                    }
+                }
+            }
+            if (named_type != 0 && current_module == NULL) {
+                return named_type;
+            }
         }
 
         semantic_error_at_node(node, "unsupported type '%s'", node->value);
@@ -864,6 +976,44 @@ const char *semantic_call_c_name(const SemanticInfo *info, const ParseNode *call
 int semantic_has_call_target(const SemanticInfo *info, const ParseNode *call)
 {
     return semantic_resolved_call_target(info, call) != NULL;
+}
+
+void semantic_record_constructor_target(SemanticInfo *info, const ParseNode *call, ValueType class_type)
+{
+    ConstructorTargetInfo *target;
+
+    for (target = info->constructor_targets; target != NULL; target = target->next) {
+        if (target->call == call) {
+            target->class_type = class_type;
+            return;
+        }
+    }
+
+    target = malloc(sizeof(ConstructorTargetInfo));
+    if (target == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    target->call = call;
+    target->class_type = class_type;
+    target->next = info->constructor_targets;
+    info->constructor_targets = target;
+}
+
+ValueType semantic_resolved_constructor_target(const SemanticInfo *info, const ParseNode *call)
+{
+    for (ConstructorTargetInfo *target = info->constructor_targets; target != NULL; target = target->next) {
+        if (target->call == call) {
+            return target->class_type;
+        }
+    }
+    return 0;
+}
+
+ValueType semantic_call_constructor_type(const SemanticInfo *info, const ParseNode *call)
+{
+    return semantic_resolved_constructor_target(info, call);
 }
 
 size_t semantic_call_arity(const SemanticInfo *info, const ParseNode *call)

@@ -34,6 +34,12 @@ typedef struct CallTargetInfo {
     struct CallTargetInfo *next;
 } CallTargetInfo;
 
+typedef struct ConstructorTargetInfo {
+    const ParseNode *call;
+    ValueType class_type;
+    struct ConstructorTargetInfo *next;
+} ConstructorTargetInfo;
+
 typedef struct MethodInfo {
     ValueType owner_type;
     const char *name;
@@ -92,6 +98,7 @@ struct SemanticInfo {
     MethodInfo *methods;
     NodeTypeInfo *node_types;
     CallTargetInfo *call_targets;
+    ConstructorTargetInfo *constructor_targets;
     ModuleInfo *modules;
     ModuleInfo *entry_module;
     GlobalBinding *globals;
@@ -116,6 +123,8 @@ FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);
 FunctionInfo *semantic_find_function_by_node(FunctionInfo *functions, const ParseNode *node);
 void semantic_record_call_target(SemanticInfo *info, const ParseNode *call, FunctionInfo *function);
 FunctionInfo *semantic_resolved_call_target(const SemanticInfo *info, const ParseNode *call);
+void semantic_record_constructor_target(SemanticInfo *info, const ParseNode *call, ValueType class_type);
+ValueType semantic_resolved_constructor_target(const SemanticInfo *info, const ParseNode *call);
 MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name);
 VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);

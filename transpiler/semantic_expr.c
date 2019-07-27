@@ -69,6 +69,7 @@ static ValueType infer_class_constructor_type(
                 semantic_class_name(class_type),
                 field_count);
         }
+        semantic_record_constructor_target(info, call, class_type);
         semantic_record_node_type(info, call, class_type);
         return class_type;
     }
@@ -97,6 +98,7 @@ static ValueType infer_class_constructor_type(
         }
     }
 
+    semantic_record_constructor_target(info, call, class_type);
     semantic_record_node_type(info, call, class_type);
     return class_type;
 }
@@ -323,6 +325,74 @@ static GlobalBinding *resolve_visible_global(SemanticInfo *info, Scope *scope, c
     return semantic_find_global(info->globals, import_binding->module_name, import_binding->symbol_name);
 }
 
+static ValueType resolve_visible_class_type(SemanticInfo *info, Scope *scope, const char *name)
+{
+    const ModuleInfo *current_module = scope_module(scope);
+    ImportBinding *import_binding;
+    ValueType class_type;
+
+    (void) info;
+
+    class_type = semantic_find_class_type(name);
+    if (class_type == 0 || current_module == NULL) {
+        return class_type;
+    }
+
+    for (size_t i = 0; i < current_module->root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
+
+        if (payload->kind == NODE_CLASS_DEF &&
+            strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, name) == 0) {
+            return class_type;
+        }
+    }
+
+    import_binding = find_import_binding(current_module, name, 0);
+    if (import_binding != NULL && import_binding->symbol_name != NULL &&
+        strcmp(import_binding->symbol_name, name) == 0) {
+        return class_type;
+    }
+
+    return 0;
+}
+
+static ValueType resolve_module_class_type(
+    SemanticInfo *info,
+    const ModuleInfo *current_module,
+    const char *module_local_name,
+    const char *class_name)
+{
+    ImportBinding *module_binding;
+    ModuleInfo *target_module;
+    ValueType class_type;
+
+    if (current_module == NULL) {
+        return 0;
+    }
+
+    module_binding = find_import_binding(current_module, module_local_name, 1);
+    if (module_binding == NULL) {
+        return 0;
+    }
+
+    target_module = semantic_find_module_info(info->modules, module_binding->module_name);
+    if (target_module == NULL) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < target_module->root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(target_module->root->children[i]);
+
+        if (payload->kind == NODE_CLASS_DEF &&
+            strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, class_name) == 0) {
+            class_type = semantic_find_class_type(class_name);
+            return class_type;
+        }
+    }
+
+    return 0;
+}
+
 static ValueType resolve_function_call_type(
     SemanticInfo *info,
     const ParseNode *call,
@@ -510,6 +580,16 @@ static ValueType infer_method_call_type(
         ImportBinding *module_binding = find_import_binding(current_module, receiver->value, 1);
 
         if (var == NULL && module_binding != NULL) {
+            ValueType module_class_type = resolve_module_class_type(
+                info,
+                current_module,
+                receiver->value,
+                method->value);
+
+            if (module_class_type != 0) {
+                return infer_class_constructor_type(info, module_class_type, call, arguments, scope);
+            }
+
             char *qualified_name = malloc(strlen(receiver->value) + strlen(method->value) + 2);
 
             if (qualified_name == NULL) {
@@ -828,7 +908,7 @@ static ValueType infer_call_type(
         return infer_builtin_call_type(info, callee->value, call, arguments, scope);
     }
 
-    class_type = semantic_find_class_type(callee->value);
+    class_type = resolve_visible_class_type(info, scope, callee->value);
     if (class_type != 0) {
         return infer_class_constructor_type(info, class_type, call, arguments, scope);
     }

@@ -153,6 +153,29 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
         parse_error(type_tok, "expected type name");
     }
 
+    if (type_tok.type == TOKEN_IDENTIFIER && peek_ts(ts).type == TOKEN_DOT) {
+        Token member_tok;
+        size_t len;
+        char *qualified_name;
+
+        expect(ts, TOKEN_DOT);
+        member_tok = expect(ts, TOKEN_IDENTIFIER);
+        len = strlen(type_tok.value) + strlen(member_tok.value) + 2;
+        qualified_name = malloc(len);
+        if (qualified_name == NULL) {
+            perror("malloc");
+            exit(1);
+        }
+        snprintf(qualified_name, len, "%s.%s", type_tok.value, member_tok.value);
+        node = create_node(NODE_PRIMARY, TOKEN_IDENTIFIER, qualified_name);
+        node->line = type_tok.line;
+        node->column = type_tok.column;
+        node->source_path = parse_dup_string(type_tok.path);
+        node->source_line = parse_dup_string(type_tok.line_text);
+        free(qualified_name);
+        return node;
+    }
+
     return create_node_from_token(NODE_PRIMARY, type_tok);
 }
 

@@ -1322,6 +1322,15 @@ void free_semantic_info(SemanticInfo *info)
     }
 
     {
+        ConstructorTargetInfo *constructor_targets = info->constructor_targets;
+        while (constructor_targets != NULL) {
+            ConstructorTargetInfo *next = constructor_targets->next;
+            free(constructor_targets);
+            constructor_targets = next;
+        }
+    }
+
+    {
         ModuleInfo *modules = info->modules;
         while (modules != NULL) {
             ModuleInfo *next_module = modules->next;

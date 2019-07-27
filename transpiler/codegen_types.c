@@ -620,7 +620,7 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
         } else if (is_codegen_builtin_name(callee->value)) {
             /* Builtins lower directly to runtime helpers and do not need union conversions. */
         } else {
-            class_type = semantic_find_class_type(callee->value);
+            class_type = semantic_call_constructor_type(ctx->semantic, node);
             if (class_type != 0) {
                 return;
             }
@@ -663,6 +663,10 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
                     codegen_add_union_conversion(ctx, expr_type, target_type);
                 }
             }
+            return;
+        }
+
+        if (semantic_call_constructor_type(ctx->semantic, node) != 0) {
             return;
         }
 
