@@ -13,6 +13,7 @@ typedef struct VariableBinding {
 typedef struct Scope {
     VariableBinding *vars;
     const struct ModuleInfo *module;
+    ValueType current_class_type;
     struct Scope *parent;
 } Scope;
 

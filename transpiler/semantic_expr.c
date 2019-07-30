@@ -41,6 +41,11 @@ static int is_direct_tuple_literal_expression(const ParseNode *expr)
         expr->children[0]->kind == NODE_TUPLE_LITERAL;
 }
 
+static int is_private_member_name(const char *name)
+{
+    return name != NULL && strncmp(name, "__", 2) == 0;
+}
+
 static int tuple_element_type_supported(ValueType type)
 {
     return type == TYPE_INT ||
@@ -277,6 +282,17 @@ static const ModuleInfo *scope_module(Scope *scope)
         scope = scope->parent;
     }
     return NULL;
+}
+
+static ValueType scope_class_type(Scope *scope)
+{
+    while (scope != NULL) {
+        if (scope->current_class_type != 0) {
+            return scope->current_class_type;
+        }
+        scope = scope->parent;
+    }
+    return 0;
 }
 
 static ImportBinding *find_import_binding(const ModuleInfo *module, const char *local_name, int module_import_only)
@@ -620,6 +636,11 @@ static ValueType infer_method_call_type(
             semantic_error_at_node(method, "class '%s' has no method '%s'",
                 semantic_class_name(receiver_type),
                 method->value);
+        }
+        if (is_private_member_name(method->value) && scope_class_type(scope) != receiver_type) {
+            semantic_error_at_node(method, "method '%s' is private to class '%s'",
+                method->value,
+                semantic_class_name(receiver_type));
         }
 
         if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
@@ -1063,6 +1084,11 @@ ValueType semantic_infer_primary_type(
 
         for (size_t i = 0; i < semantic_class_field_count(base_type); i++) {
             if (strcmp(semantic_class_field_name(base_type, i), field->value) == 0) {
+                if (is_private_member_name(field->value) && scope_class_type(scope) != base_type) {
+                    semantic_error_at_node(field, "field '%s' is private to class '%s'",
+                        field->value,
+                        semantic_class_name(base_type));
+                }
                 type = semantic_class_field_type(base_type, i);
                 semantic_record_node_type(info, field, type);
                 semantic_record_node_type(info, node, type);

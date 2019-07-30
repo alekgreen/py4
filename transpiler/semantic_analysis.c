@@ -446,6 +446,7 @@ static int typecheck_branch_suite(
 
     branch_scope.parent = parent_scope;
     branch_scope.module = parent_scope->module;
+    branch_scope.current_class_type = parent_scope->current_class_type;
     if (!(suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0]))) {
         for (size_t i = 0; i < suite->child_count; i++) {
             if (!returns) {
@@ -859,6 +860,7 @@ static int typecheck_for_statement(
 
     loop_scope.parent = scope;
     loop_scope.module = scope->module;
+    loop_scope.current_class_type = scope->current_class_type;
     semantic_bind_variable(&loop_scope, target->value, target_type);
     semantic_record_node_type(info, target, target_type);
     current_function->loop_depth++;
@@ -1147,6 +1149,7 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
 
     local_scope.parent = global_scope;
     local_scope.module = global_scope->module;
+    local_scope.current_class_type = global_scope->current_class_type;
     current.name = semantic_expect_child(function_def, 0, NODE_PRIMARY)->value;
     current.return_type = semantic_function_return_type(info, function_def);
     current.loop_depth = 0;
@@ -1172,12 +1175,15 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
 
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope)
 {
+    Scope class_scope = *global_scope;
+    class_scope.current_class_type = semantic_find_class_type(semantic_expect_child(class_def, 0, NODE_PRIMARY)->value);
+
     for (size_t i = 2; i < class_def->child_count; i++) {
         if (class_def->children[i]->kind == NODE_NATIVE_FUNCTION_DEF) {
             semantic_error_at_node(class_def->children[i]->children[0], "native methods are not supported");
         }
         if (class_def->children[i]->kind == NODE_FUNCTION_DEF) {
-            typecheck_function(info, class_def->children[i], global_scope);
+            typecheck_function(info, class_def->children[i], &class_scope);
         }
     }
 }
