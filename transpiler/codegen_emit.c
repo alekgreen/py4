@@ -36,8 +36,13 @@ static void codegen_module_name_from_path(const char *path, char *buffer, size_t
 static const char *codegen_global_name_for_node(CodegenContext *ctx, const ParseNode *node)
 {
     char module_name[MAX_NAME_LEN];
+    const char *semantic_module_name = semantic_module_name_for_path(ctx->semantic, node->source_path);
 
-    codegen_module_name_from_path(node->source_path, module_name, sizeof(module_name));
+    if (semantic_module_name != NULL) {
+        snprintf(module_name, sizeof(module_name), "%s", semantic_module_name);
+    } else {
+        codegen_module_name_from_path(node->source_path, module_name, sizeof(module_name));
+    }
     return semantic_global_c_name(ctx->semantic, module_name, node->value);
 }
 

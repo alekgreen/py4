@@ -154,19 +154,26 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
     }
 
     if (type_tok.type == TOKEN_IDENTIFIER && peek_ts(ts).type == TOKEN_DOT) {
-        Token member_tok;
-        size_t len;
-        char *qualified_name;
+        char *qualified_name = parse_dup_string(type_tok.value);
 
-        expect(ts, TOKEN_DOT);
-        member_tok = expect(ts, TOKEN_IDENTIFIER);
-        len = strlen(type_tok.value) + strlen(member_tok.value) + 2;
-        qualified_name = malloc(len);
-        if (qualified_name == NULL) {
-            perror("malloc");
-            exit(1);
+        while (peek_ts(ts).type == TOKEN_DOT) {
+            Token member_tok;
+            char *joined;
+            size_t len;
+
+            expect(ts, TOKEN_DOT);
+            member_tok = expect(ts, TOKEN_IDENTIFIER);
+            len = strlen(qualified_name) + strlen(member_tok.value) + 2;
+            joined = malloc(len);
+            if (joined == NULL) {
+                perror("malloc");
+                exit(1);
+            }
+            snprintf(joined, len, "%s.%s", qualified_name, member_tok.value);
+            free(qualified_name);
+            qualified_name = joined;
         }
-        snprintf(qualified_name, len, "%s.%s", type_tok.value, member_tok.value);
+
         node = create_node(NODE_PRIMARY, TOKEN_IDENTIFIER, qualified_name);
         node->line = type_tok.line;
         node->column = type_tok.column;

@@ -56,6 +56,18 @@ static char *dup_printf(const char *fmt, ...)
     return buffer;
 }
 
+static char *dots_to_slashes(const char *name)
+{
+    char *copy = dup_string(name);
+
+    for (char *p = copy; *p != '\0'; p++) {
+        if (*p == '.') {
+            *p = '/';
+        }
+    }
+    return copy;
+}
+
 static int file_exists(const char *path)
 {
     FILE *fp = fopen(path, "r");
@@ -123,34 +135,78 @@ static char *dirname_of(const char *path)
 
 static char *module_name_from_path(const char *path)
 {
-    const char *basename = strrchr(path, '/');
+    char *copy = dup_string(path);
+    char *trimmed = copy;
     size_t len;
 
-    basename = basename == NULL ? path : basename + 1;
-    len = strlen(basename);
-    if (len >= 3 && strcmp(basename + len - 3, ".p4") == 0) {
-        len -= 3;
+    if (strncmp(trimmed, "./", 2) == 0) {
+        trimmed += 2;
     }
-    return dup_printf("%.*s", (int) len, basename);
+    if (strncmp(trimmed, "stdlib/", 7) == 0) {
+        trimmed += 7;
+    }
+
+    len = strlen(trimmed);
+    if (len >= 3 && strcmp(trimmed + len - 3, ".p4") == 0) {
+        trimmed[len - 3] = '\0';
+    }
+    len = strlen(trimmed);
+    if (len >= 9 && strcmp(trimmed + len - 9, "/__init__") == 0) {
+        trimmed[len - 9] = '\0';
+    }
+
+    for (char *p = trimmed; *p != '\0'; p++) {
+        if (*p == '/') {
+            *p = '.';
+        }
+    }
+
+    {
+        char *result = dup_string(trimmed);
+        free(copy);
+        return result;
+    }
 }
 
 static char *resolve_import_path(const char *current_path, const char *module_name)
 {
     char *dir = dirname_of(current_path);
-    char *resolved = dup_printf("%s/%s.p4", dir, module_name);
-    char *stdlib_path = dup_printf("stdlib/%s.p4", module_name);
+    char *rel = dots_to_slashes(module_name);
+    char *resolved = dup_printf("%s/%s.p4", dir, rel);
+    char *resolved_pkg = dup_printf("%s/%s/__init__.p4", dir, rel);
+    char *stdlib_path = dup_printf("stdlib/%s.p4", rel);
+    char *stdlib_pkg = dup_printf("stdlib/%s/__init__.p4", rel);
 
     free(dir);
+    free(rel);
     if (file_exists(resolved)) {
+        free(resolved_pkg);
         free(stdlib_path);
+        free(stdlib_pkg);
         return resolved;
+    }
+    if (file_exists(resolved_pkg)) {
+        free(resolved);
+        free(stdlib_path);
+        free(stdlib_pkg);
+        return resolved_pkg;
     }
     if (file_exists(stdlib_path)) {
         free(resolved);
+        free(resolved_pkg);
+        free(stdlib_pkg);
         return stdlib_path;
     }
+    if (file_exists(stdlib_pkg)) {
+        free(resolved);
+        free(resolved_pkg);
+        free(stdlib_path);
+        return stdlib_pkg;
+    }
 
+    free(resolved_pkg);
     free(stdlib_path);
+    free(stdlib_pkg);
     return resolved;
 }
 
@@ -162,6 +218,16 @@ static int has_visited(const LoadContext *ctx, const char *path)
         }
     }
     return 0;
+}
+
+static LoadedModule *find_loaded_module(LoadContext *ctx, const char *path)
+{
+    for (size_t i = 0; i < ctx->program->module_count; i++) {
+        if (strcmp(ctx->program->modules[i].path, path) == 0) {
+            return &ctx->program->modules[i];
+        }
+    }
+    return NULL;
 }
 
 static void mark_visited(LoadContext *ctx, const char *path)
@@ -186,7 +252,7 @@ static void mark_visited(LoadContext *ctx, const char *path)
     ctx->visited_paths[ctx->visited_count++] = dup_string(path);
 }
 
-static void add_loaded_module(LoadContext *ctx, const char *path, ParseNode *root)
+static void add_loaded_module(LoadContext *ctx, const char *path, const char *module_name, ParseNode *root)
 {
     LoadedProgram *program = ctx->program;
 
@@ -202,7 +268,11 @@ static void add_loaded_module(LoadContext *ctx, const char *path, ParseNode *roo
         program->module_capacity = next_capacity;
     }
 
-    program->modules[program->module_count].name = module_name_from_path(path);
+    if (module_name != NULL) {
+        program->modules[program->module_count].name = dup_string(module_name);
+    } else {
+        program->modules[program->module_count].name = module_name_from_path(path);
+    }
     program->modules[program->module_count].path = dup_string(path);
     program->modules[program->module_count].root = root;
     program->module_count++;
@@ -232,7 +302,7 @@ static ParseNode *parse_file(const char *path, int show_tokens)
     return root;
 }
 
-static void load_file(LoadContext *ctx, const char *path, int show_tokens);
+static void load_file(LoadContext *ctx, const char *path, const char *module_name, int show_tokens);
 
 static ParseNode *clone_tree(const ParseNode *node)
 {
@@ -364,10 +434,44 @@ static ParseNode *make_alias_wrapper(const ParseNode *statement, const char *ori
     return statement_node;
 }
 
-static void import_module_symbol(LoadContext *ctx, const char *path, const char *symbol_name, const char *alias_name)
+static void import_module_symbol(
+    LoadContext *ctx,
+    const char *path,
+    const char *module_name,
+    const char *symbol_name,
+    const char *alias_name)
 {
-    ParseNode *root = parse_file(path, 0);
+    ParseNode *root;
     int found = 0;
+
+    if (!has_visited(ctx, path)) {
+        mark_visited(ctx, path);
+        root = parse_file(path, 0);
+        if (root->kind != NODE_S) {
+            fprintf(stderr, "Import error: malformed module root for '%s'\n", path);
+            exit(1);
+        }
+        add_loaded_module(ctx, path, module_name, root);
+
+        for (size_t i = 0; i < root->child_count; i++) {
+            ParseNode *child = root->children[i];
+
+            if (child == NULL || child->kind == NODE_EPSILON) {
+                continue;
+            }
+            if (is_import_statement(child)) {
+                load_import_from_node(ctx, path, child->children[0]);
+            }
+        }
+    } else {
+        LoadedModule *loaded = find_loaded_module(ctx, path);
+
+        if (loaded == NULL) {
+            fprintf(stderr, "Import error: module tracking failed for '%s'\n", path);
+            exit(1);
+        }
+        root = loaded->root;
+    }
 
     if (root->kind != NODE_S) {
         fprintf(stderr, "Import error: malformed module root for '%s'\n", path);
@@ -382,15 +486,11 @@ static void import_module_symbol(LoadContext *ctx, const char *path, const char 
         }
 
         if (is_import_statement(child)) {
-            load_import_from_node(ctx, path, child->children[0]);
-            free_tree(child);
-            root->children[i] = NULL;
             continue;
         }
 
         if (is_exported_top_level(child, symbol_name)) {
             ParseNode *selected = child;
-            root->children[i] = NULL;
             found = 1;
             add_child(ctx->program->emission_root, clone_tree(selected));
             if (alias_name != NULL && strcmp(alias_name, symbol_name) != 0) {
@@ -406,35 +506,36 @@ static void import_module_symbol(LoadContext *ctx, const char *path, const char 
     }
 
     if (!found) {
-        free_tree(root);
         fprintf(stderr, "Import error: module '%s' has no export '%s'\n", path, symbol_name);
         exit(1);
     }
-    free_tree(root);
 }
 
 static void load_import_from_node(LoadContext *ctx, const char *current_path, const ParseNode *import_stmt)
 {
     const ParseNode *module_name = import_stmt->children[0];
-    const ParseNode *imported_name = import_stmt->child_count > 1 ? import_stmt->children[1] : NULL;
-    const ParseNode *alias_name = import_stmt->child_count > 2 ? import_stmt->children[2] : NULL;
+    const ParseNode *imported_name = NULL;
+    const ParseNode *alias_name = NULL;
     char *import_path = resolve_import_path(current_path, module_name->value);
 
-    if (imported_name != NULL) {
+    if (strcmp(import_stmt->value, "from") == 0) {
+        imported_name = import_stmt->child_count > 1 ? import_stmt->children[1] : NULL;
+        alias_name = import_stmt->child_count > 2 ? import_stmt->children[2] : NULL;
         import_module_symbol(
             ctx,
             import_path,
+            module_name->value,
             imported_name->value,
             alias_name != NULL ? alias_name->value : NULL);
         free(import_path);
         return;
     }
 
-    load_file(ctx, import_path, 0);
+    load_file(ctx, import_path, module_name->value, 0);
     free(import_path);
 }
 
-static void load_file(LoadContext *ctx, const char *path, int show_tokens)
+static void load_file(LoadContext *ctx, const char *path, const char *module_name, int show_tokens)
 {
     ParseNode *root;
 
@@ -449,7 +550,7 @@ static void load_file(LoadContext *ctx, const char *path, int show_tokens)
         exit(1);
     }
 
-    add_loaded_module(ctx, path, root);
+    add_loaded_module(ctx, path, module_name, root);
 
     for (size_t i = 0; i < root->child_count; i++) {
         ParseNode *child = root->children[i];
@@ -481,7 +582,7 @@ LoadedProgram *load_program_from_entry(const char *input_path, int show_tokens)
     }
     program->emission_root = create_node(NODE_S, TOKEN_NULL, NULL);
     ctx.program = program;
-    load_file(&ctx, input_path, show_tokens);
+    load_file(&ctx, input_path, NULL, show_tokens);
 
     if (program->module_count == 0) {
         fprintf(stderr, "Import error: no modules were loaded\n");

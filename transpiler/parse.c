@@ -361,11 +361,38 @@ static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
 {
     Token first_tok = expect(ts, TOKEN_KEYWORD);
     ParseNode *node = create_node_from_token(NODE_IMPORT_STATEMENT, first_tok);
-    Token module_name;
+    Token first_name;
+    ParseNode *module_node;
+
+    first_name = expect(ts, TOKEN_IDENTIFIER);
+    module_node = create_node_from_token(NODE_PRIMARY, first_name);
+    while (peek_ts(ts).type == TOKEN_DOT) {
+        Token next_name;
+        char *joined;
+        size_t len;
+
+        expect(ts, TOKEN_DOT);
+        next_name = expect(ts, TOKEN_IDENTIFIER);
+        len = strlen(module_node->value) + strlen(next_name.value) + 2;
+        joined = malloc(len);
+        if (joined == NULL) {
+            perror("malloc");
+            exit(1);
+        }
+        snprintf(joined, len, "%s.%s", module_node->value, next_name.value);
+        free(module_node->value);
+        module_node->value = joined;
+    }
 
     if (strcmp(first_tok.value, "import") == 0) {
-        module_name = expect(ts, TOKEN_IDENTIFIER);
-        add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
+        add_child(node, module_node);
+        if (parse_is_keyword_token(peek_ts(ts), "as")) {
+            Token alias_name;
+
+            get_from_ts(ts);
+            alias_name = expect(ts, TOKEN_IDENTIFIER);
+            add_child(node, create_node_from_token(NODE_PRIMARY, alias_name));
+        }
         return node;
     }
 
@@ -373,8 +400,7 @@ static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
         Token imported_name;
         Token alias_name;
 
-        module_name = expect(ts, TOKEN_IDENTIFIER);
-        add_child(node, create_node_from_token(NODE_PRIMARY, module_name));
+        add_child(node, module_node);
         parse_expect_keyword(ts, "import");
         imported_name = expect(ts, TOKEN_IDENTIFIER);
         add_child(node, create_node_from_token(NODE_PRIMARY, imported_name));
@@ -386,6 +412,7 @@ static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
         return node;
     }
 
+    free_tree(module_node);
     parse_error(first_tok, "unexpected keyword");
     return NULL;
 }

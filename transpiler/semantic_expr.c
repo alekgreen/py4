@@ -41,9 +41,58 @@ static int is_direct_tuple_literal_expression(const ParseNode *expr)
         expr->children[0]->kind == NODE_TUPLE_LITERAL;
 }
 
+static char *semantic_dup_string(const char *value)
+{
+    size_t len = strlen(value) + 1;
+    char *copy = malloc(len);
+
+    if (copy == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    memcpy(copy, value, len);
+    return copy;
+}
+
 static int is_private_member_name(const char *name)
 {
     return name != NULL && strncmp(name, "__", 2) == 0;
+}
+
+static char *module_ref_string(const ParseNode *node)
+{
+    if (node == NULL) {
+        return NULL;
+    }
+
+    if (node->kind == NODE_PRIMARY && node->token_type == TOKEN_IDENTIFIER && node->value != NULL) {
+        return semantic_dup_string(node->value);
+    }
+
+    if (node->kind == NODE_FIELD_ACCESS) {
+        char *base = module_ref_string(node->children[0]);
+        const ParseNode *field = semantic_expect_child(node, 1, NODE_PRIMARY);
+        char *joined;
+        size_t len;
+
+        if (base == NULL || field->value == NULL) {
+            free(base);
+            return NULL;
+        }
+
+        len = strlen(base) + strlen(field->value) + 2;
+        joined = malloc(len);
+        if (joined == NULL) {
+            perror("malloc");
+            exit(1);
+        }
+        snprintf(joined, len, "%s.%s", base, field->value);
+        free(base);
+        return joined;
+    }
+
+    return NULL;
 }
 
 static int tuple_element_type_supported(ValueType type)
@@ -318,6 +367,20 @@ static ImportBinding *find_import_binding(const ModuleInfo *module, const char *
     return NULL;
 }
 
+static ImportBinding *find_module_binding_for_receiver(const ModuleInfo *module, const ParseNode *receiver)
+{
+    char *name = module_ref_string(receiver);
+    ImportBinding *binding;
+
+    if (name == NULL) {
+        return NULL;
+    }
+
+    binding = find_import_binding(module, name, 1);
+    free(name);
+    return binding;
+}
+
 static GlobalBinding *resolve_visible_global(SemanticInfo *info, Scope *scope, const char *name)
 {
     const ModuleInfo *current_module = scope_module(scope);
@@ -590,29 +653,33 @@ static ValueType infer_method_call_type(
     }
 
     receiver = call->children[0];
-    if (receiver->kind == NODE_PRIMARY && receiver->token_type == TOKEN_IDENTIFIER) {
-        VariableBinding *var = semantic_find_variable(scope, receiver->value);
+    {
+        char *receiver_module_name = module_ref_string(receiver);
+        VariableBinding *var = (receiver->kind == NODE_PRIMARY && receiver->token_type == TOKEN_IDENTIFIER)
+            ? semantic_find_variable(scope, receiver->value)
+            : NULL;
         const ModuleInfo *current_module = scope_module(scope);
-        ImportBinding *module_binding = find_import_binding(current_module, receiver->value, 1);
+        ImportBinding *module_binding = find_module_binding_for_receiver(current_module, receiver);
 
         if (var == NULL && module_binding != NULL) {
             ValueType module_class_type = resolve_module_class_type(
                 info,
                 current_module,
-                receiver->value,
+                receiver_module_name,
                 method->value);
 
             if (module_class_type != 0) {
+                free(receiver_module_name);
                 return infer_class_constructor_type(info, module_class_type, call, arguments, scope);
             }
 
-            char *qualified_name = malloc(strlen(receiver->value) + strlen(method->value) + 2);
+            char *qualified_name = malloc(strlen(receiver_module_name) + strlen(method->value) + 2);
 
             if (qualified_name == NULL) {
                 perror("malloc");
                 exit(1);
             }
-            sprintf(qualified_name, "%s.%s", receiver->value, method->value);
+            sprintf(qualified_name, "%s.%s", receiver_module_name, method->value);
             {
                 ValueType resolved = resolve_function_call_type(
                     info,
@@ -622,10 +689,12 @@ static ValueType infer_method_call_type(
                     module_binding->module_name,
                     arguments,
                     scope);
+                free(receiver_module_name);
                 free(qualified_name);
                 return resolved;
             }
         }
+        free(receiver_module_name);
     }
 
     receiver_type = semantic_infer_primary_type(info, receiver, scope);
@@ -1056,8 +1125,8 @@ ValueType semantic_infer_primary_type(
         const ModuleInfo *current_module = scope_module(scope);
         ImportBinding *module_binding = NULL;
 
-        if (base->kind == NODE_PRIMARY && base->token_type == TOKEN_IDENTIFIER && current_module != NULL) {
-            module_binding = find_import_binding(current_module, base->value, 1);
+        if (current_module != NULL) {
+            module_binding = find_module_binding_for_receiver(current_module, base);
             if (module_binding != NULL) {
                 GlobalBinding *global = semantic_find_global(info->globals, module_binding->module_name, field->value);
 

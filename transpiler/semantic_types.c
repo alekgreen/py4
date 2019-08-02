@@ -147,28 +147,16 @@ static ValueType parse_named_type_atom(const char *name)
 
 static ModuleInfo *module_info_for_type_node(SemanticInfo *info, const ParseNode *node)
 {
-    char module_name[128];
-    const char *path;
-    const char *basename;
-    size_t len;
-
     if (node == NULL || node->source_path == NULL) {
         return NULL;
     }
 
-    path = node->source_path;
-    basename = strrchr(path, '/');
-    basename = basename == NULL ? path : basename + 1;
-    len = strlen(basename);
-    if (len >= 3 && strcmp(basename + len - 3, ".p4") == 0) {
-        len -= 3;
+    for (ModuleInfo *module = info->modules; module != NULL; module = module->next) {
+        if (strcmp(module->path, node->source_path) == 0) {
+            return module;
+        }
     }
-    if (len >= sizeof(module_name)) {
-        semantic_error("module name is too long");
-    }
-    memcpy(module_name, basename, len);
-    module_name[len] = '\0';
-    return semantic_find_module_info(info->modules, module_name);
+    return NULL;
 }
 
 static ImportBinding *find_type_import_binding(const ModuleInfo *module, const char *local_name, int module_import_only)
@@ -1049,6 +1037,16 @@ ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name)
     return NULL;
 }
 
+const char *semantic_module_name_for_path(const SemanticInfo *info, const char *path)
+{
+    for (ModuleInfo *module = info->modules; module != NULL; module = module->next) {
+        if (strcmp(module->path, path) == 0) {
+            return module->name;
+        }
+    }
+    return NULL;
+}
+
 GlobalBinding *semantic_find_global(GlobalBinding *globals, const char *module_name, const char *name)
 {
     for (GlobalBinding *global = globals; global != NULL; global = global->next) {
@@ -1099,13 +1097,21 @@ GlobalTargetInfo *semantic_find_global_target(const SemanticInfo *info, const Pa
 const char *semantic_global_c_name(const SemanticInfo *info, const char *module_name, const char *name)
 {
     static char buffer[256];
+    char module_buffer[128];
     GlobalBinding *global = semantic_find_global(info->globals, module_name, name);
 
     if (global == NULL) {
         semantic_error("unknown global '%s' in module '%s'", name, module_name);
     }
 
-    snprintf(buffer, sizeof(buffer), "py4_global_%s_%s", module_name, name);
+    snprintf(module_buffer, sizeof(module_buffer), "%s", module_name);
+    for (size_t i = 0; module_buffer[i] != '\0'; i++) {
+        if (module_buffer[i] == '.') {
+            module_buffer[i] = '_';
+        }
+    }
+
+    snprintf(buffer, sizeof(buffer), "py4_global_%s_%s", module_buffer, name);
     return buffer;
 }
 

@@ -94,11 +94,12 @@ static char *module_name_from_path(const char *path)
 
 static ModuleInfo *module_info_for_path(SemanticInfo *info, const char *path)
 {
-    char *module_name = module_name_from_path(path);
-    ModuleInfo *module = semantic_find_module_info(info->modules, module_name);
-
-    free(module_name);
-    return module;
+    for (ModuleInfo *module = info->modules; module != NULL; module = module->next) {
+        if (strcmp(module->path, path) == 0) {
+            return module;
+        }
+    }
+    return NULL;
 }
 
 static ImportBinding *create_import_binding(
@@ -190,6 +191,17 @@ static void append_text(char *buffer, size_t size, size_t *length, const char *t
         semantic_error("generated function name is too long");
     }
     *length += (size_t) written;
+}
+
+static void append_identifier_text(char *buffer, size_t size, size_t *length, const char *text)
+{
+    for (size_t i = 0; text[i] != '\0'; i++) {
+        char piece[2];
+
+        piece[0] = text[i] == '.' ? '_' : text[i];
+        piece[1] = '\0';
+        append_text(buffer, size, length, piece);
+    }
 }
 
 static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueType type)
@@ -300,15 +312,15 @@ static char *build_function_c_name(
             }
             memcpy(module_name, basename, module_len);
             module_name[module_len] = '\0';
-            append_text(buffer, sizeof(buffer), &length, module_name);
+            append_identifier_text(buffer, sizeof(buffer), &length, module_name);
         }
         append_text(buffer, sizeof(buffer), &length, "_");
-        append_text(buffer, sizeof(buffer), &length, name);
+        append_identifier_text(buffer, sizeof(buffer), &length, name);
     } else {
         append_text(buffer, sizeof(buffer), &length, "py4_fn_");
-        append_text(buffer, sizeof(buffer), &length, module_name);
+        append_identifier_text(buffer, sizeof(buffer), &length, module_name);
         append_text(buffer, sizeof(buffer), &length, "_");
-        append_text(buffer, sizeof(buffer), &length, name);
+        append_identifier_text(buffer, sizeof(buffer), &length, name);
     }
 
     append_text(buffer, sizeof(buffer), &length, "__");
@@ -999,7 +1011,10 @@ static void collect_functions(SemanticInfo *info, const ParseNode *root)
         }
 
         name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
-        module_name = module_name_from_path(payload->source_path);
+        {
+            ModuleInfo *module = module_info_for_path(info, payload->source_path);
+            module_name = module != NULL ? dup_string(module->name) : module_name_from_path(payload->source_path);
+        }
         if (semantic_find_class_type(name) != 0) {
             semantic_error_at_node(payload->children[0], "function name '%s' conflicts with class", name);
         }
@@ -1090,13 +1105,17 @@ static void collect_module_bindings(SemanticInfo *info, const LoadedProgram *pro
             }
 
             module_name = payload->children[0];
-            imported_name = payload->child_count > 1 ? payload->children[1] : NULL;
-            alias_name = payload->child_count > 2 ? payload->children[2] : NULL;
-
-            if (imported_name == NULL) {
+            if (strcmp(payload->value, "import") == 0) {
+                alias_name = payload->child_count > 1 ? payload->children[1] : NULL;
                 add_import_binding(module,
-                    create_import_binding(module_name->value, module_name->value, NULL, 1));
+                    create_import_binding(
+                        alias_name != NULL ? alias_name->value : module_name->value,
+                        module_name->value,
+                        NULL,
+                        1));
             } else {
+                imported_name = payload->child_count > 1 ? payload->children[1] : NULL;
+                alias_name = payload->child_count > 2 ? payload->children[2] : NULL;
                 add_import_binding(module,
                     create_import_binding(
                         alias_name != NULL ? alias_name->value : imported_name->value,
