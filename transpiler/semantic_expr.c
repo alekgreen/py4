@@ -60,6 +60,11 @@ static int is_private_member_name(const char *name)
     return name != NULL && strncmp(name, "__", 2) == 0;
 }
 
+static int is_module_private_name(const char *name)
+{
+    return name != NULL && name[0] == '_' && (name[1] == '\0' || name[1] != '_');
+}
+
 static char *module_ref_string(const ParseNode *node)
 {
     if (node == NULL) {
@@ -400,6 +405,11 @@ static GlobalBinding *resolve_visible_global(SemanticInfo *info, Scope *scope, c
     if (import_binding == NULL) {
         return NULL;
     }
+    if (is_module_private_name(import_binding->symbol_name)) {
+        semantic_error_at_node(scope->module->root, "name '%s' is private to module '%s'",
+            import_binding->symbol_name,
+            import_binding->module_name);
+    }
 
     return semantic_find_global(info->globals, import_binding->module_name, import_binding->symbol_name);
 }
@@ -429,6 +439,11 @@ static ValueType resolve_visible_class_type(SemanticInfo *info, Scope *scope, co
     import_binding = find_import_binding(current_module, name, 0);
     if (import_binding != NULL && import_binding->symbol_name != NULL &&
         strcmp(import_binding->symbol_name, name) == 0) {
+        if (is_module_private_name(import_binding->symbol_name)) {
+            semantic_error_at_node(scope->module->root, "name '%s' is private to module '%s'",
+                import_binding->symbol_name,
+                import_binding->module_name);
+        }
         return class_type;
     }
 
@@ -457,6 +472,11 @@ static ValueType resolve_module_class_type(
     target_module = semantic_find_module_info(info->modules, module_binding->module_name);
     if (target_module == NULL) {
         return 0;
+    }
+    if (is_module_private_name(class_name)) {
+        semantic_error_at_node(current_module->root, "name '%s' is private to module '%s'",
+            class_name,
+            target_module->name);
     }
 
     for (size_t i = 0; i < target_module->root->child_count; i++) {
@@ -495,6 +515,18 @@ static ValueType resolve_function_call_type(
     ImportBinding *import_binding = module_name == NULL && current_module != NULL
         ? find_import_binding(current_module, function_name, 0)
         : NULL;
+
+    if (module_name != NULL && is_module_private_name(function_name)) {
+        semantic_error_at_node(call, "name '%s' is private to module '%s'",
+            function_name,
+            module_name);
+    }
+    if (module_name == NULL && import_binding != NULL &&
+        is_module_private_name(import_binding->symbol_name)) {
+        semantic_error_at_node(call, "name '%s' is private to module '%s'",
+            import_binding->symbol_name,
+            import_binding->module_name);
+    }
 
     if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
         actual_count = 0;
@@ -1128,6 +1160,11 @@ ValueType semantic_infer_primary_type(
         if (current_module != NULL) {
             module_binding = find_module_binding_for_receiver(current_module, base);
             if (module_binding != NULL) {
+                if (is_module_private_name(field->value)) {
+                    semantic_error_at_node(field, "name '%s' is private to module '%s'",
+                        field->value,
+                        module_binding->module_name);
+                }
                 GlobalBinding *global = semantic_find_global(info->globals, module_binding->module_name, field->value);
 
                 if (global == NULL) {

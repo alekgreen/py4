@@ -182,6 +182,11 @@ static ImportBinding *find_type_import_binding(const ModuleInfo *module, const c
     return NULL;
 }
 
+static int is_module_private_name(const char *name)
+{
+    return name != NULL && name[0] == '_' && (name[1] == '\0' || name[1] != '_');
+}
+
 static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 {
     ValueType elements[MAX_TUPLE_ELEMENTS];
@@ -221,6 +226,11 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
             if (binding == NULL) {
                 semantic_error_at_node(node, "unknown module '%s' in type annotation", module_local_name);
             }
+            if (is_module_private_name(class_name)) {
+                semantic_error_at_node(node, "name '%s' is private to module '%s'",
+                    class_name,
+                    binding->module_name);
+            }
 
             {
                 ModuleInfo *target_module = semantic_find_module_info(info->modules, binding->module_name);
@@ -256,6 +266,11 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 
                     if (binding != NULL && binding->symbol_name != NULL &&
                         strcmp(binding->symbol_name, node->value) == 0) {
+                        if (is_module_private_name(binding->symbol_name)) {
+                            semantic_error_at_node(node, "name '%s' is private to module '%s'",
+                                binding->symbol_name,
+                                binding->module_name);
+                        }
                         return named_type;
                     }
                 }
