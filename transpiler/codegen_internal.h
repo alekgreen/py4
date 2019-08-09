@@ -32,6 +32,7 @@ typedef struct {
     int has_user_main;
     int has_top_level_executable_statements;
     int current_function_is_main;
+    int current_function_is_init;
     ValueType current_function_return_type;
     ValueType union_types[MAX_UNION_TYPES];
     size_t union_type_count;
@@ -78,6 +79,7 @@ void codegen_build_tuple_release_name(char *buffer, size_t size, ValueType type)
 void codegen_build_class_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_retain_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_release_name(char *buffer, size_t size, ValueType type);
+void codegen_build_class_ctor_name(char *buffer, size_t size, ValueType type);
 void codegen_build_list_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_dict_print_name(char *buffer, size_t size, ValueType type);
 const char *codegen_ref_runtime_prefix(ValueType type);

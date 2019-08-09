@@ -967,6 +967,11 @@ static void collect_methods(SemanticInfo *info, const ParseNode *root)
                     name,
                     semantic_class_name(owner_type));
             }
+            if (strcmp(name, "__init__") == 0 &&
+                semantic_function_return_type(info, member) != TYPE_NONE) {
+                semantic_error_at_node(member->children[0], "__init__ on class '%s' must return None",
+                    semantic_class_name(owner_type));
+            }
 
             method = malloc(sizeof(MethodInfo));
             if (method == NULL) {

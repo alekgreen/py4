@@ -89,6 +89,11 @@ void codegen_build_class_release_name(char *buffer, size_t size, ValueType type)
     snprintf(buffer, size, "py4_release_%s", semantic_class_name(type));
 }
 
+void codegen_build_class_ctor_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "%s__ctor", semantic_class_name(type));
+}
+
 void codegen_build_list_print_name(char *buffer, size_t size, ValueType type)
 {
     snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));

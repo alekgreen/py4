@@ -678,6 +678,11 @@ ValueType semantic_find_class_type(const char *name)
     return 0;
 }
 
+int semantic_class_has_initializer(const SemanticInfo *info, ValueType type)
+{
+    return semantic_find_method(info->methods, type, "__init__") != NULL;
+}
+
 ValueType semantic_register_class(const ParseNode *class_def)
 {
     const ParseNode *name_node;

@@ -73,6 +73,16 @@ static int is_dict_method_name(const char *name)
         strcmp(name, "copy") == 0;
 }
 
+static int is_init_self_identifier(CodegenContext *ctx, const ParseNode *primary)
+{
+    return ctx->current_function_is_init &&
+        primary != NULL &&
+        primary->kind == NODE_PRIMARY &&
+        primary->token_type == TOKEN_IDENTIFIER &&
+        primary->value != NULL &&
+        strcmp(primary->value, "self") == 0;
+}
+
 char *codegen_next_temp_name(CodegenContext *ctx)
 {
     return codegen_dup_printf("py4_tmp_%d", ctx->temp_counter++);
@@ -297,6 +307,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     const char *function_c_name = NULL;
     ValueType return_type = semantic_type_of(ctx->semantic, call);
     ValueType class_type = semantic_call_constructor_type(ctx->semantic, call);
+    int class_uses_init = class_type != 0 && semantic_class_has_initializer(ctx->semantic, class_type);
     char *arg_parts[32];
     int arg_owned[32] = {0};
     ValueType cleanup_types[32];
@@ -358,6 +369,8 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             }
         } else if (function_c_name != NULL) {
             target_type = semantic_call_parameter_type(ctx->semantic, call, i);
+        } else if (class_uses_init) {
+            target_type = semantic_method_parameter_type(ctx->semantic, class_type, "__init__", i);
         } else if (class_type != 0) {
             target_type = semantic_class_field_type(class_type, i);
         }
@@ -423,6 +436,11 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         }
     } else if (strcmp(callee->value, "list_set") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "set", args);
+    } else if (class_uses_init) {
+        char ctor_name[MAX_NAME_LEN];
+
+        codegen_build_class_ctor_name(ctor_name, sizeof(ctor_name), class_type);
+        result = codegen_dup_printf("%s(%s)", ctor_name, args);
     } else if (class_type != 0) {
         if (semantic_type_needs_management(class_type)) {
             char *temp_name = codegen_next_temp_name(ctx);
@@ -595,6 +613,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
     {
         ValueType class_type = semantic_call_constructor_type(ctx->semantic, call);
+        int class_uses_init = class_type != 0 && semantic_class_has_initializer(ctx->semantic, class_type);
 
         if (class_type != 0) {
             size_t arg_count = (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))
@@ -610,7 +629,9 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             for (size_t i = 0; i < arg_count; i++) {
                 const ParseNode *arg_node = arguments->children[i];
                 ValueType arg_type = semantic_type_of(ctx->semantic, arg_node);
-                ValueType target_type = semantic_class_field_type(class_type, i);
+                ValueType target_type = class_uses_init
+                    ? semantic_method_parameter_type(ctx->semantic, class_type, "__init__", i)
+                    : semantic_class_field_type(class_type, i);
 
                 if (semantic_type_is_ref(target_type) && semantic_type_is_ref(arg_type)) {
                     int arg_needs_cleanup = 0;
@@ -635,6 +656,22 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                     free(args);
                     args = joined;
                 }
+            }
+
+            if (class_uses_init) {
+                char ctor_name[MAX_NAME_LEN];
+
+                codegen_build_class_ctor_name(ctor_name, sizeof(ctor_name), class_type);
+                result = codegen_dup_printf("%s(%s)", ctor_name, args);
+                free(args);
+                for (size_t i = 0; i < arg_count; i++) {
+                    free(arg_parts[i]);
+                }
+                for (size_t i = cleanup_count; i > 0; i--) {
+                    codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                    free(cleanup_names[i - 1]);
+                }
+                return result;
             }
 
             if (semantic_type_needs_management(class_type)) {
@@ -874,6 +911,10 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 
     if (global_name != NULL) {
         return codegen_dup_printf("%s", global_name);
+    }
+
+    if (is_init_self_identifier(ctx, primary)) {
+        return codegen_dup_printf("(*self)");
     }
 
     if (primary->kind == NODE_CALL) {

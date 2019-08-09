@@ -913,7 +913,64 @@ static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters
             fputs(", ", ctx->out);
         }
         codegen_emit_type_name(ctx, semantic_type_of(ctx->semantic, type_node));
+        if (ctx->current_function_is_init && i == 0) {
+            fprintf(ctx->out, " *%s", param->value);
+        } else {
+            fprintf(ctx->out, " %s", param->value);
+        }
+    }
+}
+
+static const ParseNode *find_class_init_definition(const ParseNode *class_def)
+{
+    for (size_t i = 2; i < class_def->child_count; i++) {
+        const ParseNode *member = class_def->children[i];
+
+        if (member->kind == NODE_FUNCTION_DEF &&
+            strcmp(codegen_expect_child(member, 0, NODE_PRIMARY)->value, "__init__") == 0) {
+            return member;
+        }
+    }
+
+    return NULL;
+}
+
+static void emit_constructor_parameter_list(CodegenContext *ctx, const ParseNode *init_def)
+{
+    const ParseNode *parameters = codegen_function_parameters(init_def);
+
+    if (parameters->child_count <= 1) {
+        fputs("void", ctx->out);
+        return;
+    }
+
+    for (size_t i = 1; i < parameters->child_count; i++) {
+        const ParseNode *param = parameters->children[i];
+        const ParseNode *type_node = codegen_expect_child(param, 0, NODE_TYPE);
+
+        if (i > 1) {
+            fputs(", ", ctx->out);
+        }
+        codegen_emit_type_name(ctx, semantic_type_of(ctx->semantic, type_node));
         fprintf(ctx->out, " %s", param->value);
+    }
+}
+
+static void emit_constructor_helper_signature(
+    CodegenContext *ctx,
+    ValueType owner_type,
+    const ParseNode *init_def,
+    int prototype_only)
+{
+    char ctor_name[MAX_NAME_LEN];
+
+    codegen_build_class_ctor_name(ctor_name, sizeof(ctor_name), owner_type);
+    codegen_emit_type_name(ctx, owner_type);
+    fprintf(ctx->out, " %s(", ctor_name);
+    emit_constructor_parameter_list(ctx, init_def);
+    fputc(')', ctx->out);
+    if (prototype_only) {
+        fputs(";\n", ctx->out);
     }
 }
 
@@ -941,8 +998,11 @@ static void emit_function_signature(CodegenContext *ctx, const ParseNode *functi
     const ParseNode *parameters = codegen_function_parameters(function_def);
     ValueType owner_type = codegen_method_owner_type(ctx, function_def);
     int is_c_main = owner_type == 0 && codegen_is_main_function(function_def);
+    int prev_is_init = ctx->current_function_is_init;
+    int is_init_method = owner_type != 0 && strcmp(name->value, "__init__") == 0;
     ValueType return_type = codegen_function_return_type(ctx, function_def);
 
+    ctx->current_function_is_init = is_init_method;
     if (is_c_main) {
         fputs("int main(", ctx->out);
     } else {
@@ -956,17 +1016,22 @@ static void emit_function_signature(CodegenContext *ctx, const ParseNode *functi
     if (prototype_only) {
         fputs(";\n", ctx->out);
     }
+    ctx->current_function_is_init = prev_is_init;
 }
 
 static void emit_function_definition(CodegenContext *ctx, const ParseNode *function_def)
 {
     ValueType owner_type = codegen_method_owner_type(ctx, function_def);
     int is_c_main = owner_type == 0 && codegen_is_main_function(function_def);
+    int is_init_method = owner_type != 0 &&
+        strcmp(codegen_expect_child(function_def, 0, NODE_PRIMARY)->value, "__init__") == 0;
     ValueType return_type = codegen_function_return_type(ctx, function_def);
     const ParseNode *parameters = codegen_function_parameters(function_def);
     int prev_is_main = ctx->current_function_is_main;
+    int prev_is_init = ctx->current_function_is_init;
     ValueType prev_return_type = ctx->current_function_return_type;
 
+    ctx->current_function_is_init = is_init_method;
     emit_function_signature(ctx, function_def, 0);
     fputs("\n{\n", ctx->out);
     ctx->indent_level++;
@@ -979,6 +1044,9 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
             const ParseNode *param = parameters->children[i];
             ValueType param_type = semantic_type_of(ctx->semantic, codegen_expect_child(param, 0, NODE_TYPE));
 
+            if (is_init_method && i == 0) {
+                continue;
+            }
             if (!semantic_type_needs_management(param_type)) {
                 continue;
             }
@@ -1002,7 +1070,38 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     }
 
     ctx->current_function_is_main = prev_is_main;
+    ctx->current_function_is_init = prev_is_init;
     ctx->current_function_return_type = prev_return_type;
+    ctx->indent_level--;
+    fputs("}\n", ctx->out);
+}
+
+static void emit_constructor_helper_definition(
+    CodegenContext *ctx,
+    ValueType owner_type,
+    const ParseNode *init_def)
+{
+    char ctor_name[MAX_NAME_LEN];
+    const ParseNode *parameters = codegen_function_parameters(init_def);
+    const char *init_c_name = semantic_method_c_name(ctx->semantic, owner_type, "__init__");
+
+    codegen_build_class_ctor_name(ctor_name, sizeof(ctor_name), owner_type);
+    emit_constructor_helper_signature(ctx, owner_type, init_def, 0);
+    fputs("\n{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    codegen_emit_type_name(ctx, owner_type);
+    fprintf(ctx->out, " tmp = {0};\n");
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s(&tmp", init_c_name);
+    if (parameters->child_count > 1) {
+        for (size_t i = 1; i < parameters->child_count; i++) {
+            fprintf(ctx->out, ", %s", parameters->children[i]->value);
+        }
+    }
+    fputs(");\n", ctx->out);
+    codegen_emit_indent(ctx);
+    fputs("return tmp;\n", ctx->out);
     ctx->indent_level--;
     fputs("}\n", ctx->out);
 }
@@ -1121,6 +1220,18 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
             for (size_t j = 2; j < payload->child_count; j++) {
                 if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
                     emit_function_signature(ctx, payload->children[j], 1);
+                    wrote_any = 1;
+                }
+            }
+            {
+                const ParseNode *init_def = find_class_init_definition(payload);
+
+                if (init_def != NULL) {
+                    emit_constructor_helper_signature(
+                        ctx,
+                        semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value),
+                        init_def,
+                        1);
                     wrote_any = 1;
                 }
             }
@@ -1257,11 +1368,20 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
+            const ParseNode *init_def = find_class_init_definition(payload);
+
             for (size_t j = 2; j < payload->child_count; j++) {
                 if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
                     emit_function_definition(ctx, payload->children[j]);
                     fputc('\n', ctx->out);
                 }
+            }
+            if (init_def != NULL) {
+                emit_constructor_helper_definition(
+                    ctx,
+                    semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value),
+                    init_def);
+                fputc('\n', ctx->out);
             }
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {

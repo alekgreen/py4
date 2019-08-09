@@ -120,7 +120,44 @@ static ValueType infer_class_constructor_type(
     const ParseNode *arguments,
     Scope *scope)
 {
+    MethodInfo *init_method = semantic_find_method(info->methods, class_type, "__init__");
     size_t field_count = semantic_class_field_count(class_type);
+
+    if (init_method != NULL) {
+        size_t expected = init_method->param_count > 0 ? init_method->param_count - 1 : 0;
+        size_t actual = arguments->child_count;
+
+        if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+            actual = 0;
+        }
+        if (actual != expected) {
+            semantic_error_at_node(call, "constructor '%s' expects %zu arguments",
+                semantic_class_name(class_type),
+                expected);
+        }
+
+        for (size_t i = 0; i < expected; i++) {
+            ValueType param_type = init_method->param_types[i + 1];
+            ValueType actual_type = semantic_infer_expression_type_with_hint(
+                info,
+                arguments->children[i],
+                scope,
+                param_type);
+
+            if (!semantic_is_assignable(param_type, actual_type)) {
+                semantic_error_at_node(arguments->children[i],
+                    "constructor '%s' argument %zu expects %s but got %s",
+                    semantic_class_name(class_type),
+                    i + 1,
+                    semantic_type_name(param_type),
+                    semantic_type_name(actual_type));
+            }
+        }
+
+        semantic_record_constructor_target(info, call, class_type);
+        semantic_record_node_type(info, call, class_type);
+        return class_type;
+    }
 
     if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
         if (field_count != 0) {
@@ -737,6 +774,9 @@ static ValueType infer_method_call_type(
             semantic_error_at_node(method, "class '%s' has no method '%s'",
                 semantic_class_name(receiver_type),
                 method->value);
+        }
+        if (strcmp(method->value, "__init__") == 0) {
+            semantic_error_at_node(method, "'__init__' can only be used through constructor calls");
         }
         if (is_private_member_name(method->value) && scope_class_type(scope) != receiver_type) {
             semantic_error_at_node(method, "method '%s' is private to class '%s'",

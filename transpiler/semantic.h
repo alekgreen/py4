@@ -57,6 +57,7 @@ size_t semantic_class_field_count(ValueType type);
 const char *semantic_class_field_name(ValueType type, size_t index);
 ValueType semantic_class_field_type(ValueType type, size_t index);
 ValueType semantic_find_class_type(const char *name);
+int semantic_class_has_initializer(const SemanticInfo *info, ValueType type);
 ValueType semantic_call_constructor_type(const SemanticInfo *info, const ParseNode *call);
 const char *semantic_module_name_for_path(const SemanticInfo *info, const char *path);
 const char *semantic_function_c_name(const SemanticInfo *info, const ParseNode *function_def);
