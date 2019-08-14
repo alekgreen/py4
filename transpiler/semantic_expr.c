@@ -1085,62 +1085,37 @@ ValueType semantic_infer_primary_type(
     ValueType type;
 
     if (node->kind == NODE_LIST_LITERAL) {
-        int saw_float = 0;
-        int saw_bool = 0;
-        int saw_char = 0;
-        int saw_int = 0;
-        int saw_str = 0;
+        ValueType element_type = 0;
 
         for (size_t i = 0; i < node->child_count; i++) {
             ValueType item_type = semantic_infer_expression_type(info, node->children[i], scope);
 
-            if (item_type == TYPE_FLOAT) {
-                saw_float = 1;
+            if (element_type == 0) {
+                element_type = item_type;
                 continue;
             }
-            if (item_type == TYPE_BOOL) {
-                saw_bool = 1;
+            if (item_type == element_type) {
                 continue;
             }
-            if (item_type == TYPE_CHAR) {
-                saw_char = 1;
+            if (item_type == TYPE_INT && element_type == TYPE_FLOAT) {
                 continue;
             }
-            if (item_type == TYPE_INT) {
-                saw_int = 1;
+            if (item_type == TYPE_FLOAT && element_type == TYPE_INT) {
+                element_type = TYPE_FLOAT;
                 continue;
             }
-            if (item_type == TYPE_STR) {
-                saw_str = 1;
-                continue;
-            }
-            semantic_error_at_node(node->children[i], "list literals currently support only int, float, bool, char, and str elements");
+            semantic_error_at_node(node->children[i],
+                "list literals currently support only homogeneous int, float, bool, char, str, or class elements");
         }
 
-        if ((saw_float && saw_bool) || (saw_bool && saw_int)) {
-            semantic_error_at_node(node, "list literals cannot mix bool elements with numeric elements");
-        }
-        if (saw_char && (saw_int || saw_float || saw_bool || saw_str)) {
-            semantic_error_at_node(node, "list literals cannot mix char elements with non-char elements");
-        }
-        if (saw_str && (saw_int || saw_float || saw_bool || saw_char)) {
-            semantic_error_at_node(node, "list literals cannot mix str elements with non-str elements");
-        }
-        if (saw_bool && node->child_count > 0) {
-            semantic_record_node_type(info, node, TYPE_LIST_BOOL);
-            return TYPE_LIST_BOOL;
-        }
-        if (saw_char && node->child_count > 0) {
-            semantic_record_node_type(info, node, TYPE_LIST_CHAR);
-            return TYPE_LIST_CHAR;
-        }
-        if (saw_str && node->child_count > 0) {
-            semantic_record_node_type(info, node, TYPE_LIST_STR);
-            return TYPE_LIST_STR;
+        if (element_type == 0) {
+            semantic_record_node_type(info, node, TYPE_LIST_INT);
+            return TYPE_LIST_INT;
         }
 
-        semantic_record_node_type(info, node, saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT);
-        return saw_float ? TYPE_LIST_FLOAT : TYPE_LIST_INT;
+        element_type = element_type == TYPE_NONE ? TYPE_INT : element_type;
+        semantic_record_node_type(info, node, semantic_make_list_type(element_type));
+        return semantic_make_list_type(element_type);
     }
 
     if (node->kind == NODE_DICT_LITERAL) {

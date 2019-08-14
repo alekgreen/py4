@@ -1428,6 +1428,7 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     codegen_collect_program_state(&ctx, root);
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
+    codegen_emit_struct_declarations(&ctx);
     codegen_emit_container_runtime(&ctx);
     emit_native_function_runtime(&ctx, root);
     codegen_emit_struct_types(&ctx);

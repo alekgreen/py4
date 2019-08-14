@@ -3,14 +3,94 @@
 
 #include "codegen_internal.h"
 
-static void emit_list_runtime(
-    CodegenContext *ctx,
-    const char *struct_name,
-    const char *prefix,
-    const char *type_name,
-    const char *item_c_type)
+static void emit_runtime_value_retain(CodegenContext *ctx, ValueType type, const char *expr)
 {
-    fprintf(ctx->out, "typedef struct {\n");
+    char helper_name[MAX_NAME_LEN];
+
+    if (!semantic_type_needs_management(type)) {
+        return;
+    }
+    if (semantic_type_is_ref(type)) {
+        fprintf(ctx->out, "    %s_incref(%s);\n", codegen_ref_runtime_prefix(type), expr);
+        return;
+    }
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_retain_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "    %s(&%s);\n", helper_name, expr);
+        return;
+    }
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "    %s(&%s);\n", helper_name, expr);
+        return;
+    }
+    codegen_error("unsupported managed list element type %s", semantic_type_name(type));
+}
+
+static void emit_runtime_value_release(CodegenContext *ctx, ValueType type, const char *expr)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (!semantic_type_needs_management(type)) {
+        return;
+    }
+    if (semantic_type_is_ref(type)) {
+        fprintf(ctx->out, "        %s_decref(%s);\n", codegen_ref_runtime_prefix(type), expr);
+        return;
+    }
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_release_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "        %s(&%s);\n", helper_name, expr);
+        return;
+    }
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_release_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "        %s(&%s);\n", helper_name, expr);
+        return;
+    }
+    codegen_error("unsupported managed list element type %s", semantic_type_name(type));
+}
+
+static void emit_runtime_value_print(CodegenContext *ctx, ValueType type, const char *expr)
+{
+    char helper_name[MAX_NAME_LEN];
+
+    if (semantic_type_is_class(type)) {
+        codegen_build_class_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
+        return;
+    }
+
+    switch (type) {
+        case TYPE_INT:
+            fprintf(ctx->out, "            printf(\"%%d\", %s);\n", expr);
+            return;
+        case TYPE_FLOAT:
+            fprintf(ctx->out, "            printf(\"%%g\", %s);\n", expr);
+            return;
+        case TYPE_BOOL:
+            fprintf(ctx->out, "            printf(\"%%s\", %s ? \"True\" : \"False\");\n", expr);
+            return;
+        case TYPE_CHAR:
+            fprintf(ctx->out, "            printf(\"%%c\", %s);\n", expr);
+            return;
+        case TYPE_STR:
+            fprintf(ctx->out, "            printf(\"%%s\", %s);\n", expr);
+            return;
+        default:
+            codegen_error("unsupported list print type %s", semantic_type_name(type));
+    }
+}
+
+static void emit_list_runtime(CodegenContext *ctx, ValueType list_type)
+{
+    const char *struct_name = codegen_list_struct_name(list_type);
+    const char *prefix = codegen_list_runtime_prefix(list_type);
+    const char *type_name = semantic_type_name(list_type);
+    const char *item_c_type = codegen_list_element_c_type(list_type);
+    ValueType element_type = semantic_list_element_type(list_type);
+
+    fprintf(ctx->out, "typedef struct %s {\n", struct_name);
     fprintf(ctx->out, "    int refcount;\n");
     fprintf(ctx->out, "    size_t len;\n");
     fprintf(ctx->out, "    size_t cap;\n");
@@ -50,6 +130,11 @@ static void emit_list_runtime(
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    list->refcount--;\n");
     fprintf(ctx->out, "    if (list->refcount == 0) {\n");
+    if (semantic_type_needs_management(element_type)) {
+        fprintf(ctx->out, "        for (size_t i = 0; i < list->len; i++) {\n");
+        emit_runtime_value_release(ctx, element_type, "list->items[i]");
+        fprintf(ctx->out, "        }\n");
+    }
     fprintf(ctx->out, "        free(list->items);\n");
     fprintf(ctx->out, "        free(list);\n");
     fprintf(ctx->out, "    }\n");
@@ -81,6 +166,9 @@ static void emit_list_runtime(
     fprintf(ctx->out, "static void %s_append(%s *list, %s value)\n{\n", prefix, struct_name, item_c_type);
     fprintf(ctx->out, "    %s_ensure_capacity(list, list->len + 1);\n", prefix);
     fprintf(ctx->out, "    list->items[list->len++] = value;\n");
+    if (semantic_type_needs_management(element_type)) {
+        emit_runtime_value_retain(ctx, element_type, "list->items[list->len - 1]");
+    }
     fprintf(ctx->out, "}\n\n");
 
     fprintf(ctx->out, "static %s *%s_from_values(size_t count, const %s *values)\n{\n",
@@ -89,6 +177,9 @@ static void emit_list_runtime(
     fprintf(ctx->out, "    %s_ensure_capacity(list, count);\n", prefix);
     fprintf(ctx->out, "    for (size_t i = 0; i < count; i++) {\n");
     fprintf(ctx->out, "        list->items[i] = values[i];\n");
+    if (semantic_type_needs_management(element_type)) {
+        emit_runtime_value_retain(ctx, element_type, "list->items[i]");
+    }
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    list->len = count;\n");
     fprintf(ctx->out, "    return list;\n");
@@ -96,13 +187,38 @@ static void emit_list_runtime(
 
     fprintf(ctx->out, "static %s %s_get(%s *list, int index)\n{\n", item_c_type, prefix, struct_name);
     fprintf(ctx->out, "    %s_bounds_check(list, index);\n", prefix);
+    if (semantic_type_needs_management(element_type)) {
+        fprintf(ctx->out, "    %s value = list->items[index];\n", item_c_type);
+        if (semantic_type_is_ref(element_type)) {
+            fprintf(ctx->out, "    %s_incref(value);\n", codegen_ref_runtime_prefix(element_type));
+        } else if (semantic_type_is_class(element_type)) {
+            char helper_name[MAX_NAME_LEN];
+
+            codegen_build_class_retain_name(helper_name, sizeof(helper_name), element_type);
+            fprintf(ctx->out, "    %s(&value);\n", helper_name);
+        } else {
+            char helper_name[MAX_NAME_LEN];
+
+            codegen_build_tuple_retain_name(helper_name, sizeof(helper_name), element_type);
+            fprintf(ctx->out, "    %s(&value);\n", helper_name);
+        }
+        fprintf(ctx->out, "    return value;\n");
+        fprintf(ctx->out, "}\n\n");
+    } else {
     fprintf(ctx->out, "    return list->items[index];\n");
     fprintf(ctx->out, "}\n\n");
+    }
 
     fprintf(ctx->out, "static void %s_set(%s *list, int index, %s value)\n{\n",
         prefix, struct_name, item_c_type);
     fprintf(ctx->out, "    %s_bounds_check(list, index);\n", prefix);
+    if (semantic_type_needs_management(element_type)) {
+        emit_runtime_value_release(ctx, element_type, "list->items[index]");
+    }
     fprintf(ctx->out, "    list->items[index] = value;\n");
+    if (semantic_type_needs_management(element_type)) {
+        emit_runtime_value_retain(ctx, element_type, "list->items[index]");
+    }
     fprintf(ctx->out, "}\n\n");
 
     fprintf(ctx->out, "static %s %s_pop(%s *list)\n{\n", item_c_type, prefix, struct_name);
@@ -123,6 +239,11 @@ static void emit_list_runtime(
     fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
     fprintf(ctx->out, "        exit(1);\n");
     fprintf(ctx->out, "    }\n");
+    if (semantic_type_needs_management(element_type)) {
+        fprintf(ctx->out, "    for (size_t i = 0; i < list->len; i++) {\n");
+        emit_runtime_value_release(ctx, element_type, "list->items[i]");
+        fprintf(ctx->out, "    }\n");
+    }
     fprintf(ctx->out, "    list->len = 0;\n");
     fprintf(ctx->out, "}\n\n");
 
@@ -141,6 +262,21 @@ static void emit_list_runtime(
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    return (int)list->len;\n");
     fprintf(ctx->out, "}\n\n");
+
+    fprintf(ctx->out, "static void py4_print_%s(%s *value)\n{\n",
+        codegen_type_suffix(list_type),
+        struct_name);
+    fprintf(ctx->out, "    printf(\"[\");\n");
+    fprintf(ctx->out, "    if (value != NULL) {\n");
+    fprintf(ctx->out, "        for (size_t i = 0; i < value->len; i++) {\n");
+    fprintf(ctx->out, "            if (i > 0) {\n");
+    fprintf(ctx->out, "                printf(\", \");\n");
+    fprintf(ctx->out, "            }\n");
+    emit_runtime_value_print(ctx, element_type, "value->items[i]");
+    fprintf(ctx->out, "        }\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    printf(\"]\");\n");
+    fprintf(ctx->out, "}\n\n");
 }
 
 static void emit_dict_runtime(
@@ -149,13 +285,13 @@ static void emit_dict_runtime(
     const char *prefix,
     const char *type_name)
 {
-    fprintf(ctx->out, "typedef struct {\n");
+    fprintf(ctx->out, "struct %s {\n", struct_name);
     fprintf(ctx->out, "    int refcount;\n");
     fprintf(ctx->out, "    size_t len;\n");
     fprintf(ctx->out, "    size_t cap;\n");
     fprintf(ctx->out, "    const char **keys;\n");
     fprintf(ctx->out, "    const char **values;\n");
-    fprintf(ctx->out, "} %s;\n\n", struct_name);
+    fprintf(ctx->out, "};\n\n");
 
     fprintf(ctx->out, "static int %s_find_index(%s *dict, const char *key)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    if (dict == NULL) {\n");
@@ -310,10 +446,8 @@ static void emit_dict_runtime(
 
 void codegen_emit_container_runtime(CodegenContext *ctx)
 {
-    emit_list_runtime(ctx, "Py4ListInt", "py4_list_int", "list[int]", "int");
-    emit_list_runtime(ctx, "Py4ListFloat", "py4_list_float", "list[float]", "double");
-    emit_list_runtime(ctx, "Py4ListBool", "py4_list_bool", "list[bool]", "bool");
-    emit_list_runtime(ctx, "Py4ListChar", "py4_list_char", "list[char]", "char");
-    emit_list_runtime(ctx, "Py4ListStr", "py4_list_str", "list[str]", "const char *");
+    for (size_t i = 0; i < semantic_list_type_count(); i++) {
+        emit_list_runtime(ctx, semantic_list_type_at(i));
+    }
     emit_dict_runtime(ctx, "Py4DictStrStr", "py4_dict_str_str", "dict[str, str]");
 }

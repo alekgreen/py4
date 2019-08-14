@@ -83,6 +83,8 @@ static int is_init_self_identifier(CodegenContext *ctx, const ParseNode *primary
         strcmp(primary->value, "self") == 0;
 }
 
+static int node_is_owned_ref_value(CodegenContext *ctx, const ParseNode *node);
+
 char *codegen_next_temp_name(CodegenContext *ctx)
 {
     return codegen_dup_printf("py4_tmp_%d", ctx->temp_counter++);
@@ -223,11 +225,7 @@ int codegen_expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)
     }
 
     child = expr->children[0];
-    return child->kind == NODE_CALL ||
-        child->kind == NODE_LIST_LITERAL ||
-        child->kind == NODE_DICT_LITERAL ||
-        child->kind == NODE_METHOD_CALL ||
-        child->kind == NODE_TUPLE_LITERAL;
+    return node_is_owned_ref_value(ctx, child);
 }
 
 static int node_is_borrowed_ref_value(const ParseNode *node)
@@ -244,7 +242,7 @@ static int node_is_borrowed_ref_value(const ParseNode *node)
     return 0;
 }
 
-static int node_is_owned_ref_value(const ParseNode *node)
+static int node_is_owned_ref_value(CodegenContext *ctx, const ParseNode *node)
 {
     if (node == NULL) {
         return 0;
@@ -256,8 +254,14 @@ static int node_is_owned_ref_value(const ParseNode *node)
         node->kind == NODE_TUPLE_LITERAL) {
         return 1;
     }
+    if (node->kind == NODE_INDEX) {
+        ValueType base_type = semantic_type_of(ctx->semantic, node->children[0]);
+
+        return semantic_type_is_list(base_type) &&
+            semantic_type_needs_management(semantic_list_element_type(base_type));
+    }
     if (node->kind == NODE_EXPRESSION && node->child_count == 1) {
-        return node_is_owned_ref_value(node->children[0]);
+        return node_is_owned_ref_value(ctx, node->children[0]);
     }
     return 0;
 }
@@ -290,7 +294,7 @@ static char *materialize_ref_node(
     type_name = codegen_type_to_c_string(type);
     codegen_emit_indent(ctx);
     fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, expr_text);
-    if (!node_is_owned_ref_value(node)) {
+    if (!node_is_owned_ref_value(ctx, node)) {
         codegen_emit_ref_incref(ctx, type, temp_name);
     }
 
@@ -380,7 +384,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             char *part = materialize_ref_node(ctx, arg_node, target_type, 0, &needs_cleanup);
 
             arg_parts[i] = part;
-            arg_owned[i] = node_is_owned_ref_value(arg_node);
+            arg_owned[i] = node_is_owned_ref_value(ctx, arg_node);
             if (needs_cleanup && !(class_type != 0 && arg_owned[i])) {
                 cleanup_names[cleanup_count] = codegen_dup_printf("%s", part);
                 cleanup_types[cleanup_count] = target_type;
@@ -390,7 +394,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         }
 
         if (semantic_type_needs_management(target_type) && semantic_type_needs_management(arg_type) &&
-            node_is_owned_ref_value(arg_node) && class_type == 0) {
+            node_is_owned_ref_value(ctx, arg_node) && class_type == 0) {
             char *temp_name = codegen_next_temp_name(ctx);
             char *type_name = codegen_type_to_c_string(target_type);
             char *part = codegen_wrapped_expression_to_c_string(ctx, arg_node, target_type);
@@ -410,7 +414,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         arg_parts[i] = is_list_builtin_name(callee->value)
             ? codegen_expression_to_c_string(ctx, arg_node)
             : codegen_wrapped_expression_to_c_string(ctx, arg_node, target_type);
-        arg_owned[i] = node_is_owned_ref_value(arg_node);
+        arg_owned[i] = node_is_owned_ref_value(ctx, arg_node);
     }
 
     args = codegen_dup_printf("");
@@ -549,7 +553,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
             if (semantic_type_needs_management(target_type) &&
                 semantic_type_needs_management(arg_type) &&
-                node_is_owned_ref_value(arguments->children[i])) {
+                node_is_owned_ref_value(ctx, arguments->children[i])) {
                 char *temp_name = codegen_next_temp_name(ctx);
                 char *type_name = codegen_type_to_c_string(target_type);
                 char *part = codegen_wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
@@ -638,7 +642,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                     char *part = materialize_ref_node(ctx, arg_node, target_type, 0, &arg_needs_cleanup);
 
                     arg_parts[i] = part;
-                    arg_owned[i] = node_is_owned_ref_value(arg_node);
+                    arg_owned[i] = node_is_owned_ref_value(ctx, arg_node);
                     if (arg_needs_cleanup && !arg_owned[i]) {
                         cleanup_names[cleanup_count] = codegen_dup_printf("%s", part);
                         cleanup_types[cleanup_count] = target_type;
@@ -646,7 +650,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                     }
                 } else {
                     arg_parts[i] = codegen_wrapped_expression_to_c_string(ctx, arg_node, target_type);
-                    arg_owned[i] = node_is_owned_ref_value(arg_node);
+                    arg_owned[i] = node_is_owned_ref_value(ctx, arg_node);
                 }
 
                 {
@@ -728,7 +732,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             ? 0
             : arguments->child_count;
         ValueType return_type = semantic_type_of(ctx->semantic, call);
-        int receiver_owned = node_is_owned_ref_value(receiver);
+        int receiver_owned = node_is_owned_ref_value(ctx, receiver);
         ValueType cleanup_types[32];
         char *cleanup_names[32];
         size_t cleanup_count = 0;
@@ -759,7 +763,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
             if (semantic_type_needs_management(target_type) &&
                 semantic_type_needs_management(arg_type) &&
-                node_is_owned_ref_value(arguments->children[i])) {
+                node_is_owned_ref_value(ctx, arguments->children[i])) {
                 char *temp_name = codegen_next_temp_name(ctx);
                 char *type_name = codegen_type_to_c_string(target_type);
                 char *part = codegen_wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
@@ -1033,7 +1037,7 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             for (size_t i = 0; i < element_count; i++) {
                 ValueType element_type = semantic_tuple_element_type(tuple_type, i);
 
-                if (!semantic_type_needs_management(element_type) || node_is_owned_ref_value(primary->children[i])) {
+                if (!semantic_type_needs_management(element_type) || node_is_owned_ref_value(ctx, primary->children[i])) {
                     continue;
                 }
                 {

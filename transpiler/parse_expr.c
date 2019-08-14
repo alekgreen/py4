@@ -114,29 +114,23 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
     Token type_tok = get_from_ts(ts);
 
     if (parse_is_keyword_token(type_tok, "list")) {
-        Token member_tok;
+        ParseNode *member_node;
         char *type_name;
 
         expect(ts, TOKEN_LBRACKET);
-        member_tok = get_from_ts(ts);
-        if (!parse_is_type_token(member_tok)) {
-            parse_error(member_tok, "expected type name inside list[...]");
-        }
-        if (strcmp(member_tok.value, "int") != 0 &&
-            strcmp(member_tok.value, "float") != 0 &&
-            strcmp(member_tok.value, "bool") != 0 &&
-            strcmp(member_tok.value, "char") != 0 &&
-            strcmp(member_tok.value, "str") != 0) {
-            parse_error(member_tok, "only list[int], list[float], list[bool], list[char], and list[str] are supported right now");
+        member_node = parse_TYPE_ATOM(ts);
+        if (member_node == NULL || member_node->value == NULL) {
+            parse_error(type_tok, "expected type name inside list[...]");
         }
         expect(ts, TOKEN_RBRACKET);
 
-        type_name = parse_join_type_name("list", member_tok.value);
+        type_name = parse_join_type_name("list", member_node->value);
         node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
         node->line = type_tok.line;
         node->column = type_tok.column;
         node->source_path = parse_dup_string(type_tok.path);
         node->source_line = parse_dup_string(type_tok.line_text);
+        free_tree(member_node);
         free(type_name);
         return node;
     }

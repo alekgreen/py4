@@ -21,10 +21,18 @@ typedef struct {
     ValueType field_types[MAX_CLASS_FIELDS];
 } ClassTypeInfo;
 
+typedef struct {
+    ValueType id;
+    ValueType element_type;
+    char name[128];
+} ClassListTypeInfo;
+
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
 static size_t TUPLE_TYPE_COUNT = 0;
 static ClassTypeInfo CLASS_TYPES[MAX_CLASS_TYPES];
 static size_t CLASS_TYPE_COUNT = 0;
+static ClassListTypeInfo CLASS_LIST_TYPES[MAX_CLASS_LIST_TYPES];
+static size_t CLASS_LIST_TYPE_COUNT = 0;
 
 static const TupleTypeInfo *find_tuple_type(ValueType type)
 {
@@ -47,6 +55,18 @@ static ClassTypeInfo *find_class_type(ValueType type)
     }
 
     semantic_error("unknown class type id %u", type);
+    return NULL;
+}
+
+static ClassListTypeInfo *find_class_list_type(ValueType type)
+{
+    for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
+        if (CLASS_LIST_TYPES[i].id == type) {
+            return &CLASS_LIST_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown class list type id %u", type);
     return NULL;
 }
 
@@ -81,6 +101,9 @@ static const char *type_member_name(ValueType type)
 {
     if (semantic_type_is_tuple(type)) {
         return find_tuple_type(type)->name;
+    }
+    if (semantic_type_is_list(type) && type >= TYPE_CLASS_LIST_BASE) {
+        return find_class_list_type(type)->name;
     }
     if (semantic_type_is_class(type)) {
         return find_class_type(type)->name;
@@ -199,10 +222,110 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
     if (node->child_count == 0) {
         const ModuleInfo *current_module = module_info_for_type_node(info, node);
         const char *dot = strchr(node->value, '.');
+        size_t value_len = strlen(node->value);
 
         named_type = parse_named_type_atom(node->value);
         if (named_type != 0) {
             return named_type;
+        }
+
+        if (value_len > 6 && strncmp(node->value, "list[", 5) == 0 && node->value[value_len - 1] == ']') {
+            char element_name[128];
+            size_t element_len = value_len - 6;
+            ValueType element_type = 0;
+
+            if (element_len == 0 || element_len >= sizeof(element_name)) {
+                semantic_error_at_node(node, "unsupported type '%s'", node->value);
+            }
+
+            memcpy(element_name, node->value + 5, element_len);
+            element_name[element_len] = '\0';
+
+            element_type = parse_named_type_atom(element_name);
+            if (element_type == 0) {
+                const char *element_dot = strchr(element_name, '.');
+
+                if (element_dot != NULL) {
+                    char module_local_name[128];
+                    char class_name[128];
+                    size_t module_len = (size_t)(element_dot - element_name);
+                    size_t class_len = strlen(element_dot + 1);
+                    ImportBinding *binding;
+
+                    if (module_len == 0 || class_len == 0 ||
+                        module_len >= sizeof(module_local_name) ||
+                        class_len >= sizeof(class_name)) {
+                        semantic_error_at_node(node, "unsupported type '%s'", node->value);
+                    }
+
+                    memcpy(module_local_name, element_name, module_len);
+                    module_local_name[module_len] = '\0';
+                    memcpy(class_name, element_dot + 1, class_len + 1);
+
+                    binding = find_type_import_binding(current_module, module_local_name, 1);
+                    if (binding == NULL) {
+                        semantic_error_at_node(node, "unknown module '%s' in type annotation", module_local_name);
+                    }
+                    if (is_module_private_name(class_name)) {
+                        semantic_error_at_node(node, "name '%s' is private to module '%s'",
+                            class_name,
+                            binding->module_name);
+                    }
+
+                    {
+                        ModuleInfo *target_module = semantic_find_module_info(info->modules, binding->module_name);
+
+                        if (target_module != NULL) {
+                            for (size_t i = 0; i < target_module->root->child_count; i++) {
+                                const ParseNode *payload = semantic_statement_payload(target_module->root->children[i]);
+
+                                if (payload->kind == NODE_CLASS_DEF &&
+                                    strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, class_name) == 0) {
+                                    element_type = semantic_find_class_type(class_name);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    element_type = semantic_find_class_type(element_name);
+                    if (element_type != 0 && current_module != NULL) {
+                        for (size_t i = 0; i < current_module->root->child_count; i++) {
+                            const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
+
+                            if (payload->kind == NODE_CLASS_DEF &&
+                                strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, element_name) == 0) {
+                                return semantic_make_list_type(element_type);
+                            }
+                        }
+
+                        {
+                            ImportBinding *binding = find_type_import_binding(current_module, element_name, 0);
+
+                            if (binding != NULL && binding->symbol_name != NULL &&
+                                strcmp(binding->symbol_name, element_name) == 0) {
+                                if (is_module_private_name(binding->symbol_name)) {
+                                    semantic_error_at_node(node, "name '%s' is private to module '%s'",
+                                        binding->symbol_name,
+                                        binding->module_name);
+                                }
+                                return semantic_make_list_type(element_type);
+                            }
+                        }
+                    }
+                    if (element_type != 0 && current_module == NULL) {
+                        return semantic_make_list_type(element_type);
+                    }
+                }
+            }
+
+            if (element_type == TYPE_INT || element_type == TYPE_FLOAT ||
+                element_type == TYPE_BOOL || element_type == TYPE_CHAR ||
+                element_type == TYPE_STR || semantic_type_is_class(element_type)) {
+                return semantic_make_list_type(element_type);
+            }
+
+            semantic_error_at_node(node, "unsupported type '%s'", node->value);
         }
 
         if (dot != NULL) {
@@ -300,6 +423,7 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 int semantic_type_contains(ValueType type, ValueType member)
 {
     if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member) ||
+        semantic_type_is_list(type) || semantic_type_is_list(member) ||
         semantic_type_is_class(type) || semantic_type_is_class(member)) {
         return type == member;
     }
@@ -308,7 +432,8 @@ int semantic_type_contains(ValueType type, ValueType member)
 
 int semantic_type_is_union(ValueType type)
 {
-    if (semantic_type_is_tuple(type) || semantic_type_is_class(type) || (type & ~TYPE_ATOMIC_MASK) != 0) {
+    if (semantic_type_is_tuple(type) || semantic_type_is_list(type) ||
+        semantic_type_is_class(type) || (type & ~TYPE_ATOMIC_MASK) != 0) {
         return 0;
     }
     return count_type_bits(type) > 1;
@@ -321,17 +446,12 @@ int semantic_type_is_tuple(ValueType type)
 
 int semantic_type_is_class(ValueType type)
 {
-    return type >= TYPE_CLASS_BASE;
+    return type >= TYPE_CLASS_BASE && type < TYPE_CLASS_LIST_BASE;
 }
 
 int semantic_type_is_ref(ValueType type)
 {
-    return !semantic_type_is_tuple(type) && (type == TYPE_LIST_INT ||
-        type == TYPE_LIST_FLOAT ||
-        type == TYPE_LIST_BOOL ||
-        type == TYPE_LIST_CHAR ||
-        type == TYPE_LIST_STR ||
-        type == TYPE_DICT_STR_STR);
+    return !semantic_type_is_tuple(type) && (semantic_type_is_list(type) || type == TYPE_DICT_STR_STR);
 }
 
 int semantic_type_needs_management(ValueType type)
@@ -367,7 +487,9 @@ int semantic_type_is_list(ValueType type)
         type == TYPE_LIST_FLOAT ||
         type == TYPE_LIST_BOOL ||
         type == TYPE_LIST_CHAR ||
-        type == TYPE_LIST_STR;
+        type == TYPE_LIST_STR ||
+        (type >= TYPE_CLASS_LIST_BASE &&
+            type < TYPE_CLASS_LIST_BASE + MAX_CLASS_LIST_TYPES);
 }
 
 int semantic_type_is_dict(ValueType type)
@@ -389,6 +511,9 @@ ValueType semantic_list_element_type(ValueType type)
         case TYPE_LIST_STR:
             return TYPE_STR;
         default:
+            if (type >= TYPE_CLASS_LIST_BASE) {
+                return find_class_list_type(type)->element_type;
+            }
             semantic_error("%s is not a list type", semantic_type_name(type));
             return TYPE_NONE;
     }
@@ -546,11 +671,6 @@ int semantic_is_assignable(ValueType target, ValueType value)
         TYPE_CHAR,
         TYPE_STR,
         TYPE_NONE,
-        TYPE_LIST_INT,
-        TYPE_LIST_FLOAT,
-        TYPE_LIST_BOOL,
-        TYPE_LIST_CHAR,
-        TYPE_LIST_STR,
         TYPE_DICT_STR_STR
     };
 
@@ -559,6 +679,7 @@ int semantic_is_assignable(ValueType target, ValueType value)
     }
 
     if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value) ||
+        semantic_type_is_list(target) || semantic_type_is_list(value) ||
         semantic_type_is_class(target) || semantic_type_is_class(value)) {
         return target == value;
     }
@@ -579,6 +700,47 @@ int semantic_is_assignable(ValueType target, ValueType value)
     }
 
     return 1;
+}
+
+ValueType semantic_make_list_type(ValueType element_type)
+{
+    ClassListTypeInfo *entry;
+
+    switch (element_type) {
+        case TYPE_INT:
+            return TYPE_LIST_INT;
+        case TYPE_FLOAT:
+            return TYPE_LIST_FLOAT;
+        case TYPE_BOOL:
+            return TYPE_LIST_BOOL;
+        case TYPE_CHAR:
+            return TYPE_LIST_CHAR;
+        case TYPE_STR:
+            return TYPE_LIST_STR;
+        default:
+            break;
+    }
+
+    if (!semantic_type_is_class(element_type)) {
+        semantic_error("list elements must currently be int, float, bool, char, str, or class values");
+    }
+
+    for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
+        if (CLASS_LIST_TYPES[i].element_type == element_type) {
+            return CLASS_LIST_TYPES[i].id;
+        }
+    }
+
+    if (CLASS_LIST_TYPE_COUNT >= MAX_CLASS_LIST_TYPES) {
+        semantic_error("too many class list types in one program");
+    }
+
+    entry = &CLASS_LIST_TYPES[CLASS_LIST_TYPE_COUNT];
+    entry->id = TYPE_CLASS_LIST_BASE + (ValueType)CLASS_LIST_TYPE_COUNT;
+    entry->element_type = element_type;
+    snprintf(entry->name, sizeof(entry->name), "list[%s]", semantic_type_name(element_type));
+    CLASS_LIST_TYPE_COUNT++;
+    return entry->id;
 }
 
 ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count)
@@ -666,6 +828,27 @@ ValueType semantic_tuple_type_at(size_t index)
         semantic_error("tuple type index out of bounds");
     }
     return TUPLE_TYPES[index].id;
+}
+
+size_t semantic_list_type_count(void)
+{
+    return 5 + CLASS_LIST_TYPE_COUNT;
+}
+
+ValueType semantic_list_type_at(size_t index)
+{
+    switch (index) {
+        case 0: return TYPE_LIST_INT;
+        case 1: return TYPE_LIST_FLOAT;
+        case 2: return TYPE_LIST_BOOL;
+        case 3: return TYPE_LIST_CHAR;
+        case 4: return TYPE_LIST_STR;
+        default:
+            if (index - 5 >= CLASS_LIST_TYPE_COUNT) {
+                semantic_error("list type index out of bounds");
+            }
+            return CLASS_LIST_TYPES[index - 5].id;
+    }
 }
 
 ValueType semantic_find_class_type(const char *name)
@@ -862,6 +1045,10 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
             (type != 0 || type_node->child_count > 1)) {
             semantic_error_at_node(type_node, "class types cannot be used inside a union yet");
         }
+        if ((semantic_type_is_list(atom) || semantic_type_is_list(type)) &&
+            (type != 0 || type_node->child_count > 1)) {
+            semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
+        }
 
         if (semantic_type_contains(type, atom)) {
             semantic_error_at_node(member, "duplicate type '%s' in union", member->value);
@@ -871,14 +1058,6 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         type |= atom;
     }
 
-    if ((semantic_type_contains(type, TYPE_LIST_INT) ||
-         semantic_type_contains(type, TYPE_LIST_FLOAT) ||
-         semantic_type_contains(type, TYPE_LIST_BOOL) ||
-         semantic_type_contains(type, TYPE_LIST_CHAR) ||
-         semantic_type_contains(type, TYPE_LIST_STR)) &&
-        semantic_type_is_union(type)) {
-        semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
-    }
     if (semantic_type_contains(type, TYPE_DICT_STR_STR) && semantic_type_is_union(type)) {
         semantic_error_at_node(type_node, "dict types cannot be used inside a union yet");
     }
