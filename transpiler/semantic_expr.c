@@ -364,6 +364,107 @@ static int function_matches_module(FunctionInfo *fn, const char *module_name)
     return fn->module_name != NULL && strcmp(fn->module_name, module_name) == 0;
 }
 
+static int function_visible_for_call(
+    FunctionInfo *fn,
+    const ModuleInfo *current_module,
+    ImportBinding *import_binding,
+    const char *module_name)
+{
+    if (module_name != NULL) {
+        return function_matches_module(fn, module_name);
+    }
+    if (current_module == NULL) {
+        return 1;
+    }
+    if (function_matches_module(fn, current_module->name)) {
+        return 1;
+    }
+    return import_binding != NULL &&
+        function_matches_module(fn, import_binding->module_name) &&
+        strcmp(fn->name, import_binding->symbol_name) == 0;
+}
+
+static void format_actual_argument_types(
+    SemanticInfo *info,
+    const ParseNode *arguments,
+    Scope *scope,
+    char *buffer,
+    size_t buffer_size)
+{
+    size_t used = 0;
+
+    buffer[0] = '\0';
+    if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+        return;
+    }
+
+    for (size_t i = 0; i < arguments->child_count; i++) {
+        ValueType actual = semantic_infer_expression_type(info, arguments->children[i], scope);
+
+        if (i != 0) {
+            used += (size_t)snprintf(buffer + used, buffer_size - used, ", ");
+        }
+        used += (size_t)snprintf(buffer + used, buffer_size - used, "%s",
+            semantic_type_name(actual));
+    }
+}
+
+static void append_function_signature(
+    FunctionInfo *fn,
+    const char *display_name,
+    char *buffer,
+    size_t buffer_size,
+    int *first)
+{
+    size_t used = strlen(buffer);
+
+    if (!*first) {
+        used += (size_t)snprintf(buffer + used, buffer_size - used, "; ");
+    }
+
+    used += (size_t)snprintf(buffer + used, buffer_size - used, "%s(", display_name);
+    for (size_t i = 0; i < fn->param_count; i++) {
+        if (i != 0) {
+            used += (size_t)snprintf(buffer + used, buffer_size - used, ", ");
+        }
+        used += (size_t)snprintf(buffer + used, buffer_size - used, "%s",
+            semantic_type_name(fn->param_types[i]));
+    }
+    snprintf(buffer + used, buffer_size - used, ")");
+    *first = 0;
+}
+
+static void format_candidate_signatures(
+    SemanticInfo *info,
+    const char *display_name,
+    const char *function_name,
+    const ModuleInfo *current_module,
+    ImportBinding *import_binding,
+    const char *module_name,
+    size_t arity_filter,
+    int require_arity,
+    char *buffer,
+    size_t buffer_size)
+{
+    int first = 1;
+
+    buffer[0] = '\0';
+    for (FunctionInfo *fn = info->functions; fn != NULL; fn = fn->next) {
+        if (strcmp(fn->name, function_name) != 0) {
+            if (import_binding == NULL || strcmp(fn->name, import_binding->symbol_name) != 0) {
+                continue;
+            }
+        }
+        if (!function_visible_for_call(fn, current_module, import_binding, module_name)) {
+            continue;
+        }
+        if (require_arity && fn->param_count != arity_filter) {
+            continue;
+        }
+        append_function_signature(fn, display_name, buffer, buffer_size, &first);
+    }
+}
+
 static const ModuleInfo *scope_module(Scope *scope)
 {
     while (scope != NULL) {
@@ -543,7 +644,7 @@ static ValueType resolve_function_call_type(
     int best_score = 0;
     int ambiguous = 0;
     char actual_types[256];
-    size_t actual_len = 0;
+    char candidates[512];
     int saw_name = 0;
     int saw_arity = 0;
     size_t arity_match_count = 0;
@@ -578,19 +679,8 @@ static ValueType resolve_function_call_type(
                 continue;
             }
         }
-        if (module_name != NULL && !function_matches_module(fn, module_name)) {
+        if (!function_visible_for_call(fn, current_module, import_binding, module_name)) {
             continue;
-        }
-        if (module_name == NULL && current_module != NULL) {
-            if (function_matches_module(fn, current_module->name)) {
-                /* local function visible */
-            } else if (import_binding != NULL &&
-                function_matches_module(fn, import_binding->module_name) &&
-                strcmp(fn->name, import_binding->symbol_name) == 0) {
-                /* explicitly imported symbol visible */
-            } else {
-                continue;
-            }
         }
 
         saw_name = 1;
@@ -643,8 +733,19 @@ static ValueType resolve_function_call_type(
     }
     if (best == NULL) {
         if (!saw_arity) {
-            semantic_error_at_node(call, "no overload of function '%s' expects %zu arguments",
-                display_name, actual_count);
+            format_candidate_signatures(
+                info,
+                display_name,
+                function_name,
+                current_module,
+                import_binding,
+                module_name,
+                0,
+                0,
+                candidates,
+                sizeof(candidates));
+            semantic_error_at_node(call, "no overload of function '%s' expects %zu arguments; candidates: %s",
+                display_name, actual_count, candidates);
         }
         if (arity_match_count == 1 && sole_arity_match != NULL) {
             for (size_t i = 0; i < actual_count; i++) {
@@ -663,28 +764,36 @@ static ValueType resolve_function_call_type(
                 }
             }
         }
-        for (size_t i = 0; i < actual_count; i++) {
-            ValueType actual = semantic_infer_expression_type(info, arguments->children[i], scope);
-            if (i != 0) {
-                actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len, ", ");
-            }
-            actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len,
-                "%s", semantic_type_name(actual));
-        }
-        semantic_error_at_node(call, "no overload of function '%s' matches argument types (%s)",
-            display_name, actual_count == 0 ? "" : actual_types);
+        format_actual_argument_types(info, arguments, scope, actual_types, sizeof(actual_types));
+        format_candidate_signatures(
+            info,
+            display_name,
+            function_name,
+            current_module,
+            import_binding,
+            module_name,
+            actual_count,
+            1,
+            candidates,
+            sizeof(candidates));
+        semantic_error_at_node(call, "no overload of function '%s' matches argument types (%s); candidates: %s",
+            display_name, actual_count == 0 ? "" : actual_types, candidates);
     }
     if (ambiguous) {
-        for (size_t i = 0; i < actual_count; i++) {
-            ValueType actual = semantic_infer_expression_type(info, arguments->children[i], scope);
-            if (i != 0) {
-                actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len, ", ");
-            }
-            actual_len += (size_t) snprintf(actual_types + actual_len, sizeof(actual_types) - actual_len,
-                "%s", semantic_type_name(actual));
-        }
-        semantic_error_at_node(call, "call to function '%s' is ambiguous for argument types (%s)",
-            display_name, actual_count == 0 ? "" : actual_types);
+        format_actual_argument_types(info, arguments, scope, actual_types, sizeof(actual_types));
+        format_candidate_signatures(
+            info,
+            display_name,
+            function_name,
+            current_module,
+            import_binding,
+            module_name,
+            actual_count,
+            1,
+            candidates,
+            sizeof(candidates));
+        semantic_error_at_node(call, "call to function '%s' is ambiguous for argument types (%s); candidates: %s",
+            display_name, actual_count == 0 ? "" : actual_types, candidates);
     }
 
     for (size_t i = 0; i < actual_count; i++) {
