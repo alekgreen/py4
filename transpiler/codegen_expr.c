@@ -69,6 +69,7 @@ static int is_dict_method_name(const char *name)
     return strcmp(name, "set") == 0 ||
         strcmp(name, "get") == 0 ||
         strcmp(name, "contains") == 0 ||
+        strcmp(name, "pop") == 0 ||
         strcmp(name, "clear") == 0 ||
         strcmp(name, "copy") == 0;
 }
@@ -845,6 +846,11 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
 
             result = codegen_dict_binary_call(receiver_type, "contains", receiver_name, key);
+            free(key);
+        } else if (strcmp(method->value, "pop") == 0) {
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+
+            result = codegen_dict_binary_call(receiver_type, "pop", receiver_name, key);
             free(key);
         } else if (strcmp(method->value, "clear") == 0) {
             result = codegen_dict_unary_call(receiver_type, "clear", receiver_name);

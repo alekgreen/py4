@@ -411,6 +411,27 @@ static void emit_dict_runtime(
     fprintf(ctx->out, "    return %s_find_index(dict, key) >= 0;\n", prefix);
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static const char *%s_pop(%s *dict, const char *key)\n{\n", prefix, struct_name);
+    fprintf(ctx->out, "    int index;\n");
+    fprintf(ctx->out, "    const char *value;\n");
+    fprintf(ctx->out, "    if (dict == NULL) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    index = %s_find_index(dict, key);\n", prefix);
+    fprintf(ctx->out, "    if (index < 0) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: key not found in %s\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    value = dict->values[index];\n");
+    fprintf(ctx->out, "    for (size_t i = (size_t)index + 1; i < dict->len; i++) {\n");
+    fprintf(ctx->out, "        dict->keys[i - 1] = dict->keys[i];\n");
+    fprintf(ctx->out, "        dict->values[i - 1] = dict->values[i];\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    dict->len--;\n");
+    fprintf(ctx->out, "    return value;\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static void %s_clear(%s *dict)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    if (dict == NULL) {\n");
     fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);

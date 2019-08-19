@@ -967,6 +967,18 @@ static ValueType infer_method_call_type(
             return TYPE_BOOL;
         }
 
+        if (strcmp(method->value, "pop") == 0) {
+            ValueType key_type;
+
+            expect_argument_count(method->value, arguments, 1);
+            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
+            if (!semantic_is_assignable(TYPE_STR, key_type)) {
+                semantic_error_at_node(arguments->children[0], "method 'pop' expects str key");
+            }
+            semantic_record_node_type(info, call, TYPE_STR);
+            return TYPE_STR;
+        }
+
         if (strcmp(method->value, "clear") == 0) {
             expect_argument_count(method->value, arguments, 0);
             semantic_record_node_type(info, call, TYPE_NONE);

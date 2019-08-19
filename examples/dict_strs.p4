@@ -5,6 +5,8 @@ def main() -> None:
     print(colors["sky"])
     print(colors.contains("grass"))
     print(len(colors))
+    print(colors.pop("apple"))
+    print(colors)
 
     copy: dict[str, str] = colors.copy()
     copy.set("grass", "green")
