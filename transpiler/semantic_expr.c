@@ -1124,8 +1124,10 @@ static ValueType infer_builtin_call_type(
 
         expect_argument_count(name, arguments, 1);
         container_type = semantic_infer_expression_type(info, arguments->children[0], scope);
-        if (!semantic_type_is_list(container_type) && !semantic_type_is_dict(container_type)) {
-            semantic_error_at_node(arguments->children[0], "function '%s' argument 1 expects list or dict", name);
+        if (!semantic_type_is_list(container_type) &&
+            !semantic_type_is_dict(container_type) &&
+            container_type != TYPE_STR) {
+            semantic_error_at_node(arguments->children[0], "function '%s' argument 1 expects list, dict, or str", name);
         }
         semantic_record_node_type(info, call, TYPE_INT);
         return TYPE_INT;

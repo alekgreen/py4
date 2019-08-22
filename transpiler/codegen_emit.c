@@ -59,10 +59,17 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
     const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
     const ParseNode *parameters = codegen_function_parameters(function_def);
     const char *c_name = codegen_function_c_name(ctx, function_def);
+    const char *module_name = semantic_module_name_for_path(ctx->semantic, function_def->source_path);
     ValueType return_type = codegen_function_return_type(ctx, function_def);
-    ValueType first_param_type = semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[0], 0, NODE_TYPE));
+    ValueType first_param_type = parameters->child_count > 0
+        ? semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[0], 0, NODE_TYPE))
+        : TYPE_NONE;
 
-    if (strcmp(name->value, "abs") == 0 && parameters->child_count == 1 && first_param_type == TYPE_INT) {
+    if (module_name != NULL &&
+        strcmp(module_name, "math") == 0 &&
+        strcmp(name->value, "abs") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_INT) {
         codegen_emit_type_name(ctx, return_type);
         fprintf(ctx->out, " %s(", c_name);
         emit_parameter_list(ctx, parameters, 0);
@@ -78,7 +85,11 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         return;
     }
 
-    if (strcmp(name->value, "abs") == 0 && parameters->child_count == 1 && first_param_type == TYPE_FLOAT) {
+    if (module_name != NULL &&
+        strcmp(module_name, "math") == 0 &&
+        strcmp(name->value, "abs") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_FLOAT) {
         codegen_emit_type_name(ctx, return_type);
         fprintf(ctx->out, " %s(", c_name);
         emit_parameter_list(ctx, parameters, 0);
@@ -89,6 +100,86 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
             parameters->children[0]->value,
             parameters->children[0]->value,
             parameters->children[0]->value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "math") == 0 &&
+        strcmp(name->value, "max") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_INT) {
+        const char *a = parameters->children[0]->value;
+        const char *b = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s > %s ? %s : %s;\n", a, b, a, b);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "math") == 0 &&
+        strcmp(name->value, "max") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_FLOAT) {
+        const char *a = parameters->children[0]->value;
+        const char *b = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s > %s ? %s : %s;\n", a, b, a, b);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "math") == 0 &&
+        strcmp(name->value, "min") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_INT) {
+        const char *a = parameters->children[0]->value;
+        const char *b = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s < %s ? %s : %s;\n", a, b, a, b);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "math") == 0 &&
+        strcmp(name->value, "min") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_FLOAT) {
+        const char *a = parameters->children[0]->value;
+        const char *b = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s < %s ? %s : %s;\n", a, b, a, b);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return;

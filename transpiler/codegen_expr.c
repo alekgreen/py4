@@ -436,6 +436,8 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
 
         if (semantic_type_is_dict(container_type)) {
             result = codegen_dict_unary_call(container_type, "len", args);
+        } else if (container_type == TYPE_STR) {
+            result = codegen_dup_printf("((int)strlen(%s))", args);
         } else {
             result = codegen_list_unary_call(container_type, "len", args);
         }
