@@ -185,6 +185,236 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         return;
     }
 
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "read_text") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_STR) {
+        const char *path = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("FILE *file = fopen(", ctx->out);
+        fputs(path, ctx->out);
+        fputs(", \"rb\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("long size;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("char *buffer;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("size_t read_size;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (file == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fopen\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (fseek(file, 0, SEEK_END) != 0) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fseek\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("size = ftell(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (size < 0) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"ftell\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (fseek(file, 0, SEEK_SET) != 0) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fseek\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer = malloc((size_t)size + 1);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (buffer == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"malloc\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("read_size = fread(buffer, 1, (size_t)size, file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (read_size != (size_t)size) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: failed to read full file\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("free(buffer);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer[size] = '\\0';\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return buffer;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "write_text") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR) {
+        const char *path = parameters->children[0]->value;
+        const char *data = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "FILE *file = fopen(%s, \"w\");\n", path);
+        codegen_emit_indent(ctx);
+        fputs("if (file == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fopen\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (fputs(%s, file) == EOF) {\n", data);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fputs\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "append_text") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR) {
+        const char *path = parameters->children[0]->value;
+        const char *data = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "FILE *file = fopen(%s, \"a\");\n", path);
+        codegen_emit_indent(ctx);
+        fputs("if (file == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fopen\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (fputs(%s, file) == EOF) {\n", data);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fputs\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "exists") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_STR) {
+        const char *path = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "FILE *file = fopen(%s, \"r\");\n", path);
+        codegen_emit_indent(ctx);
+        fputs("if (file == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("return false;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fclose(file);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return true;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
     codegen_error("unsupported native stdlib function '%s'", name->value);
 }
 
