@@ -118,6 +118,8 @@ int semantic_builtin_returns_owned_ref(const char *name);
 void semantic_record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type);
 ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_node);
 ValueType semantic_find_class_type(const char *name);
+ValueType semantic_find_native_type(const char *module_name, const char *name);
+void semantic_register_native_type(const char *module_name, const ParseNode *type_def);
 ValueType semantic_register_class(const ParseNode *class_def);
 void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def);
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);

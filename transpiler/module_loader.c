@@ -99,6 +99,7 @@ static const char *top_level_symbol_name(const ParseNode *statement)
     payload = statement->children[0];
     if (payload->kind != NODE_FUNCTION_DEF &&
         payload->kind != NODE_NATIVE_FUNCTION_DEF &&
+        payload->kind != NODE_NATIVE_TYPE_DEF &&
         payload->kind != NODE_CLASS_DEF) {
         if (payload->kind == NODE_SIMPLE_STATEMENT &&
             payload->child_count == 2 &&

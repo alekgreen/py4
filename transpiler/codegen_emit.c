@@ -54,6 +54,68 @@ static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_typ
     fputs(ctor_name, ctx->out);
 }
 
+static int native_type_runtime_emitted(ValueType type)
+{
+    return semantic_type_is_native(type) &&
+        strcmp(semantic_native_type_module(type), "io") == 0 &&
+        strcmp(semantic_native_type_name(type), "File") == 0;
+}
+
+static void emit_native_type_runtime(CodegenContext *ctx)
+{
+    int emitted_io_file = 0;
+
+    for (size_t i = 0; i < semantic_native_type_count(); i++) {
+        ValueType type = semantic_native_type_at(i);
+
+        if (!native_type_runtime_emitted(type) || emitted_io_file) {
+            continue;
+        }
+
+        fputs("typedef struct Py4IoFile {\n", ctx->out);
+        fputs("    int refcount;\n", ctx->out);
+        fputs("    FILE *handle;\n", ctx->out);
+        fputs("    bool closed;\n", ctx->out);
+        fputs("} Py4IoFile;\n\n", ctx->out);
+
+        fputs("static Py4IoFile *py4_io_file_new(FILE *handle)\n{\n", ctx->out);
+        fputs("    Py4IoFile *file = malloc(sizeof(Py4IoFile));\n", ctx->out);
+        fputs("    if (file == NULL) {\n", ctx->out);
+        fputs("        perror(\"malloc\");\n", ctx->out);
+        fputs("        if (handle != NULL) {\n", ctx->out);
+        fputs("            fclose(handle);\n", ctx->out);
+        fputs("        }\n", ctx->out);
+        fputs("        exit(1);\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        fputs("    file->refcount = 1;\n", ctx->out);
+        fputs("    file->handle = handle;\n", ctx->out);
+        fputs("    file->closed = false;\n", ctx->out);
+        fputs("    return file;\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+
+        fputs("static void py4_io_file_incref(Py4IoFile *file)\n{\n", ctx->out);
+        fputs("    if (file != NULL) {\n", ctx->out);
+        fputs("        file->refcount++;\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+
+        fputs("static void py4_io_file_decref(Py4IoFile *file)\n{\n", ctx->out);
+        fputs("    if (file == NULL) {\n", ctx->out);
+        fputs("        return;\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        fputs("    file->refcount--;\n", ctx->out);
+        fputs("    if (file->refcount <= 0) {\n", ctx->out);
+        fputs("        if (!file->closed && file->handle != NULL) {\n", ctx->out);
+        fputs("            fclose(file->handle);\n", ctx->out);
+        fputs("        }\n", ctx->out);
+        fputs("        free(file);\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+
+        emitted_io_file = 1;
+    }
+}
+
 static void emit_native_function_definition(CodegenContext *ctx, const ParseNode *function_def)
 {
     const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
@@ -298,6 +360,38 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
 
     if (module_name != NULL &&
         strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "open") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR) {
+        const char *path = parameters->children[0]->value;
+        const char *mode = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "FILE *handle = fopen(%s, %s);\n", path, mode);
+        codegen_emit_indent(ctx);
+        fputs("if (handle == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fopen\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return py4_io_file_new(handle);\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
         strcmp(name->value, "write_text") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR) {
@@ -342,6 +436,141 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
 
     if (module_name != NULL &&
         strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "write") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type != TYPE_STR) {
+        const char *file_name = parameters->children[0]->value;
+        const char *data = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->closed || %s->handle == NULL) {\n",
+            file_name, file_name, file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: cannot write to a closed file\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (fputs(%s, %s->handle) == EOF) {\n", data, file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fputs\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "read") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *file_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "long size;\n");
+        codegen_emit_indent(ctx);
+        fputs("char *buffer;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("size_t read_size;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->closed || %s->handle == NULL) {\n",
+            file_name, file_name, file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: cannot read from a closed file\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (fseek(%s->handle, 0, SEEK_END) != 0) {\n", file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fseek\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "size = ftell(%s->handle);\n", file_name);
+        codegen_emit_indent(ctx);
+        fputs("if (size < 0) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"ftell\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (fseek(%s->handle, 0, SEEK_SET) != 0) {\n", file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fseek\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer = malloc((size_t)size + 1);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (buffer == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"malloc\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "read_size = fread(buffer, 1, (size_t)size, %s->handle);\n", file_name);
+        codegen_emit_indent(ctx);
+        fputs("if (read_size != (size_t)size) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: failed to read full file\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("free(buffer);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer[size] = '\\0';\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return buffer;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
         strcmp(name->value, "append_text") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR) {
@@ -379,6 +608,43 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         fputs("}\n", ctx->out);
         codegen_emit_indent(ctx);
         fputs("fclose(file);\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "close") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *file_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->closed) {\n", file_name, file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("return;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s->handle != NULL) {\n", file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "fclose(%s->handle);\n", file_name);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s->handle = NULL;\n", file_name);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s->closed = true;\n", file_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return;
@@ -1443,6 +1709,10 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+        return;
+    }
+
     if (payload->kind == NODE_CLASS_DEF) {
         codegen_error("class definitions are only supported at module scope");
     }
@@ -1502,6 +1772,8 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
@@ -1535,6 +1807,8 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
@@ -1586,6 +1860,8 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
@@ -1686,6 +1962,8 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
@@ -1751,6 +2029,7 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
     codegen_emit_struct_declarations(&ctx);
     codegen_emit_container_runtime(&ctx);
+    emit_native_type_runtime(&ctx);
     emit_native_function_runtime(&ctx, root);
     codegen_emit_struct_types(&ctx);
     codegen_emit_union_runtime(&ctx);

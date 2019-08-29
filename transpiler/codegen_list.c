@@ -40,6 +40,9 @@ const char *codegen_ref_runtime_prefix(ValueType type)
     if (semantic_type_is_dict(type)) {
         return codegen_dict_runtime_prefix(type);
     }
+    if (semantic_type_is_native(type)) {
+        return semantic_native_runtime_prefix(type);
+    }
     codegen_error("%s is not a supported ref type", semantic_type_name(type));
     return "";
 }

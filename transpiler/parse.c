@@ -142,6 +142,8 @@ static ParseNode *parse_CLASS_DEF(TokenStream *ts);
 static ParseNode *parse_FIELD_DECL(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_NATIVE_FUNCTION_DEF(TokenStream *ts);
+static ParseNode *parse_NATIVE_TYPE_DEF(TokenStream *ts);
+static ParseNode *parse_NATIVE_DECL(TokenStream *ts);
 static ParseNode *parse_SUITE(TokenStream *ts);
 static ParseNode *parse_PARAMETERS(TokenStream *ts);
 static ParseNode *parse_EXPRESSION_STATEMENT(TokenStream *ts);
@@ -234,6 +236,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_STATEMENT_TAIL:       return "STATEMENT_TAIL";
         case NODE_FUNCTION_DEF:         return "FUNCTION_DEF";
         case NODE_NATIVE_FUNCTION_DEF:  return "NATIVE_FUNCTION_DEF";
+        case NODE_NATIVE_TYPE_DEF:      return "NATIVE_TYPE_DEF";
         case NODE_PARAMETERS:           return "PARAMETERS";
         case NODE_PARAMETER:            return "PARAMETER";
         case NODE_RETURN_TYPE:          return "RETURN_TYPE";
@@ -311,7 +314,7 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
     if (parse_is_keyword_token(peek_ts(ts), "def")) {
         add_child(node, parse_FUNCTION_DEF(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "native")) {
-        add_child(node, parse_NATIVE_FUNCTION_DEF(ts));
+        add_child(node, parse_NATIVE_DECL(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "import") || parse_is_keyword_token(peek_ts(ts), "from")) {
         add_child(node, parse_IMPORT_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "if")) {
@@ -483,7 +486,7 @@ static ParseNode *parse_CLASS_DEF(TokenStream *ts)
         if (parse_is_keyword_token(peek_ts(ts), "def")) {
             add_child(node, parse_FUNCTION_DEF(ts));
         } else if (parse_is_keyword_token(peek_ts(ts), "native")) {
-            add_child(node, parse_NATIVE_FUNCTION_DEF(ts));
+            add_child(node, parse_NATIVE_DECL(ts));
         } else {
             add_child(node, parse_FIELD_DECL(ts));
         }
@@ -630,6 +633,39 @@ static ParseNode *parse_NATIVE_FUNCTION_DEF(TokenStream *ts)
     }
 
     return node;
+}
+
+static ParseNode *parse_NATIVE_TYPE_DEF(TokenStream *ts)
+{
+    Token native_tok = parse_expect_keyword(ts, "native");
+    Token type_tok;
+    ParseNode *node;
+    Token name;
+
+    (void)native_tok;
+    type_tok = parse_expect_keyword(ts, "type");
+    node = create_node_from_token(NODE_NATIVE_TYPE_DEF, type_tok);
+
+    name = expect(ts, TOKEN_IDENTIFIER);
+    add_child(node, create_node_from_token(NODE_PRIMARY, name));
+    return node;
+}
+
+static ParseNode *parse_NATIVE_DECL(TokenStream *ts)
+{
+    if (ts->pos + 1 >= ts->count) {
+        parse_error(peek_ts(ts), "expected native declaration");
+    }
+
+    if (parse_is_keyword_token(ts->data[ts->pos + 1], "def")) {
+        return parse_NATIVE_FUNCTION_DEF(ts);
+    }
+    if (parse_is_keyword_token(ts->data[ts->pos + 1], "type")) {
+        return parse_NATIVE_TYPE_DEF(ts);
+    }
+
+    parse_error(ts->data[ts->pos + 1], "expected 'def' or 'type' after native");
+    return NULL;
 }
 
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts)

@@ -18,6 +18,7 @@ static const char *KEYWORDS[] = {
     "from",
     "as",
     "native",
+    "type",
     "class",
     "if",
     "while",

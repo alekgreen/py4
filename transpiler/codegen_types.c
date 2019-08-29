@@ -94,6 +94,11 @@ void codegen_build_class_ctor_name(char *buffer, size_t size, ValueType type)
     snprintf(buffer, size, "%s__ctor", semantic_class_name(type));
 }
 
+void codegen_build_native_print_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));
+}
+
 void codegen_build_list_print_name(char *buffer, size_t size, ValueType type)
 {
     snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));
@@ -269,6 +274,12 @@ const char *codegen_type_suffix(ValueType type)
     if (semantic_type_is_class(type)) {
         return semantic_class_name(type);
     }
+    if (semantic_type_is_native(type)) {
+        snprintf(list_name, sizeof(list_name), "%s_%s",
+            semantic_native_type_module(type),
+            semantic_native_type_name(type));
+        return list_name;
+    }
 
     switch (type) {
         case TYPE_INT: return "int";
@@ -395,6 +406,10 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         fputs(semantic_class_name(type), out);
         return;
     }
+    if (semantic_type_is_native(type)) {
+        fprintf(out, "%s *", semantic_native_c_type(type));
+        return;
+    }
     if (semantic_type_is_list(type)) {
         fprintf(out, "%s *", codegen_list_struct_name(type));
         return;
@@ -453,6 +468,9 @@ char *codegen_type_to_c_string(ValueType type)
         }
         if (semantic_type_is_class(type)) {
             return codegen_dup_printf("%s", semantic_class_name(type));
+        }
+        if (semantic_type_is_native(type)) {
+            return codegen_dup_printf("%s *", semantic_native_c_type(type));
         }
     }
 
@@ -1487,6 +1505,8 @@ void codegen_collect_program_state(CodegenContext *ctx, const ParseNode *root)
             if (codegen_is_main_function(payload)) {
                 ctx->has_user_main = 1;
             }
+        } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind != NODE_CLASS_DEF) {

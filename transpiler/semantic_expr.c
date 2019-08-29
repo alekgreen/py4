@@ -1184,6 +1184,16 @@ static ValueType infer_call_type(
         if (arg_type == TYPE_NONE) {
             semantic_error_at_node(arguments->children[0], "print cannot print None");
         }
+        if (semantic_type_is_native(arg_type)) {
+            char type_name[128];
+
+            snprintf(type_name, sizeof(type_name), "%s.%s",
+                semantic_native_type_module(arg_type),
+                semantic_native_type_name(arg_type));
+            semantic_error_at_node(arguments->children[0],
+                "print cannot print native opaque type %s",
+                type_name);
+        }
 
         semantic_record_node_type(info, call, TYPE_NONE);
         return TYPE_NONE;

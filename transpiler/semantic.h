@@ -14,6 +14,8 @@ typedef unsigned int ValueType;
 #define MAX_CLASS_TYPES 64
 #define TYPE_CLASS_LIST_BASE (TYPE_CLASS_BASE + MAX_CLASS_TYPES)
 #define MAX_CLASS_LIST_TYPES 64
+#define TYPE_NATIVE_BASE (TYPE_CLASS_LIST_BASE + MAX_CLASS_LIST_TYPES)
+#define MAX_NATIVE_TYPES 16
 #define MAX_CLASS_FIELDS 32
 
 enum {
@@ -41,6 +43,7 @@ int semantic_type_contains(ValueType type, ValueType member);
 int semantic_type_is_union(ValueType type);
 int semantic_type_is_tuple(ValueType type);
 int semantic_type_is_class(ValueType type);
+int semantic_type_is_native(ValueType type);
 int semantic_type_is_ref(ValueType type);
 int semantic_type_needs_management(ValueType type);
 int semantic_type_is_list(ValueType type);
@@ -62,6 +65,12 @@ size_t semantic_class_field_count(ValueType type);
 const char *semantic_class_field_name(ValueType type, size_t index);
 ValueType semantic_class_field_type(ValueType type, size_t index);
 ValueType semantic_find_class_type(const char *name);
+size_t semantic_native_type_count(void);
+ValueType semantic_native_type_at(size_t index);
+const char *semantic_native_type_name(ValueType type);
+const char *semantic_native_type_module(ValueType type);
+const char *semantic_native_c_type(ValueType type);
+const char *semantic_native_runtime_prefix(ValueType type);
 int semantic_class_has_initializer(const SemanticInfo *info, ValueType type);
 ValueType semantic_call_constructor_type(const SemanticInfo *info, const ParseNode *call);
 const char *semantic_module_name_for_path(const SemanticInfo *info, const char *path);

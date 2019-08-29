@@ -221,6 +221,14 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
         return;
     }
 
+    if (semantic_type_is_native(type)) {
+        append_text(buffer, size, length, "native_");
+        append_identifier_text(buffer, size, length, semantic_native_type_module(type));
+        append_text(buffer, size, length, "_");
+        append_identifier_text(buffer, size, length, semantic_native_type_name(type));
+        return;
+    }
+
     if (semantic_type_is_union(type)) {
         static const ValueType ordered_members[] = {
             TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_CHAR, TYPE_STR, TYPE_NONE
@@ -252,6 +260,25 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
         case TYPE_DICT_STR_STR: append_text(buffer, size, length, "dict_str_str"); return;
         default:
             semantic_error("unsupported function overload type %s", semantic_type_name(type));
+    }
+}
+
+static void collect_native_types(SemanticInfo *info, const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
+        ModuleInfo *module;
+
+        if (payload->kind != NODE_NATIVE_TYPE_DEF) {
+            continue;
+        }
+
+        module = module_info_for_path(info, payload->source_path);
+        if (module == NULL) {
+            semantic_error_at_node(payload->children[0], "native type '%s' is missing module path information",
+                semantic_expect_child(payload, 0, NODE_PRIMARY)->value);
+        }
+        semantic_register_native_type(module->name, payload);
     }
 }
 
@@ -1236,6 +1263,13 @@ static int typecheck_statement(
         return 0;
     }
 
+    if (payload->kind == NODE_NATIVE_TYPE_DEF) {
+        if (!allow_function_defs) {
+            semantic_error_at_node(payload->children[0], "native type declarations are only supported at module scope");
+        }
+        return 0;
+    }
+
     if (payload->kind == NODE_CLASS_DEF) {
         semantic_error_at_node(payload->children[0], "class definitions are only supported at module scope");
     }
@@ -1284,6 +1318,7 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
     }
 
     collect_module_bindings(info, program);
+    collect_native_types(info, root);
     collect_classes(root);
     validate_class_definitions(info, root);
     collect_global_bindings(info, program);
@@ -1301,6 +1336,8 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
             semantic_error_at_node(payload, "imports should be resolved before semantic analysis");
         } else if (payload->kind == NODE_CLASS_DEF) {
             typecheck_class_methods(info, payload, &global_scope);
+            continue;
+        } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             typecheck_function(info, payload, &global_scope);

@@ -27,12 +27,24 @@ typedef struct {
     char name[128];
 } ClassListTypeInfo;
 
+typedef struct {
+    ValueType id;
+    char module_name[128];
+    char name[128];
+    char qualified_name[192];
+    char c_type[128];
+    char runtime_prefix[128];
+    const ParseNode *node;
+} NativeTypeInfo;
+
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
 static size_t TUPLE_TYPE_COUNT = 0;
 static ClassTypeInfo CLASS_TYPES[MAX_CLASS_TYPES];
 static size_t CLASS_TYPE_COUNT = 0;
 static ClassListTypeInfo CLASS_LIST_TYPES[MAX_CLASS_LIST_TYPES];
 static size_t CLASS_LIST_TYPE_COUNT = 0;
+static NativeTypeInfo NATIVE_TYPES[MAX_NATIVE_TYPES];
+static size_t NATIVE_TYPE_COUNT = 0;
 
 static const TupleTypeInfo *find_tuple_type(ValueType type)
 {
@@ -67,6 +79,18 @@ static ClassListTypeInfo *find_class_list_type(ValueType type)
     }
 
     semantic_error("unknown class list type id %u", type);
+    return NULL;
+}
+
+static NativeTypeInfo *find_native_type_info(ValueType type)
+{
+    for (size_t i = 0; i < NATIVE_TYPE_COUNT; i++) {
+        if (NATIVE_TYPES[i].id == type) {
+            return &NATIVE_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown native type id %u", type);
     return NULL;
 }
 
@@ -107,6 +131,9 @@ static const char *type_member_name(ValueType type)
     }
     if (semantic_type_is_class(type)) {
         return find_class_type(type)->name;
+    }
+    if (semantic_type_is_native(type)) {
+        return find_native_type_info(type)->qualified_name;
     }
 
     switch (type) {
@@ -165,6 +192,20 @@ static ValueType parse_named_type_atom(const char *name)
         return TYPE_DICT_STR_STR;
     }
 
+    return 0;
+}
+
+ValueType semantic_find_native_type(const char *module_name, const char *name)
+{
+    for (size_t i = 0; i < NATIVE_TYPE_COUNT; i++) {
+        if (strcmp(NATIVE_TYPES[i].name, name) != 0) {
+            continue;
+        }
+        if (module_name != NULL && strcmp(NATIVE_TYPES[i].module_name, module_name) != 0) {
+            continue;
+        }
+        return NATIVE_TYPES[i].id;
+    }
     return 0;
 }
 
@@ -272,28 +313,20 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
                             binding->module_name);
                     }
 
-                    {
-                        ModuleInfo *target_module = semantic_find_module_info(info->modules, binding->module_name);
-
-                        if (target_module != NULL) {
-                            for (size_t i = 0; i < target_module->root->child_count; i++) {
-                                const ParseNode *payload = semantic_statement_payload(target_module->root->children[i]);
-
-                                if (payload->kind == NODE_CLASS_DEF &&
-                                    strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, class_name) == 0) {
-                                    element_type = semantic_find_class_type(class_name);
-                                    break;
-                                }
-                            }
-                        }
+                    element_type = semantic_find_class_type(class_name);
+                    if (element_type == 0) {
+                        element_type = semantic_find_native_type(binding->module_name, class_name);
                     }
                 } else {
                     element_type = semantic_find_class_type(element_name);
+                    if (element_type == 0 && current_module != NULL) {
+                        element_type = semantic_find_native_type(current_module->name, element_name);
+                    }
                     if (element_type != 0 && current_module != NULL) {
                         for (size_t i = 0; i < current_module->root->child_count; i++) {
                             const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
 
-                            if (payload->kind == NODE_CLASS_DEF &&
+                            if ((payload->kind == NODE_CLASS_DEF || payload->kind == NODE_NATIVE_TYPE_DEF) &&
                                 strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, element_name) == 0) {
                                 return semantic_make_list_type(element_type);
                             }
@@ -321,7 +354,9 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 
             if (element_type == TYPE_INT || element_type == TYPE_FLOAT ||
                 element_type == TYPE_BOOL || element_type == TYPE_CHAR ||
-                element_type == TYPE_STR || semantic_type_is_class(element_type)) {
+                element_type == TYPE_STR ||
+                semantic_type_is_class(element_type) ||
+                semantic_type_is_native(element_type)) {
                 return semantic_make_list_type(element_type);
             }
 
@@ -355,30 +390,23 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
                     binding->module_name);
             }
 
-            {
-                ModuleInfo *target_module = semantic_find_module_info(info->modules, binding->module_name);
-
-                if (target_module != NULL) {
-                    for (size_t i = 0; i < target_module->root->child_count; i++) {
-                        const ParseNode *payload = semantic_statement_payload(target_module->root->children[i]);
-
-                        if (payload->kind == NODE_CLASS_DEF &&
-                            strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, class_name) == 0) {
-                            named_type = semantic_find_class_type(class_name);
-                            if (named_type != 0) {
-                                return named_type;
-                            }
-                        }
-                    }
-                }
+            named_type = semantic_find_class_type(class_name);
+            if (named_type == 0) {
+                named_type = semantic_find_native_type(binding->module_name, class_name);
+            }
+            if (named_type != 0) {
+                return named_type;
             }
         } else {
             named_type = semantic_find_class_type(node->value);
+            if (named_type == 0 && current_module != NULL) {
+                named_type = semantic_find_native_type(current_module->name, node->value);
+            }
             if (named_type != 0 && current_module != NULL) {
                 for (size_t i = 0; i < current_module->root->child_count; i++) {
                     const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
 
-                    if (payload->kind == NODE_CLASS_DEF &&
+                    if ((payload->kind == NODE_CLASS_DEF || payload->kind == NODE_NATIVE_TYPE_DEF) &&
                         strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, node->value) == 0) {
                         return named_type;
                     }
@@ -424,7 +452,8 @@ int semantic_type_contains(ValueType type, ValueType member)
 {
     if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member) ||
         semantic_type_is_list(type) || semantic_type_is_list(member) ||
-        semantic_type_is_class(type) || semantic_type_is_class(member)) {
+        semantic_type_is_class(type) || semantic_type_is_class(member) ||
+        semantic_type_is_native(type) || semantic_type_is_native(member)) {
         return type == member;
     }
     return member != 0 && (type & member) == member;
@@ -433,7 +462,8 @@ int semantic_type_contains(ValueType type, ValueType member)
 int semantic_type_is_union(ValueType type)
 {
     if (semantic_type_is_tuple(type) || semantic_type_is_list(type) ||
-        semantic_type_is_class(type) || (type & ~TYPE_ATOMIC_MASK) != 0) {
+        semantic_type_is_class(type) || semantic_type_is_native(type) ||
+        (type & ~TYPE_ATOMIC_MASK) != 0) {
         return 0;
     }
     return count_type_bits(type) > 1;
@@ -449,9 +479,15 @@ int semantic_type_is_class(ValueType type)
     return type >= TYPE_CLASS_BASE && type < TYPE_CLASS_LIST_BASE;
 }
 
+int semantic_type_is_native(ValueType type)
+{
+    return type >= TYPE_NATIVE_BASE && type < TYPE_NATIVE_BASE + MAX_NATIVE_TYPES;
+}
+
 int semantic_type_is_ref(ValueType type)
 {
-    return !semantic_type_is_tuple(type) && (semantic_type_is_list(type) || type == TYPE_DICT_STR_STR);
+    return !semantic_type_is_tuple(type) &&
+        (semantic_type_is_list(type) || type == TYPE_DICT_STR_STR || semantic_type_is_native(type));
 }
 
 int semantic_type_needs_management(ValueType type)
@@ -680,7 +716,8 @@ int semantic_is_assignable(ValueType target, ValueType value)
 
     if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value) ||
         semantic_type_is_list(target) || semantic_type_is_list(value) ||
-        semantic_type_is_class(target) || semantic_type_is_class(value)) {
+        semantic_type_is_class(target) || semantic_type_is_class(value) ||
+        semantic_type_is_native(target) || semantic_type_is_native(value)) {
         return target == value;
     }
 
@@ -721,6 +758,10 @@ ValueType semantic_make_list_type(ValueType element_type)
             break;
     }
 
+    if (semantic_type_is_native(element_type)) {
+        semantic_error("list elements cannot use native opaque types yet");
+    }
+
     if (!semantic_type_is_class(element_type)) {
         semantic_error("list elements must currently be int, float, bool, char, str, or class values");
     }
@@ -758,6 +799,9 @@ ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_cou
     for (size_t i = 0; i < element_count; i++) {
         if (semantic_type_is_union(elements[i])) {
             semantic_error("tuple elements cannot be union types yet");
+        }
+        if (semantic_type_is_native(elements[i])) {
+            semantic_error("tuple elements cannot use native opaque types yet");
         }
         if (elements[i] == TYPE_NONE) {
             semantic_error("tuple elements cannot be None");
@@ -861,6 +905,43 @@ ValueType semantic_find_class_type(const char *name)
     return 0;
 }
 
+void semantic_register_native_type(const char *module_name, const ParseNode *type_def)
+{
+    const ParseNode *name_node;
+    const char *name;
+    NativeTypeInfo *entry;
+
+    if (type_def == NULL || type_def->kind != NODE_NATIVE_TYPE_DEF) {
+        semantic_error("malformed native type definition");
+    }
+
+    name_node = semantic_expect_child(type_def, 0, NODE_PRIMARY);
+    name = name_node->value;
+    if (semantic_find_native_type(module_name, name) != 0) {
+        semantic_error_at_node(name_node, "duplicate native type '%s' in module '%s'", name, module_name);
+    }
+    if (parse_named_type_atom(name) != 0) {
+        semantic_error_at_node(name_node, "native type name '%s' conflicts with built-in type", name);
+    }
+    if (NATIVE_TYPE_COUNT >= MAX_NATIVE_TYPES) {
+        semantic_error("too many native types in one program");
+    }
+
+    entry = &NATIVE_TYPES[NATIVE_TYPE_COUNT];
+    entry->id = TYPE_NATIVE_BASE + (ValueType)NATIVE_TYPE_COUNT;
+    snprintf(entry->module_name, sizeof(entry->module_name), "%s", module_name);
+    snprintf(entry->name, sizeof(entry->name), "%s", name);
+    snprintf(entry->qualified_name, sizeof(entry->qualified_name), "%s.%s", module_name, name);
+    if (strcmp(module_name, "io") == 0 && strcmp(name, "File") == 0) {
+        snprintf(entry->c_type, sizeof(entry->c_type), "Py4IoFile");
+        snprintf(entry->runtime_prefix, sizeof(entry->runtime_prefix), "py4_io_file");
+    } else {
+        semantic_error_at_node(name_node, "unsupported native type '%s.%s'", module_name, name);
+    }
+    entry->node = type_def;
+    NATIVE_TYPE_COUNT++;
+}
+
 int semantic_class_has_initializer(const SemanticInfo *info, ValueType type)
 {
     return semantic_find_method(info->methods, type, "__init__") != NULL;
@@ -937,6 +1018,9 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         }
         if (semantic_type_is_union(field_type)) {
             semantic_error_at_node(field, "class fields cannot use union types yet");
+        }
+        if (semantic_type_is_native(field_type)) {
+            semantic_error_at_node(field, "class fields cannot use native opaque types yet");
         }
         if (field_type == TYPE_NONE) {
             semantic_error_at_node(field, "class fields cannot use None");
@@ -1069,6 +1153,9 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
             }
             if (semantic_type_is_class(member_type)) {
                 semantic_error_at_node(type_node, "class types cannot be used inside a union yet");
+            }
+            if (semantic_type_is_native(member_type)) {
+                semantic_error_at_node(type_node, "native opaque types cannot be used inside a union yet");
             }
         }
     }
@@ -1244,6 +1331,39 @@ const char *semantic_module_name_for_path(const SemanticInfo *info, const char *
         }
     }
     return NULL;
+}
+
+size_t semantic_native_type_count(void)
+{
+    return NATIVE_TYPE_COUNT;
+}
+
+ValueType semantic_native_type_at(size_t index)
+{
+    if (index >= NATIVE_TYPE_COUNT) {
+        semantic_error("native type index out of bounds");
+    }
+    return NATIVE_TYPES[index].id;
+}
+
+const char *semantic_native_type_name(ValueType type)
+{
+    return find_native_type_info(type)->name;
+}
+
+const char *semantic_native_type_module(ValueType type)
+{
+    return find_native_type_info(type)->module_name;
+}
+
+const char *semantic_native_c_type(ValueType type)
+{
+    return find_native_type_info(type)->c_type;
+}
+
+const char *semantic_native_runtime_prefix(ValueType type)
+{
+    return find_native_type_info(type)->runtime_prefix;
 }
 
 GlobalBinding *semantic_find_global(GlobalBinding *globals, const char *module_name, const char *name)
