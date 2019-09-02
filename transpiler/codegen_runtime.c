@@ -411,6 +411,21 @@ static void emit_dict_runtime(
     fprintf(ctx->out, "    return %s_find_index(dict, key) >= 0;\n", prefix);
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static Py4List_str *%s_keys(%s *dict)\n{\n", prefix, struct_name);
+    fprintf(ctx->out, "    Py4List_str *keys;\n");
+    fprintf(ctx->out, "    if (dict == NULL) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    keys = py4_list_str_new();\n");
+    fprintf(ctx->out, "    py4_list_str_ensure_capacity(keys, dict->len);\n");
+    fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+    fprintf(ctx->out, "        keys->items[i] = dict->keys[i];\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    keys->len = dict->len;\n");
+    fprintf(ctx->out, "    return keys;\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static const char *%s_pop(%s *dict, const char *key)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    int index;\n");
     fprintf(ctx->out, "    const char *value;\n");
