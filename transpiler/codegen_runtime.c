@@ -426,6 +426,21 @@ static void emit_dict_runtime(
     fprintf(ctx->out, "    return keys;\n");
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static Py4List_str *%s_values(%s *dict)\n{\n", prefix, struct_name);
+    fprintf(ctx->out, "    Py4List_str *values;\n");
+    fprintf(ctx->out, "    if (dict == NULL) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    values = py4_list_str_new();\n");
+    fprintf(ctx->out, "    py4_list_str_ensure_capacity(values, dict->len);\n");
+    fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+    fprintf(ctx->out, "        values->items[i] = dict->values[i];\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    values->len = dict->len;\n");
+    fprintf(ctx->out, "    return values;\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static const char *%s_pop(%s *dict, const char *key)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    int index;\n");
     fprintf(ctx->out, "    const char *value;\n");

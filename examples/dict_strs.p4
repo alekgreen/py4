@@ -2,6 +2,7 @@ def main() -> None:
     colors: dict[str, str] = {"apple": "red", "sky": "blue"}
     print(colors)
     print(colors.keys())
+    print(colors.values())
     print(colors.get("apple"))
     print(colors["sky"])
     print(colors.contains("grass"))

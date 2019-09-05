@@ -973,6 +973,12 @@ static ValueType infer_method_call_type(
             return TYPE_LIST_STR;
         }
 
+        if (strcmp(method->value, "values") == 0) {
+            expect_argument_count(method->value, arguments, 0);
+            semantic_record_node_type(info, call, TYPE_LIST_STR);
+            return TYPE_LIST_STR;
+        }
+
         if (strcmp(method->value, "pop") == 0) {
             ValueType key_type;
 
