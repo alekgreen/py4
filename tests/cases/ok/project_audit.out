@@ -1,0 +1,7 @@
+release-audit
+(10, 2)
+[todo, done]
+[open, closed]
+[Task(code=A, points=3, state=todo, done=False), Task(code=B, points=5, state=done, done=True), Task(code=C, points=2, state=done, done=True)]
+audit
+saved
