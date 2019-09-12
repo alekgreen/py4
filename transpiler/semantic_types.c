@@ -251,6 +251,39 @@ static int is_module_private_name(const char *name)
     return name != NULL && name[0] == '_' && (name[1] == '\0' || name[1] != '_');
 }
 
+static int split_module_member_name(
+    const char *qualified_name,
+    char *module_name,
+    size_t module_size,
+    char *member_name,
+    size_t member_size)
+{
+    const char *dot;
+    size_t module_len;
+    size_t member_len;
+
+    if (qualified_name == NULL) {
+        return 0;
+    }
+
+    dot = strrchr(qualified_name, '.');
+    if (dot == NULL) {
+        return 0;
+    }
+
+    module_len = (size_t)(dot - qualified_name);
+    member_len = strlen(dot + 1);
+    if (module_len == 0 || member_len == 0 ||
+        module_len >= module_size || member_len >= member_size) {
+        return 0;
+    }
+
+    memcpy(module_name, qualified_name, module_len);
+    module_name[module_len] = '\0';
+    memcpy(member_name, dot + 1, member_len + 1);
+    return 1;
+}
+
 static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 {
     ValueType elements[MAX_TUPLE_ELEMENTS];
@@ -284,24 +317,19 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 
             element_type = parse_named_type_atom(element_name);
             if (element_type == 0) {
-                const char *element_dot = strchr(element_name, '.');
-
-                if (element_dot != NULL) {
+                if (strchr(element_name, '.') != NULL) {
                     char module_local_name[128];
                     char class_name[128];
-                    size_t module_len = (size_t)(element_dot - element_name);
-                    size_t class_len = strlen(element_dot + 1);
                     ImportBinding *binding;
 
-                    if (module_len == 0 || class_len == 0 ||
-                        module_len >= sizeof(module_local_name) ||
-                        class_len >= sizeof(class_name)) {
+                    if (!split_module_member_name(
+                            element_name,
+                            module_local_name,
+                            sizeof(module_local_name),
+                            class_name,
+                            sizeof(class_name))) {
                         semantic_error_at_node(node, "unsupported type '%s'", node->value);
                     }
-
-                    memcpy(module_local_name, element_name, module_len);
-                    module_local_name[module_len] = '\0';
-                    memcpy(class_name, element_dot + 1, class_len + 1);
 
                     binding = find_type_import_binding(current_module, module_local_name, 1);
                     if (binding == NULL) {
@@ -366,19 +394,16 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
         if (dot != NULL) {
             char module_local_name[128];
             char class_name[128];
-            size_t module_len = (size_t)(dot - node->value);
-            size_t class_len = strlen(dot + 1);
             ImportBinding *binding;
 
-            if (module_len == 0 || class_len == 0 ||
-                module_len >= sizeof(module_local_name) ||
-                class_len >= sizeof(class_name)) {
+            if (!split_module_member_name(
+                    node->value,
+                    module_local_name,
+                    sizeof(module_local_name),
+                    class_name,
+                    sizeof(class_name))) {
                 semantic_error_at_node(node, "unsupported type '%s'", node->value);
             }
-
-            memcpy(module_local_name, node->value, module_len);
-            module_local_name[module_len] = '\0';
-            memcpy(class_name, dot + 1, class_len + 1);
 
             binding = find_type_import_binding(current_module, module_local_name, 1);
             if (binding == NULL) {

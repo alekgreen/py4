@@ -171,44 +171,63 @@ static char *module_name_from_path(const char *path)
 
 static char *resolve_import_path(const char *current_path, const char *module_name)
 {
-    char *dir = dirname_of(current_path);
     char *rel = dots_to_slashes(module_name);
-    char *resolved = dup_printf("%s/%s.p4", dir, rel);
-    char *resolved_pkg = dup_printf("%s/%s/__init__.p4", dir, rel);
+    char *dir = dirname_of(current_path);
     char *stdlib_path = dup_printf("stdlib/%s.p4", rel);
     char *stdlib_pkg = dup_printf("stdlib/%s/__init__.p4", rel);
+    char *search_dir = dup_string(dir);
 
     free(dir);
-    free(rel);
-    if (file_exists(resolved)) {
-        free(resolved_pkg);
-        free(stdlib_path);
-        free(stdlib_pkg);
-        return resolved;
-    }
-    if (file_exists(resolved_pkg)) {
+    while (search_dir != NULL) {
+        char *resolved = dup_printf("%s/%s.p4", search_dir, rel);
+        char *resolved_pkg = dup_printf("%s/%s/__init__.p4", search_dir, rel);
+        char *next = NULL;
+
+        if (file_exists(resolved)) {
+            free(search_dir);
+            free(rel);
+            free(resolved_pkg);
+            free(stdlib_path);
+            free(stdlib_pkg);
+            return resolved;
+        }
+        if (file_exists(resolved_pkg)) {
+            free(search_dir);
+            free(rel);
+            free(resolved);
+            free(stdlib_path);
+            free(stdlib_pkg);
+            return resolved_pkg;
+        }
+
+        if (strcmp(search_dir, ".") == 0 || strcmp(search_dir, "/") == 0) {
+            free(resolved);
+            free(resolved_pkg);
+            free(search_dir);
+            break;
+        }
+
+        next = dirname_of(search_dir);
         free(resolved);
-        free(stdlib_path);
-        free(stdlib_pkg);
-        return resolved_pkg;
+        free(resolved_pkg);
+        free(search_dir);
+        search_dir = next;
     }
+
     if (file_exists(stdlib_path)) {
-        free(resolved);
-        free(resolved_pkg);
+        free(rel);
         free(stdlib_pkg);
         return stdlib_path;
     }
     if (file_exists(stdlib_pkg)) {
-        free(resolved);
-        free(resolved_pkg);
+        free(rel);
         free(stdlib_path);
         return stdlib_pkg;
     }
 
-    free(resolved_pkg);
+    free(rel);
     free(stdlib_path);
-    free(stdlib_pkg);
-    return resolved;
+    return stdlib_pkg;
 }
 
 static int has_visited(const LoadContext *ctx, const char *path)

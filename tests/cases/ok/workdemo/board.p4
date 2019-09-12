@@ -1,19 +1,9 @@
-class Task:
-    code: char
-    points: int
-    state: str
-    done: bool
-
-    def __init__(self: Task, code: char, points: int, state: str, done: bool) -> None:
-        self.code = code
-        self.points = points
-        self.state = state
-        self.done = done
+import workdemo.models
 
 
 class Board:
     name: str
-    tasks: list[Task]
+    tasks: list[workdemo.models.Task]
     labels: dict[str, str]
 
     def __init__(self: Board, name: str) -> None:
@@ -21,7 +11,7 @@ class Board:
         self.tasks = []
         self.labels = {"todo": "open", "done": "closed"}
 
-    def add(self: Board, task: Task) -> None:
+    def add(self: Board, task: workdemo.models.Task) -> None:
         self.tasks.append(task)
 
     def total_points(self: Board) -> int:

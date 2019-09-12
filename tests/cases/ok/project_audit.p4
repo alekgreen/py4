@@ -1,16 +1,16 @@
 import io
 import workdemo
-from workdemo.board import Board
-from workdemo.board import Task
+import workdemo.board
+import workdemo.models
 
 
 def main() -> None:
     path: str = "/tmp/py4_test_project_audit.txt"
-    board: Board = Board(workdemo.project_name)
+    board: workdemo.board.Board = workdemo.board.Board(workdemo.project_name)
 
-    board.add(Task('A', 3, "todo", False))
-    board.add(Task('B', 5, "done", True))
-    board.add(Task('C', 2, "done", True))
+    board.add(workdemo.models.Task('A', 3, "todo", False))
+    board.add(workdemo.models.Task('B', 5, "done", True))
+    board.add(workdemo.models.Task('C', 2, "done", True))
 
     totals: (int, int) = board.summary()
 
