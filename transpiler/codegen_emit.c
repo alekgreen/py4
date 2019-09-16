@@ -571,6 +571,100 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
 
     if (module_name != NULL &&
         strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "read_line") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *file_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("size_t cap = 64;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("size_t len = 0;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("char *buffer;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("int ch;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->closed || %s->handle == NULL) {\n",
+            file_name, file_name, file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: cannot read from a closed file\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer = malloc(cap);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (buffer == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"malloc\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "while ((ch = fgetc(%s->handle)) != EOF) {\n", file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("if (len + 1 >= cap) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("char *next;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("cap *= 2;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("next = realloc(buffer, cap);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (next == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"realloc\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("free(buffer);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer = next;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (ch == '\\n') {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("break;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer[len++] = (char)ch;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("buffer[len] = '\\0';\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return buffer;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
         strcmp(name->value, "append_text") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR) {
@@ -608,6 +702,44 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         fputs("}\n", ctx->out);
         codegen_emit_indent(ctx);
         fputs("fclose(file);\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "io") == 0 &&
+        strcmp(name->value, "flush") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *file_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->closed || %s->handle == NULL) {\n",
+            file_name, file_name, file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: cannot flush a closed file\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (fflush(%s->handle) != 0) {\n", file_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("perror(\"fflush\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return;
