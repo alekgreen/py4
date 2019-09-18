@@ -563,6 +563,29 @@ static int typecheck_simple_statement(
         return 0;
     }
 
+    if (first_child->kind == NODE_ASSERT_STATEMENT) {
+        ValueType condition_type;
+
+        if (first_child->child_count != 2) {
+            semantic_error("malformed assert statement");
+        }
+
+        condition_type = semantic_infer_expression_type(info, first_child->children[0], scope);
+        if (condition_type != TYPE_BOOL) {
+            semantic_error_at_node(first_child->children[0], "assert condition must be bool");
+        }
+
+        if (!semantic_is_epsilon_node(first_child->children[1])) {
+            ValueType message_type = semantic_infer_expression_type(info, first_child->children[1], scope);
+
+            if (!semantic_is_assignable(TYPE_STR, message_type)) {
+                semantic_error_at_node(first_child->children[1], "assert message must be str");
+            }
+        }
+
+        return 0;
+    }
+
     if (first_child->kind == NODE_EXPRESSION_STATEMENT) {
         semantic_infer_expression_type(info, semantic_expect_child(first_child, 0, NODE_EXPRESSION), scope);
         return 0;

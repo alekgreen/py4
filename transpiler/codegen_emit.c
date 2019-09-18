@@ -945,6 +945,39 @@ static void emit_expression_statement(CodegenContext *ctx, const ParseNode *expr
     free(expr_text);
 }
 
+static void emit_assert_statement(CodegenContext *ctx, const ParseNode *assert_stmt)
+{
+    char *cond_text;
+
+    if (assert_stmt->child_count != 2) {
+        codegen_error("malformed assert statement");
+    }
+
+    cond_text = codegen_expression_to_c_string(ctx, assert_stmt->children[0]);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "if (!(%s)) {\n", cond_text);
+    free(cond_text);
+
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fputs("fprintf(stderr, \"Assertion failed\");\n", ctx->out);
+    if (!codegen_is_epsilon_node(assert_stmt->children[1])) {
+        char *message_text = codegen_expression_to_c_string(ctx, assert_stmt->children[1]);
+
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "fprintf(stderr, \": %%s\", %s);\n", message_text);
+        free(message_text);
+    }
+    codegen_emit_indent(ctx);
+    fputs("fprintf(stderr, \"\\n\");\n", ctx->out);
+    codegen_emit_indent(ctx);
+    fputs("exit(1);\n", ctx->out);
+    ctx->indent_level--;
+
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+}
+
 static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_stmt)
 {
     if (return_stmt->child_count != 1) {
@@ -1179,6 +1212,11 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
 
     if (first_child->kind == NODE_CONTINUE_STATEMENT) {
         emit_loop_jump(ctx, "continue", 2);
+        return;
+    }
+
+    if (first_child->kind == NODE_ASSERT_STATEMENT) {
+        emit_assert_statement(ctx, first_child);
         return;
     }
 
@@ -2007,6 +2045,11 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
             if (payload->children[0]->kind == NODE_EXPRESSION_STATEMENT) {
                 emit_expression_statement(ctx, payload->children[0]);
+                continue;
+            }
+
+            if (payload->children[0]->kind == NODE_ASSERT_STATEMENT) {
+                emit_assert_statement(ctx, payload->children[0]);
                 continue;
             }
 

@@ -14,6 +14,7 @@ static const char *KEYWORDS[] = {
     "return",
     "break",
     "continue",
+    "assert",
     "import",
     "from",
     "as",
