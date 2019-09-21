@@ -932,6 +932,43 @@ static int typecheck_for_statement(
     return 0;
 }
 
+static int typecheck_with_statement(
+    SemanticInfo *info,
+    const ParseNode *with_stmt,
+    Scope *scope,
+    FunctionContext *current_function)
+{
+    Scope with_scope = {0};
+    const ParseNode *resource_expr;
+    const ParseNode *target;
+    ValueType resource_type;
+    ValueType file_type = semantic_find_native_type("io", "File");
+
+    resource_expr = semantic_expect_child(with_stmt, 0, NODE_EXPRESSION);
+    target = semantic_expect_child(with_stmt, 1, NODE_PRIMARY);
+    resource_type = semantic_infer_expression_type(info, resource_expr, scope);
+
+    if (file_type == 0 || resource_type != file_type) {
+        semantic_error_at_node(resource_expr, "with expression must be io.File but got %s",
+            semantic_type_name(resource_type));
+    }
+    if (resource_expr->child_count != 1 ||
+        (resource_expr->children[0]->kind != NODE_CALL &&
+         resource_expr->children[0]->kind != NODE_METHOD_CALL)) {
+        semantic_error_at_node(resource_expr,
+            "with expression must be an io.File-producing call");
+    }
+
+    with_scope.parent = scope;
+    with_scope.module = scope->module;
+    with_scope.current_class_type = scope->current_class_type;
+    semantic_bind_variable(&with_scope, target->value, resource_type);
+    semantic_record_node_type(info, target, resource_type);
+    typecheck_suite(info, with_stmt->children[3], &with_scope, current_function);
+    semantic_free_scope_bindings(with_scope.vars);
+    return 0;
+}
+
 static void collect_classes(const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -1307,6 +1344,10 @@ static int typecheck_statement(
 
     if (payload->kind == NODE_FOR_STATEMENT) {
         return typecheck_for_statement(info, payload, scope, current_function);
+    }
+
+    if (payload->kind == NODE_WITH_STATEMENT) {
+        return typecheck_with_statement(info, payload, scope, current_function);
     }
 
     if (semantic_is_if_statement(payload)) {

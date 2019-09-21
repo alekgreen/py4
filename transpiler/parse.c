@@ -139,6 +139,7 @@ static ParseNode *parse_ASSERT_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
 static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FOR_STATEMENT(TokenStream *ts);
+static ParseNode *parse_WITH_STATEMENT(TokenStream *ts);
 static ParseNode *parse_CLASS_DEF(TokenStream *ts);
 static ParseNode *parse_FIELD_DECL(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
@@ -231,6 +232,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_IF_STATEMENT:         return "IF_STATEMENT";
         case NODE_WHILE_STATEMENT:      return "WHILE_STATEMENT";
         case NODE_FOR_STATEMENT:        return "FOR_STATEMENT";
+        case NODE_WITH_STATEMENT:       return "WITH_STATEMENT";
         case NODE_CLASS_DEF:            return "CLASS_DEF";
         case NODE_FIELD_DECL:           return "FIELD_DECL";
         case NODE_ELIF_CLAUSE:          return "ELIF_CLAUSE";
@@ -325,6 +327,8 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
         add_child(node, parse_WHILE_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "for")) {
         add_child(node, parse_FOR_STATEMENT(ts));
+    } else if (parse_is_keyword_token(peek_ts(ts), "with")) {
+        add_child(node, parse_WITH_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "class")) {
         add_child(node, parse_CLASS_DEF(ts));
     } else {
@@ -449,6 +453,26 @@ static ParseNode *parse_FOR_STATEMENT(TokenStream *ts)
     add_child(node, create_node_from_token(NODE_PRIMARY, iterator_name));
     parse_expect_keyword(ts, "in");
     add_child(node, parse_EXPRESSION(ts));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    add_child(node, parse_SUITE(ts));
+    expect(ts, TOKEN_DEDENT);
+    return node;
+}
+
+static ParseNode *parse_WITH_STATEMENT(TokenStream *ts)
+{
+    Token with_tok = parse_expect_keyword(ts, "with");
+    ParseNode *node = create_node_from_token(NODE_WITH_STATEMENT, with_tok);
+    Token target_name;
+    Token colon_tok;
+
+    add_child(node, parse_EXPRESSION(ts));
+    parse_expect_keyword(ts, "as");
+    target_name = expect(ts, TOKEN_IDENTIFIER);
+    add_child(node, create_node_from_token(NODE_PRIMARY, target_name));
     colon_tok = expect(ts, TOKEN_COLON);
     add_child(node, create_node_from_token(NODE_COLON, colon_tok));
     expect(ts, TOKEN_NEWLINE);

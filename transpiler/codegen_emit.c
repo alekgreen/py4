@@ -1400,6 +1400,36 @@ static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stm
     fputs("}\n", ctx->out);
 }
 
+static void emit_with_statement(CodegenContext *ctx, const ParseNode *with_stmt)
+{
+    const ParseNode *resource_expr = codegen_expect_child(with_stmt, 0, NODE_EXPRESSION);
+    const ParseNode *target = codegen_expect_child(with_stmt, 1, NODE_PRIMARY);
+    const ParseNode *suite = codegen_expect_child(with_stmt, 3, NODE_SUITE);
+    ValueType resource_type = semantic_type_of(ctx->semantic, resource_expr);
+    char *resource_text = codegen_wrapped_expression_to_c_string(ctx, resource_expr, resource_type);
+    char *type_name = codegen_type_to_c_string(resource_type);
+    int resource_owned = codegen_expression_is_owned_ref(ctx, resource_expr);
+
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", type_name, target->value, resource_text);
+    if (!resource_owned) {
+        codegen_emit_ref_incref(ctx, resource_type, target->value);
+    }
+    codegen_push_cleanup_scope(ctx);
+    codegen_register_ref_local(ctx, target->value, resource_type);
+    codegen_emit_suite(ctx, suite);
+    codegen_pop_cleanup_scope(ctx);
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+
+    free(resource_text);
+    free(type_name);
+}
+
 static int argument_count(const ParseNode *arguments)
 {
     if (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0])) {
@@ -1897,6 +1927,11 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_WITH_STATEMENT) {
+        emit_with_statement(ctx, payload);
+        return;
+    }
+
     if (payload->kind == NODE_IMPORT_STATEMENT) {
         codegen_error("imports should be resolved before C code generation");
     }
@@ -2124,6 +2159,8 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
             emit_while_statement(ctx, payload);
         } else if (payload->kind == NODE_FOR_STATEMENT) {
             emit_for_statement(ctx, payload);
+        } else if (payload->kind == NODE_WITH_STATEMENT) {
+            emit_with_statement(ctx, payload);
         }
     }
     ctx->indent_level--;

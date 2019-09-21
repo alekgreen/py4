@@ -24,6 +24,7 @@ static const char *KEYWORDS[] = {
     "if",
     "while",
     "for",
+    "with",
     "in",
     "elif",
     "else",
