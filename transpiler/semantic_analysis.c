@@ -952,12 +952,6 @@ static int typecheck_with_statement(
         semantic_error_at_node(resource_expr, "with expression must be io.File but got %s",
             semantic_type_name(resource_type));
     }
-    if (resource_expr->child_count != 1 ||
-        (resource_expr->children[0]->kind != NODE_CALL &&
-         resource_expr->children[0]->kind != NODE_METHOD_CALL)) {
-        semantic_error_at_node(resource_expr,
-            "with expression must be an io.File-producing call");
-    }
 
     with_scope.parent = scope;
     with_scope.module = scope->module;
