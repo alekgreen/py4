@@ -1236,6 +1236,8 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
         ValueType target_type;
         const char *target_name;
         char *expr_text;
+        int declare_target = codegen_is_type_assignment(statement_tail) ||
+            semantic_is_inferred_declaration_target(ctx->semantic, target);
 
         if (target->kind == NODE_INDEX) {
             ValueType container_type = semantic_type_of(ctx->semantic, target->children[0]);
@@ -1296,7 +1298,7 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             target_type,
             target_name,
             expr_text,
-            codegen_is_type_assignment(statement_tail),
+            declare_target,
             codegen_expression_is_owned_ref(ctx, expr));
         free(expr_text);
     }
@@ -1954,12 +1956,17 @@ static void emit_global_declaration(CodegenContext *ctx, const ParseNode *simple
     ValueType type;
     const ParseNode *name;
 
-    if (!codegen_is_type_assignment(statement_tail)) {
+    if (!codegen_is_type_assignment(statement_tail) &&
+        !semantic_is_inferred_declaration_target(ctx->semantic, codegen_simple_statement_target(simple_stmt))) {
         return;
     }
 
     name = codegen_simple_statement_target(simple_stmt);
-    type = semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail));
+    if (codegen_is_type_assignment(statement_tail)) {
+        type = semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail));
+    } else {
+        type = semantic_type_of(ctx->semantic, name);
+    }
     if (name->kind == NODE_TUPLE_TARGET) {
         emit_tuple_target_declarations(ctx, name, type);
     } else {
@@ -1985,8 +1992,9 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
             continue;
         } else if (payload->kind == NODE_SIMPLE_STATEMENT) {
             if (payload->child_count == 2 &&
-                (payload->children[0]->kind == NODE_PRIMARY || payload->children[0]->kind == NODE_TUPLE_TARGET) &&
-                codegen_is_type_assignment(payload->children[1])) {
+                payload->children[0]->kind == NODE_PRIMARY &&
+                (codegen_is_type_assignment(payload->children[1]) ||
+                 semantic_is_inferred_declaration_target(ctx->semantic, payload->children[0]))) {
                 emit_global_declaration(ctx, payload);
                 wrote_any = 1;
             }

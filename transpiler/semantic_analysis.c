@@ -730,8 +730,26 @@ static int typecheck_simple_statement(
 
     VariableBinding *var = semantic_find_variable(scope, target->value);
     if (var == NULL) {
-        semantic_error_at_node(target, "assignment to undeclared variable '%s'", target->value);
+        expr_type = semantic_infer_expression_type(info, expr, scope);
+        if (expr_type == TYPE_NONE) {
+            semantic_error_at_node(expr,
+                "cannot infer type for '%s' from None; add a type annotation",
+                target->value);
+        }
+        if (semantic_type_is_list(expr_type) &&
+            expr->child_count == 1 &&
+            expr->children[0]->kind == NODE_LIST_LITERAL &&
+            expr->children[0]->child_count == 0) {
+            semantic_error_at_node(expr,
+                "cannot infer type for '%s' from empty list literal; add a type annotation",
+                target->value);
+        }
+        semantic_bind_variable(scope, target->value, expr_type);
+        semantic_record_inferred_declaration_target(info, target);
+        semantic_record_node_type(info, target, expr_type);
+        return 0;
     }
+
     expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, var->type);
     if (!semantic_is_assignable(var->type, expr_type)) {
         semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
@@ -1217,6 +1235,9 @@ static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *pro
 {
     for (size_t module_index = 0; module_index < program->module_count; module_index++) {
         const LoadedModule *module = &program->modules[module_index];
+        Scope module_scope = {0};
+
+        module_scope.module = semantic_find_module_info(info->modules, module->name);
 
         for (size_t i = 0; i < module->root->child_count; i++) {
             const ParseNode *statement = module->root->children[i];
@@ -1235,13 +1256,32 @@ static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *pro
             }
 
             statement_tail = semantic_simple_statement_tail(payload);
-            if (!semantic_is_type_assignment(statement_tail)) {
-                continue;
+            if (semantic_is_type_assignment(statement_tail)) {
+                target_type = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
+            } else {
+                const ParseNode *expr = semantic_statement_tail_expression(statement_tail);
+
+                target_type = semantic_infer_expression_type(info, expr, &module_scope);
+                if (target_type == TYPE_NONE) {
+                    semantic_error_at_node(expr,
+                        "cannot infer type for '%s' from None; add a type annotation",
+                        target->value);
+                }
+                if (semantic_type_is_list(target_type) &&
+                    expr->child_count == 1 &&
+                    expr->children[0]->kind == NODE_LIST_LITERAL &&
+                    expr->children[0]->child_count == 0) {
+                    semantic_error_at_node(expr,
+                        "cannot infer type for '%s' from empty list literal; add a type annotation",
+                        target->value);
+                }
             }
 
-            target_type = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
             add_global_binding(info, module->name, target->value, target_type);
+            semantic_bind_variable(&module_scope, target->value, target_type);
         }
+
+        semantic_free_scope_bindings(module_scope.vars);
     }
 }
 

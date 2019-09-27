@@ -1438,6 +1438,37 @@ GlobalTargetInfo *semantic_find_global_target(const SemanticInfo *info, const Pa
     return NULL;
 }
 
+void semantic_record_inferred_declaration_target(SemanticInfo *info, const ParseNode *node)
+{
+    InferredDeclTargetInfo *target;
+
+    for (target = info->inferred_decl_targets; target != NULL; target = target->next) {
+        if (target->node == node) {
+            return;
+        }
+    }
+
+    target = malloc(sizeof(InferredDeclTargetInfo));
+    if (target == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    target->node = node;
+    target->next = info->inferred_decl_targets;
+    info->inferred_decl_targets = target;
+}
+
+int semantic_is_inferred_declaration_target(const SemanticInfo *info, const ParseNode *node)
+{
+    for (InferredDeclTargetInfo *target = info->inferred_decl_targets; target != NULL; target = target->next) {
+        if (target->node == node) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 const char *semantic_global_c_name(const SemanticInfo *info, const char *module_name, const char *name)
 {
     static char buffer[256];

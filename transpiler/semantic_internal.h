@@ -86,6 +86,11 @@ typedef struct GlobalTargetInfo {
     struct GlobalTargetInfo *next;
 } GlobalTargetInfo;
 
+typedef struct InferredDeclTargetInfo {
+    const ParseNode *node;
+    struct InferredDeclTargetInfo *next;
+} InferredDeclTargetInfo;
+
 typedef struct ModuleInfo {
     const char *name;
     const char *path;
@@ -104,6 +109,7 @@ struct SemanticInfo {
     ModuleInfo *entry_module;
     GlobalBinding *globals;
     GlobalTargetInfo *global_targets;
+    InferredDeclTargetInfo *inferred_decl_targets;
 };
 
 void semantic_error(const char *message, ...);
@@ -157,5 +163,7 @@ void semantic_record_global_target(
     const char *module_name,
     const char *name);
 GlobalTargetInfo *semantic_find_global_target(const SemanticInfo *info, const ParseNode *node);
+void semantic_record_inferred_declaration_target(SemanticInfo *info, const ParseNode *node);
+int semantic_is_inferred_declaration_target(const SemanticInfo *info, const ParseNode *node);
 
 #endif

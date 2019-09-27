@@ -1,0 +1,1 @@
+cannot infer type for 'xs' from empty list literal; add a type annotation

@@ -88,5 +88,6 @@ ValueType semantic_method_parameter_type(
     ValueType owner_type,
     const char *method_name,
     size_t index);
+int semantic_is_inferred_declaration_target(const SemanticInfo *info, const ParseNode *node);
 
 #endif
