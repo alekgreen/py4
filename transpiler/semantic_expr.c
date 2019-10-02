@@ -1196,6 +1196,11 @@ static ValueType infer_call_type(
         if (arg_type == TYPE_NONE) {
             semantic_error_at_node(arguments->children[0], "print cannot print None");
         }
+        if (semantic_type_is_optional(arg_type)) {
+            semantic_error_at_node(arguments->children[0],
+                "print cannot print optional type %s",
+                semantic_type_name(arg_type));
+        }
         if (semantic_type_is_native(arg_type)) {
             char type_name[128];
 
@@ -1433,6 +1438,10 @@ ValueType semantic_infer_primary_type(
         case TOKEN_KEYWORD:
             if (strcmp(node->value, "True") == 0 || strcmp(node->value, "False") == 0) {
                 type = TYPE_BOOL;
+                break;
+            }
+            if (strcmp(node->value, "None") == 0) {
+                type = TYPE_NONE;
                 break;
             }
             semantic_error_at_node(node, "unexpected keyword '%s' in expression", node->value);

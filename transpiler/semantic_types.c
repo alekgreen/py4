@@ -37,6 +37,12 @@ typedef struct {
     const ParseNode *node;
 } NativeTypeInfo;
 
+typedef struct {
+    ValueType id;
+    ValueType base_type;
+    char name[192];
+} OptionalTypeInfo;
+
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
 static size_t TUPLE_TYPE_COUNT = 0;
 static ClassTypeInfo CLASS_TYPES[MAX_CLASS_TYPES];
@@ -45,6 +51,8 @@ static ClassListTypeInfo CLASS_LIST_TYPES[MAX_CLASS_LIST_TYPES];
 static size_t CLASS_LIST_TYPE_COUNT = 0;
 static NativeTypeInfo NATIVE_TYPES[MAX_NATIVE_TYPES];
 static size_t NATIVE_TYPE_COUNT = 0;
+static OptionalTypeInfo OPTIONAL_TYPES[MAX_OPTIONAL_TYPES];
+static size_t OPTIONAL_TYPE_COUNT = 0;
 
 static const TupleTypeInfo *find_tuple_type(ValueType type)
 {
@@ -94,6 +102,18 @@ static NativeTypeInfo *find_native_type_info(ValueType type)
     return NULL;
 }
 
+static OptionalTypeInfo *find_optional_type_info(ValueType type)
+{
+    for (size_t i = 0; i < OPTIONAL_TYPE_COUNT; i++) {
+        if (OPTIONAL_TYPES[i].id == type) {
+            return &OPTIONAL_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown optional type id %u", type);
+    return NULL;
+}
+
 static int tuple_elements_equal(const TupleTypeInfo *info, const ValueType *elements, size_t count)
 {
     if (info->element_count != count) {
@@ -134,6 +154,9 @@ static const char *type_member_name(ValueType type)
     }
     if (semantic_type_is_native(type)) {
         return find_native_type_info(type)->qualified_name;
+    }
+    if (semantic_type_is_optional(type)) {
+        return find_optional_type_info(type)->name;
     }
 
     switch (type) {
@@ -475,6 +498,11 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 
 int semantic_type_contains(ValueType type, ValueType member)
 {
+    if (semantic_type_is_optional(type)) {
+        ValueType base_type = find_optional_type_info(type)->base_type;
+
+        return member == TYPE_NONE || member == base_type;
+    }
     if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member) ||
         semantic_type_is_list(type) || semantic_type_is_list(member) ||
         semantic_type_is_class(type) || semantic_type_is_class(member) ||
@@ -488,6 +516,7 @@ int semantic_type_is_union(ValueType type)
 {
     if (semantic_type_is_tuple(type) || semantic_type_is_list(type) ||
         semantic_type_is_class(type) || semantic_type_is_native(type) ||
+        semantic_type_is_optional(type) ||
         (type & ~TYPE_ATOMIC_MASK) != 0) {
         return 0;
     }
@@ -507,6 +536,11 @@ int semantic_type_is_class(ValueType type)
 int semantic_type_is_native(ValueType type)
 {
     return type >= TYPE_NATIVE_BASE && type < TYPE_NATIVE_BASE + MAX_NATIVE_TYPES;
+}
+
+int semantic_type_is_optional(ValueType type)
+{
+    return type >= TYPE_OPTIONAL_BASE && type < TYPE_OPTIONAL_BASE + MAX_OPTIONAL_TYPES;
 }
 
 int semantic_type_is_ref(ValueType type)
@@ -537,6 +571,10 @@ int semantic_type_needs_management(ValueType type)
             }
         }
         return 0;
+    }
+
+    if (semantic_type_is_optional(type)) {
+        return semantic_type_needs_management(semantic_optional_base_type(type));
     }
 
     return 0;
@@ -603,6 +641,9 @@ const char *semantic_type_name(ValueType type)
     };
 
     if (semantic_type_is_tuple(type) || semantic_type_is_class(type)) {
+        return type_member_name(type);
+    }
+    if (semantic_type_is_optional(type)) {
         return type_member_name(type);
     }
 
@@ -739,6 +780,15 @@ int semantic_is_assignable(ValueType target, ValueType value)
         return 0;
     }
 
+    if (semantic_type_is_optional(target)) {
+        ValueType base_type = semantic_optional_base_type(target);
+
+        return value == TYPE_NONE || value == base_type || value == target;
+    }
+    if (semantic_type_is_optional(value)) {
+        return target == value;
+    }
+
     if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value) ||
         semantic_type_is_list(target) || semantic_type_is_list(value) ||
         semantic_type_is_class(target) || semantic_type_is_class(value) ||
@@ -809,6 +859,41 @@ ValueType semantic_make_list_type(ValueType element_type)
     return entry->id;
 }
 
+ValueType semantic_make_optional_type(ValueType base_type)
+{
+    OptionalTypeInfo *entry;
+
+    if (!semantic_type_is_class(base_type) && !semantic_type_is_native(base_type)) {
+        semantic_error("optional base type must be class or native, got %s",
+            semantic_type_name(base_type));
+    }
+
+    for (size_t i = 0; i < OPTIONAL_TYPE_COUNT; i++) {
+        if (OPTIONAL_TYPES[i].base_type == base_type) {
+            return OPTIONAL_TYPES[i].id;
+        }
+    }
+
+    if (OPTIONAL_TYPE_COUNT >= MAX_OPTIONAL_TYPES) {
+        semantic_error("too many optional types");
+    }
+
+    entry = &OPTIONAL_TYPES[OPTIONAL_TYPE_COUNT];
+    entry->id = TYPE_OPTIONAL_BASE + (ValueType)OPTIONAL_TYPE_COUNT;
+    entry->base_type = base_type;
+    snprintf(entry->name, sizeof(entry->name), "%s | None", semantic_type_name(base_type));
+    OPTIONAL_TYPE_COUNT++;
+    return entry->id;
+}
+
+ValueType semantic_optional_base_type(ValueType type)
+{
+    if (!semantic_type_is_optional(type)) {
+        semantic_error("%s is not an optional type", semantic_type_name(type));
+    }
+    return find_optional_type_info(type)->base_type;
+}
+
 ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count)
 {
     TupleTypeInfo *entry;
@@ -824,6 +909,9 @@ ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_cou
     for (size_t i = 0; i < element_count; i++) {
         if (semantic_type_is_union(elements[i])) {
             semantic_error("tuple elements cannot be union types yet");
+        }
+        if (semantic_type_is_optional(elements[i])) {
+            semantic_error("tuple elements cannot use optional types yet");
         }
         if (semantic_type_is_native(elements[i])) {
             semantic_error("tuple elements cannot use native opaque types yet");
@@ -1044,6 +1132,9 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         if (semantic_type_is_union(field_type)) {
             semantic_error_at_node(field, "class fields cannot use union types yet");
         }
+        if (semantic_type_is_optional(field_type)) {
+            semantic_error_at_node(field, "class fields cannot use optional types yet");
+        }
         if (semantic_type_is_native(field_type)) {
             semantic_error_at_node(field, "class fields cannot use native opaque types yet");
         }
@@ -1140,6 +1231,28 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
 
     if (type_node == NULL || type_node->kind != NODE_TYPE || type_node->child_count == 0) {
         semantic_error("malformed type annotation");
+    }
+
+    if (type_node->child_count == 2) {
+        ValueType first_type = parse_type_atom_node(info, semantic_expect_child(type_node, 0, NODE_PRIMARY));
+        ValueType second_type = parse_type_atom_node(info, semantic_expect_child(type_node, 1, NODE_PRIMARY));
+        ValueType base_type = 0;
+
+        semantic_record_node_type(info, type_node->children[0], first_type);
+        semantic_record_node_type(info, type_node->children[1], second_type);
+
+        if (first_type == TYPE_NONE && (semantic_type_is_class(second_type) || semantic_type_is_native(second_type))) {
+            base_type = second_type;
+        } else if (second_type == TYPE_NONE &&
+            (semantic_type_is_class(first_type) || semantic_type_is_native(first_type))) {
+            base_type = first_type;
+        }
+
+        if (base_type != 0) {
+            type = semantic_make_optional_type(base_type);
+            semantic_record_node_type(info, type_node, type);
+            return type;
+        }
     }
 
     for (size_t i = 0; i < type_node->child_count; i++) {
@@ -1369,6 +1482,19 @@ ValueType semantic_native_type_at(size_t index)
         semantic_error("native type index out of bounds");
     }
     return NATIVE_TYPES[index].id;
+}
+
+size_t semantic_optional_type_count(void)
+{
+    return OPTIONAL_TYPE_COUNT;
+}
+
+ValueType semantic_optional_type_at(size_t index)
+{
+    if (index >= OPTIONAL_TYPE_COUNT) {
+        semantic_error("optional type index out of bounds");
+    }
+    return OPTIONAL_TYPES[index].id;
 }
 
 const char *semantic_native_type_name(ValueType type)

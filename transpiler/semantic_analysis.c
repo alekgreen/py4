@@ -259,6 +259,23 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
         case TYPE_LIST_STR: append_text(buffer, size, length, "list_str"); return;
         case TYPE_DICT_STR_STR: append_text(buffer, size, length, "dict_str_str"); return;
         default:
+            if (semantic_type_is_class(type)) {
+                append_text(buffer, size, length, "class_");
+                append_text(buffer, size, length, semantic_class_name(type));
+                return;
+            }
+            if (semantic_type_is_native(type)) {
+                append_text(buffer, size, length, "native_");
+                append_text(buffer, size, length, semantic_native_type_module(type));
+                append_text(buffer, size, length, "_");
+                append_text(buffer, size, length, semantic_native_type_name(type));
+                return;
+            }
+            if (semantic_type_is_optional(type)) {
+                append_text(buffer, size, length, "optional_");
+                append_type_mangle(buffer, size, length, semantic_optional_base_type(type));
+                return;
+            }
             semantic_error("unsupported function overload type %s", semantic_type_name(type));
     }
 }
@@ -1514,6 +1531,15 @@ void free_semantic_info(SemanticInfo *info)
             free((char *) modules->path);
             free(modules);
             modules = next_module;
+        }
+    }
+
+    {
+        InferredDeclTargetInfo *targets = info->inferred_decl_targets;
+        while (targets != NULL) {
+            InferredDeclTargetInfo *next = targets->next;
+            free(targets);
+            targets = next;
         }
     }
 

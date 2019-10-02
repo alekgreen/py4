@@ -129,6 +129,13 @@ void codegen_emit_value_retain(CodegenContext *ctx, ValueType type, const char *
         return;
     }
 
+    if (semantic_type_is_optional(type)) {
+        codegen_build_optional_retain_name(helper_name, sizeof(helper_name), type);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
+        return;
+    }
+
     codegen_error("unsupported managed type %s", semantic_type_name(type));
 }
 
@@ -155,6 +162,13 @@ void codegen_emit_value_release(CodegenContext *ctx, ValueType type, const char 
 
     if (semantic_type_is_class(type)) {
         codegen_build_class_release_name(helper_name, sizeof(helper_name), type);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
+        return;
+    }
+
+    if (semantic_type_is_optional(type)) {
+        codegen_build_optional_release_name(helper_name, sizeof(helper_name), type);
         codegen_emit_indent(ctx);
         fprintf(ctx->out, "%s(&%s);\n", helper_name, name);
         return;
@@ -1262,6 +1276,25 @@ char *codegen_wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNod
     char helper_name[MAX_NAME_LEN];
     char *inner;
     char *result;
+
+    if (semantic_type_is_optional(target_type)) {
+        ValueType base_type = semantic_optional_base_type(target_type);
+        char optional_name[MAX_NAME_LEN];
+
+        codegen_build_optional_base_name(optional_name, sizeof(optional_name), target_type);
+        if (expr_type == target_type) {
+            return codegen_expression_to_c_string(ctx, expr);
+        }
+        if (expr_type == TYPE_NONE) {
+            return codegen_dup_printf("((%s){ .is_none = true })", optional_name);
+        }
+        if (expr_type == base_type) {
+            inner = codegen_wrapped_expression_to_c_string(ctx, expr, base_type);
+            result = codegen_dup_printf("((%s){ .is_none = false, .value = %s })", optional_name, inner);
+            free(inner);
+            return result;
+        }
+    }
 
     if (semantic_type_is_union(target_type)) {
         if (semantic_type_is_union(expr_type)) {

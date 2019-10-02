@@ -451,7 +451,7 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     Token tok = peek_ts(ts);
 
     if (tok.type == TOKEN_NUMBER || tok.type == TOKEN_STRING || tok.type == TOKEN_CHAR ||
-        parse_is_bool_literal(tok)) {
+        parse_is_bool_literal(tok) || parse_is_keyword_token(tok, "None")) {
         tok = get_from_ts(ts);
         return create_node_from_token(NODE_PRIMARY, tok);
     }

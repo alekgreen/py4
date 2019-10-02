@@ -94,6 +94,38 @@ void codegen_build_class_ctor_name(char *buffer, size_t size, ValueType type)
     snprintf(buffer, size, "%s__ctor", semantic_class_name(type));
 }
 
+void codegen_build_optional_base_name(char *buffer, size_t size, ValueType type)
+{
+    ValueType base_type;
+
+    if (!semantic_type_is_optional(type)) {
+        codegen_error("%s is not an optional type", semantic_type_name(type));
+    }
+
+    base_type = semantic_optional_base_type(type);
+    snprintf(buffer, size, "py4_optional_%s", codegen_type_suffix(base_type));
+}
+
+void codegen_build_optional_retain_name(char *buffer, size_t size, ValueType type)
+{
+    char base_name[MAX_NAME_LEN];
+    const char *trimmed;
+
+    codegen_build_optional_base_name(base_name, sizeof(base_name), type);
+    trimmed = strncmp(base_name, "py4_", 4) == 0 ? base_name + 4 : base_name;
+    snprintf(buffer, size, "py4_retain_%s", trimmed);
+}
+
+void codegen_build_optional_release_name(char *buffer, size_t size, ValueType type)
+{
+    char base_name[MAX_NAME_LEN];
+    const char *trimmed;
+
+    codegen_build_optional_base_name(base_name, sizeof(base_name), type);
+    trimmed = strncmp(base_name, "py4_", 4) == 0 ? base_name + 4 : base_name;
+    snprintf(buffer, size, "py4_release_%s", trimmed);
+}
+
 void codegen_build_native_print_name(char *buffer, size_t size, ValueType type)
 {
     snprintf(buffer, size, "py4_print_%s", codegen_type_suffix(type));
@@ -280,6 +312,11 @@ const char *codegen_type_suffix(ValueType type)
             semantic_native_type_name(type));
         return list_name;
     }
+    if (semantic_type_is_optional(type)) {
+        snprintf(list_name, sizeof(list_name), "optional_%s",
+            codegen_type_suffix(semantic_optional_base_type(type)));
+        return list_name;
+    }
 
     switch (type) {
         case TYPE_INT: return "int";
@@ -300,6 +337,9 @@ const char *codegen_type_field(ValueType type)
     }
     if (semantic_type_is_class(type)) {
         codegen_error("class types are not valid union fields");
+    }
+    if (semantic_type_is_optional(type)) {
+        codegen_error("optional types are not valid union fields");
     }
 
     switch (type) {
@@ -410,6 +450,13 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         fprintf(out, "%s *", semantic_native_c_type(type));
         return;
     }
+    if (semantic_type_is_optional(type)) {
+        char optional_name[MAX_NAME_LEN];
+
+        codegen_build_optional_base_name(optional_name, sizeof(optional_name), type);
+        fputs(optional_name, out);
+        return;
+    }
     if (semantic_type_is_list(type)) {
         fprintf(out, "%s *", codegen_list_struct_name(type));
         return;
@@ -471,6 +518,12 @@ char *codegen_type_to_c_string(ValueType type)
         }
         if (semantic_type_is_native(type)) {
             return codegen_dup_printf("%s *", semantic_native_c_type(type));
+        }
+        if (semantic_type_is_optional(type)) {
+            char optional_name[MAX_NAME_LEN];
+
+            codegen_build_optional_base_name(optional_name, sizeof(optional_name), type);
+            return codegen_dup_printf("%s", optional_name);
         }
     }
 
@@ -1049,6 +1102,11 @@ static void emit_managed_field_retain(FILE *out, ValueType type, const char *val
         fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
         return;
     }
+    if (semantic_type_is_optional(type)) {
+        codegen_build_optional_retain_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
+        return;
+    }
 
     codegen_error("unsupported managed type %s", semantic_type_name(type));
 }
@@ -1074,6 +1132,11 @@ static void emit_managed_field_release(FILE *out, ValueType type, const char *va
 
     if (semantic_type_is_class(type)) {
         codegen_build_class_release_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
+        return;
+    }
+    if (semantic_type_is_optional(type)) {
+        codegen_build_optional_release_name(helper_name, sizeof(helper_name), type);
         fprintf(out, "    %s(&%s);\n", helper_name, value_expr);
         return;
     }
@@ -1237,12 +1300,19 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
 
         fprintf(ctx->out, "typedef struct %s %s;\n", struct_name, struct_name);
     }
+    for (size_t i = 0; i < semantic_native_type_count(); i++) {
+        ValueType native_type = semantic_native_type_at(i);
+
+        fprintf(ctx->out, "typedef struct %s %s;\n",
+            semantic_native_c_type(native_type),
+            semantic_native_c_type(native_type));
+    }
     {
         const char *dict_struct = codegen_dict_struct_name(TYPE_DICT_STR_STR);
 
         fprintf(ctx->out, "typedef struct %s %s;\n", dict_struct, dict_struct);
     }
-    if (semantic_list_type_count() > 0) {
+    if (semantic_list_type_count() > 0 || semantic_native_type_count() > 0) {
         fputc('\n', ctx->out);
     }
 
@@ -1263,6 +1333,18 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
             visiting_tuples,
             emitted_classes,
             visiting_classes);
+    }
+    for (size_t i = 0; i < semantic_optional_type_count(); i++) {
+        ValueType optional_type = semantic_optional_type_at(i);
+        ValueType base_type = semantic_optional_base_type(optional_type);
+        char optional_name[MAX_NAME_LEN];
+
+        codegen_build_optional_base_name(optional_name, sizeof(optional_name), optional_type);
+        fprintf(ctx->out, "typedef struct {\n");
+        fprintf(ctx->out, "    bool is_none;\n");
+        codegen_emit_scalar_c_type(ctx->out, base_type);
+        fprintf(ctx->out, " value;\n");
+        fprintf(ctx->out, "} %s;\n\n", optional_name);
     }
 
     for (size_t i = 0; i < semantic_class_type_count(); i++) {
@@ -1293,8 +1375,20 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), tuple_type);
         fprintf(ctx->out, "static void %s(%s value);\n", helper_name, tuple_name);
     }
+    for (size_t i = 0; i < semantic_optional_type_count(); i++) {
+        ValueType optional_type = semantic_optional_type_at(i);
+        char optional_name[MAX_NAME_LEN];
 
-    if (semantic_class_type_count() > 0 || semantic_tuple_type_count() > 0) {
+        codegen_build_optional_base_name(optional_name, sizeof(optional_name), optional_type);
+        codegen_build_optional_retain_name(helper_name, sizeof(helper_name), optional_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n", helper_name, optional_name);
+        codegen_build_optional_release_name(helper_name, sizeof(helper_name), optional_type);
+        fprintf(ctx->out, "static void %s(%s *value);\n", helper_name, optional_name);
+    }
+
+    if (semantic_class_type_count() > 0 ||
+        semantic_tuple_type_count() > 0 ||
+        semantic_optional_type_count() > 0) {
         fputc('\n', ctx->out);
     }
 }
@@ -1392,6 +1486,30 @@ void codegen_emit_struct_types(CodegenContext *ctx)
             emit_tuple_value_print(ctx->out, semantic_tuple_element_type(tuple_type, j), value_expr);
         }
         fputs("    printf(\")\");\n", ctx->out);
+        fputs("}\n\n", ctx->out);
+    }
+
+    for (size_t i = 0; i < semantic_optional_type_count(); i++) {
+        ValueType optional_type = semantic_optional_type_at(i);
+        ValueType base_type = semantic_optional_base_type(optional_type);
+        char optional_name[MAX_NAME_LEN];
+
+        codegen_build_optional_base_name(optional_name, sizeof(optional_name), optional_type);
+
+        codegen_build_optional_retain_name(helper_name, sizeof(helper_name), optional_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, optional_name);
+        fputs("    if (value->is_none) {\n", ctx->out);
+        fputs("        return;\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        emit_managed_field_retain(ctx->out, base_type, "value->value");
+        fputs("}\n\n", ctx->out);
+
+        codegen_build_optional_release_name(helper_name, sizeof(helper_name), optional_type);
+        fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, optional_name);
+        fputs("    if (value->is_none) {\n", ctx->out);
+        fputs("        return;\n", ctx->out);
+        fputs("    }\n", ctx->out);
+        emit_managed_field_release(ctx->out, base_type, "value->value");
         fputs("}\n\n", ctx->out);
     }
 }
