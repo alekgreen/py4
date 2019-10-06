@@ -56,63 +56,208 @@ static void emit_union_constructor_call(CodegenContext *ctx, ValueType union_typ
 
 static int native_type_runtime_emitted(ValueType type)
 {
-    return semantic_type_is_native(type) &&
-        strcmp(semantic_native_type_module(type), "io") == 0 &&
-        strcmp(semantic_native_type_name(type), "File") == 0;
+    if (!semantic_type_is_native(type)) {
+        return 0;
+    }
+
+    return (strcmp(semantic_native_type_module(type), "io") == 0 &&
+            strcmp(semantic_native_type_name(type), "File") == 0) ||
+        (strcmp(semantic_native_type_module(type), "json") == 0 &&
+            strcmp(semantic_native_type_name(type), "Value") == 0);
 }
 
 static void emit_native_type_runtime(CodegenContext *ctx)
 {
     int emitted_io_file = 0;
+    int emitted_json_value = 0;
 
     for (size_t i = 0; i < semantic_native_type_count(); i++) {
         ValueType type = semantic_native_type_at(i);
 
-        if (!native_type_runtime_emitted(type) || emitted_io_file) {
+        if (!native_type_runtime_emitted(type)) {
             continue;
         }
 
-        fputs("typedef struct Py4IoFile {\n", ctx->out);
-        fputs("    int refcount;\n", ctx->out);
-        fputs("    FILE *handle;\n", ctx->out);
-        fputs("    bool closed;\n", ctx->out);
-        fputs("} Py4IoFile;\n\n", ctx->out);
+        if (strcmp(semantic_native_type_module(type), "io") == 0 &&
+            strcmp(semantic_native_type_name(type), "File") == 0) {
+            if (emitted_io_file) {
+                continue;
+            }
 
-        fputs("static Py4IoFile *py4_io_file_new(FILE *handle)\n{\n", ctx->out);
-        fputs("    Py4IoFile *file = malloc(sizeof(Py4IoFile));\n", ctx->out);
-        fputs("    if (file == NULL) {\n", ctx->out);
-        fputs("        perror(\"malloc\");\n", ctx->out);
-        fputs("        if (handle != NULL) {\n", ctx->out);
-        fputs("            fclose(handle);\n", ctx->out);
-        fputs("        }\n", ctx->out);
-        fputs("        exit(1);\n", ctx->out);
-        fputs("    }\n", ctx->out);
-        fputs("    file->refcount = 1;\n", ctx->out);
-        fputs("    file->handle = handle;\n", ctx->out);
-        fputs("    file->closed = false;\n", ctx->out);
-        fputs("    return file;\n", ctx->out);
-        fputs("}\n\n", ctx->out);
+            fputs("typedef struct Py4IoFile {\n", ctx->out);
+            fputs("    int refcount;\n", ctx->out);
+            fputs("    FILE *handle;\n", ctx->out);
+            fputs("    bool closed;\n", ctx->out);
+            fputs("} Py4IoFile;\n\n", ctx->out);
 
-        fputs("static void py4_io_file_incref(Py4IoFile *file)\n{\n", ctx->out);
-        fputs("    if (file != NULL) {\n", ctx->out);
-        fputs("        file->refcount++;\n", ctx->out);
-        fputs("    }\n", ctx->out);
-        fputs("}\n\n", ctx->out);
+            fputs("static Py4IoFile *py4_io_file_new(FILE *handle)\n{\n", ctx->out);
+            fputs("    Py4IoFile *file = malloc(sizeof(Py4IoFile));\n", ctx->out);
+            fputs("    if (file == NULL) {\n", ctx->out);
+            fputs("        perror(\"malloc\");\n", ctx->out);
+            fputs("        if (handle != NULL) {\n", ctx->out);
+            fputs("            fclose(handle);\n", ctx->out);
+            fputs("        }\n", ctx->out);
+            fputs("        exit(1);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    file->refcount = 1;\n", ctx->out);
+            fputs("    file->handle = handle;\n", ctx->out);
+            fputs("    file->closed = false;\n", ctx->out);
+            fputs("    return file;\n", ctx->out);
+            fputs("}\n\n", ctx->out);
 
-        fputs("static void py4_io_file_decref(Py4IoFile *file)\n{\n", ctx->out);
-        fputs("    if (file == NULL) {\n", ctx->out);
-        fputs("        return;\n", ctx->out);
-        fputs("    }\n", ctx->out);
-        fputs("    file->refcount--;\n", ctx->out);
-        fputs("    if (file->refcount <= 0) {\n", ctx->out);
-        fputs("        if (!file->closed && file->handle != NULL) {\n", ctx->out);
-        fputs("            fclose(file->handle);\n", ctx->out);
-        fputs("        }\n", ctx->out);
-        fputs("        free(file);\n", ctx->out);
-        fputs("    }\n", ctx->out);
-        fputs("}\n\n", ctx->out);
+            fputs("static void py4_io_file_incref(Py4IoFile *file)\n{\n", ctx->out);
+            fputs("    if (file != NULL) {\n", ctx->out);
+            fputs("        file->refcount++;\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
 
-        emitted_io_file = 1;
+            fputs("static void py4_io_file_decref(Py4IoFile *file)\n{\n", ctx->out);
+            fputs("    if (file == NULL) {\n", ctx->out);
+            fputs("        return;\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    file->refcount--;\n", ctx->out);
+            fputs("    if (file->refcount <= 0) {\n", ctx->out);
+            fputs("        if (!file->closed && file->handle != NULL) {\n", ctx->out);
+            fputs("            fclose(file->handle);\n", ctx->out);
+            fputs("        }\n", ctx->out);
+            fputs("        free(file);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            emitted_io_file = 1;
+            continue;
+        }
+
+        if (strcmp(semantic_native_type_module(type), "json") == 0 &&
+            strcmp(semantic_native_type_name(type), "Value") == 0) {
+            if (emitted_json_value) {
+                continue;
+            }
+
+            fputs("typedef struct cJSON {\n", ctx->out);
+            fputs("    struct cJSON *next;\n", ctx->out);
+            fputs("    struct cJSON *prev;\n", ctx->out);
+            fputs("    struct cJSON *child;\n", ctx->out);
+            fputs("    int type;\n", ctx->out);
+            fputs("    char *valuestring;\n", ctx->out);
+            fputs("    int valueint;\n", ctx->out);
+            fputs("    double valuedouble;\n", ctx->out);
+            fputs("    char *string;\n", ctx->out);
+            fputs("} cJSON;\n\n", ctx->out);
+
+            fputs("extern cJSON *cJSON_Parse(const char *value);\n", ctx->out);
+            fputs("extern void cJSON_Delete(cJSON *item);\n", ctx->out);
+            fputs("extern char *cJSON_PrintUnformatted(const cJSON *item);\n", ctx->out);
+            fputs("extern cJSON *cJSON_GetObjectItemCaseSensitive(const cJSON *object, const char *string);\n", ctx->out);
+            fputs("extern const char *cJSON_GetErrorPtr(void);\n", ctx->out);
+            fputs("extern int cJSON_IsInvalid(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsBool(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsTrue(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsNumber(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsString(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsArray(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsObject(const cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_IsNull(const cJSON *item);\n\n", ctx->out);
+
+            fputs("typedef struct Py4JsonOwner {\n", ctx->out);
+            fputs("    int refcount;\n", ctx->out);
+            fputs("    cJSON *root;\n", ctx->out);
+            fputs("} Py4JsonOwner;\n\n", ctx->out);
+
+            fputs("typedef struct Py4JsonValue {\n", ctx->out);
+            fputs("    int refcount;\n", ctx->out);
+            fputs("    Py4JsonOwner *owner;\n", ctx->out);
+            fputs("    cJSON *node;\n", ctx->out);
+            fputs("} Py4JsonValue;\n\n", ctx->out);
+
+            fputs("static char *py4_json_strdup(const char *value)\n{\n", ctx->out);
+            fputs("    size_t len;\n", ctx->out);
+            fputs("    char *copy;\n", ctx->out);
+            fputs("    if (value == NULL) {\n", ctx->out);
+            fputs("        value = \"\";\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    len = strlen(value);\n", ctx->out);
+            fputs("    copy = malloc(len + 1);\n", ctx->out);
+            fputs("    if (copy == NULL) {\n", ctx->out);
+            fputs("        perror(\"malloc\");\n", ctx->out);
+            fputs("        exit(1);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    memcpy(copy, value, len + 1);\n", ctx->out);
+            fputs("    return copy;\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static void py4_json_fail(const char *message)\n{\n", ctx->out);
+            fputs("    fprintf(stderr, \"Runtime error: %s\\n\", message);\n", ctx->out);
+            fputs("    exit(1);\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static Py4JsonOwner *py4_json_owner_new(cJSON *root)\n{\n", ctx->out);
+            fputs("    Py4JsonOwner *owner = malloc(sizeof(Py4JsonOwner));\n", ctx->out);
+            fputs("    if (owner == NULL) {\n", ctx->out);
+            fputs("        perror(\"malloc\");\n", ctx->out);
+            fputs("        if (root != NULL) {\n", ctx->out);
+            fputs("            cJSON_Delete(root);\n", ctx->out);
+            fputs("        }\n", ctx->out);
+            fputs("        exit(1);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    owner->refcount = 1;\n", ctx->out);
+            fputs("    owner->root = root;\n", ctx->out);
+            fputs("    return owner;\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static void py4_json_owner_incref(Py4JsonOwner *owner)\n{\n", ctx->out);
+            fputs("    if (owner != NULL) {\n", ctx->out);
+            fputs("        owner->refcount++;\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static void py4_json_owner_decref(Py4JsonOwner *owner)\n{\n", ctx->out);
+            fputs("    if (owner == NULL) {\n", ctx->out);
+            fputs("        return;\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    owner->refcount--;\n", ctx->out);
+            fputs("    if (owner->refcount <= 0) {\n", ctx->out);
+            fputs("        if (owner->root != NULL) {\n", ctx->out);
+            fputs("            cJSON_Delete(owner->root);\n", ctx->out);
+            fputs("        }\n", ctx->out);
+            fputs("        free(owner);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static Py4JsonValue *py4_json_value_new(Py4JsonOwner *owner, cJSON *node)\n{\n", ctx->out);
+            fputs("    Py4JsonValue *value = malloc(sizeof(Py4JsonValue));\n", ctx->out);
+            fputs("    if (value == NULL) {\n", ctx->out);
+            fputs("        perror(\"malloc\");\n", ctx->out);
+            fputs("        py4_json_owner_decref(owner);\n", ctx->out);
+            fputs("        exit(1);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    value->refcount = 1;\n", ctx->out);
+            fputs("    value->owner = owner;\n", ctx->out);
+            fputs("    value->node = node;\n", ctx->out);
+            fputs("    py4_json_owner_incref(owner);\n", ctx->out);
+            fputs("    return value;\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static void py4_json_value_incref(Py4JsonValue *value)\n{\n", ctx->out);
+            fputs("    if (value != NULL) {\n", ctx->out);
+            fputs("        value->refcount++;\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static void py4_json_value_decref(Py4JsonValue *value)\n{\n", ctx->out);
+            fputs("    if (value == NULL) {\n", ctx->out);
+            fputs("        return;\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    value->refcount--;\n", ctx->out);
+            fputs("    if (value->refcount <= 0) {\n", ctx->out);
+            fputs("        py4_json_owner_decref(value->owner);\n", ctx->out);
+            fputs("        free(value);\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            emitted_json_value = 1;
+            continue;
+        }
     }
 }
 
@@ -811,6 +956,231 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "parse") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_STR) {
+        const char *text = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "cJSON *root = cJSON_Parse(%s);\n", text);
+        codegen_emit_indent(ctx);
+        fputs("Py4JsonOwner *owner;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("Py4JsonValue *value;\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (root == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("const char *error_ptr = cJSON_GetErrorPtr();\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"Runtime error: failed to parse json\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("if (error_ptr != NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \" near: %s\", error_ptr);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("fprintf(stderr, \"\\n\");\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("exit(1);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("owner = py4_json_owner_new(root);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("value = py4_json_value_new(owner, root);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("py4_json_owner_decref(owner);\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return value;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "stringify") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"cannot stringify null json value handle\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "char *text = cJSON_PrintUnformatted(%s->node);\n", value_name);
+        codegen_emit_indent(ctx);
+        fputs("if (text == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"failed to stringify json value\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return text;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "get") == 0 &&
+        parameters->child_count == 2 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+        const char *key_name = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"cannot get from null json value handle\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (!cJSON_IsObject(%s->node)) {\n", value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"json.get expects an object value\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "cJSON *child = cJSON_GetObjectItemCaseSensitive(%s->node, %s);\n", value_name, key_name);
+        codegen_emit_indent(ctx);
+        fputs("if (child == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"json key not found\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_json_value_new(%s->owner, child);\n", value_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+        const char *predicate = NULL;
+        int handled_bool_conversion = 0;
+        int handled_float_conversion = 0;
+        int handled_string_conversion = 0;
+
+        if (strcmp(name->value, "is_null") == 0) {
+            predicate = "cJSON_IsNull";
+        } else if (strcmp(name->value, "is_bool") == 0) {
+            predicate = "cJSON_IsBool";
+        } else if (strcmp(name->value, "is_number") == 0) {
+            predicate = "cJSON_IsNumber";
+        } else if (strcmp(name->value, "is_string") == 0) {
+            predicate = "cJSON_IsString";
+        } else if (strcmp(name->value, "is_array") == 0) {
+            predicate = "cJSON_IsArray";
+        } else if (strcmp(name->value, "is_object") == 0) {
+            predicate = "cJSON_IsObject";
+        } else if (strcmp(name->value, "as_bool") == 0) {
+            handled_bool_conversion = 1;
+        } else if (strcmp(name->value, "as_float") == 0) {
+            handled_float_conversion = 1;
+        } else if (strcmp(name->value, "as_string") == 0) {
+            handled_string_conversion = 1;
+        }
+
+        if (predicate != NULL || handled_bool_conversion || handled_float_conversion || handled_string_conversion) {
+            codegen_emit_type_name(ctx, return_type);
+            fprintf(ctx->out, " %s(", c_name);
+            emit_parameter_list(ctx, parameters, 0);
+            fputs(")\n{\n", ctx->out);
+            ctx->indent_level++;
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+            ctx->indent_level++;
+            codegen_emit_indent(ctx);
+            fputs("py4_json_fail(\"cannot use a null json value handle\");\n", ctx->out);
+            ctx->indent_level--;
+            codegen_emit_indent(ctx);
+            fputs("}\n", ctx->out);
+
+            if (predicate != NULL) {
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "return %s(%s->node) ? true : false;\n", predicate, value_name);
+            } else if (handled_bool_conversion) {
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "if (!cJSON_IsBool(%s->node)) {\n", value_name);
+                ctx->indent_level++;
+                codegen_emit_indent(ctx);
+                fputs("py4_json_fail(\"json value is not a bool\");\n", ctx->out);
+                ctx->indent_level--;
+                codegen_emit_indent(ctx);
+                fputs("}\n", ctx->out);
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "return cJSON_IsTrue(%s->node) ? true : false;\n", value_name);
+            } else if (handled_float_conversion) {
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "if (!cJSON_IsNumber(%s->node)) {\n", value_name);
+                ctx->indent_level++;
+                codegen_emit_indent(ctx);
+                fputs("py4_json_fail(\"json value is not a number\");\n", ctx->out);
+                ctx->indent_level--;
+                codegen_emit_indent(ctx);
+                fputs("}\n", ctx->out);
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "return %s->node->valuedouble;\n", value_name);
+            } else if (handled_string_conversion) {
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "if (!cJSON_IsString(%s->node) || %s->node->valuestring == NULL) {\n", value_name, value_name);
+                ctx->indent_level++;
+                codegen_emit_indent(ctx);
+                fputs("py4_json_fail(\"json value is not a string\");\n", ctx->out);
+                ctx->indent_level--;
+                codegen_emit_indent(ctx);
+                fputs("}\n", ctx->out);
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "return py4_json_strdup(%s->node->valuestring);\n", value_name);
+            }
+
+            ctx->indent_level--;
+            fputs("}\n\n", ctx->out);
+            return;
+        }
     }
 
     codegen_error("unsupported native stdlib function '%s'", name->value);

@@ -7,6 +7,7 @@ OK_DIR="$ROOT_DIR/tests/cases/ok"
 FAIL_DIR="$ROOT_DIR/tests/cases/fail"
 RUNTIME_FAIL_DIR="$ROOT_DIR/tests/cases/runtime_fail"
 TMP_DIR="$(mktemp -d)"
+GENERATED_RUNTIME_SRC="$ROOT_DIR/runtime/vendor/cjson/cJSON.c"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -32,7 +33,7 @@ run_ok_case() {
         return
     fi
 
-    if ! gcc -std=c11 "$generated_c" -o "$generated_bin" >"$TMP_DIR/${base_name}.gcc.log" 2>&1; then
+    if ! gcc -std=c11 "$generated_c" "$GENERATED_RUNTIME_SRC" -o "$generated_bin" >"$TMP_DIR/${base_name}.gcc.log" 2>&1; then
         printf 'FAIL ok/%s: generated C did not compile\n' "$base_name"
         cat "$TMP_DIR/${base_name}.gcc.log"
         fail_count=$((fail_count + 1))
@@ -95,7 +96,7 @@ run_runtime_fail_case() {
         return
     fi
 
-    if ! gcc -std=c11 "$generated_c" -o "$generated_bin" >"$TMP_DIR/${base_name}.gcc.log" 2>&1; then
+    if ! gcc -std=c11 "$generated_c" "$GENERATED_RUNTIME_SRC" -o "$generated_bin" >"$TMP_DIR/${base_name}.gcc.log" 2>&1; then
         printf 'FAIL runtime_fail/%s: generated C did not compile\n' "$base_name"
         cat "$TMP_DIR/${base_name}.gcc.log"
         fail_count=$((fail_count + 1))

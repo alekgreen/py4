@@ -1048,6 +1048,9 @@ void semantic_register_native_type(const char *module_name, const ParseNode *typ
     if (strcmp(module_name, "io") == 0 && strcmp(name, "File") == 0) {
         snprintf(entry->c_type, sizeof(entry->c_type), "Py4IoFile");
         snprintf(entry->runtime_prefix, sizeof(entry->runtime_prefix), "py4_io_file");
+    } else if (strcmp(module_name, "json") == 0 && strcmp(name, "Value") == 0) {
+        snprintf(entry->c_type, sizeof(entry->c_type), "Py4JsonValue");
+        snprintf(entry->runtime_prefix, sizeof(entry->runtime_prefix), "py4_json_value");
     } else {
         semantic_error_at_node(name_node, "unsupported native type '%s.%s'", module_name, name);
     }

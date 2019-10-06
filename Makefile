@@ -6,6 +6,7 @@ PY4_SRC := transpiler/main.c transpiler/lexer.c transpiler/parse.c transpiler/pa
 INPUT ?= examples/functions.p4
 OUTPUT ?= out.c
 RUN_TARGET ?= out
+GENERATED_RUNTIME_SRC := runtime/vendor/cjson/cJSON.c
 
 .PHONY: all transpile run test clean
 
@@ -18,7 +19,7 @@ transpile: $(TARGET)
 	./$(TARGET) $(INPUT) > $(OUTPUT)
 
 run: transpile
-	$(CC) -std=c11 $(OUTPUT) -o $(RUN_TARGET)
+	$(CC) -std=c11 $(OUTPUT) $(GENERATED_RUNTIME_SRC) -o $(RUN_TARGET)
 	$(if $(filter /%,$(RUN_TARGET)),$(RUN_TARGET),./$(RUN_TARGET))
 
 test: $(TARGET)
