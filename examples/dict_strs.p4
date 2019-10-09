@@ -3,6 +3,7 @@ def main() -> None:
     print(colors)
     print(colors.keys())
     print(colors.values())
+    print(colors.items())
     print(colors.get("apple"))
     print(colors["sky"])
     print(colors.contains("grass"))

@@ -60,6 +60,11 @@ static void emit_runtime_value_print(CodegenContext *ctx, ValueType type, const 
         fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
         return;
     }
+    if (semantic_type_is_tuple(type)) {
+        codegen_build_tuple_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:
@@ -285,6 +290,15 @@ static void emit_dict_runtime(
     const char *prefix,
     const char *type_name)
 {
+    ValueType item_types[2] = {TYPE_STR, TYPE_STR};
+    ValueType tuple_type = semantic_make_tuple_type(item_types, 2);
+    ValueType items_list_type = semantic_make_list_type(tuple_type);
+    const char *items_struct_name = codegen_list_struct_name(items_list_type);
+    const char *items_prefix = codegen_list_runtime_prefix(items_list_type);
+    char tuple_name[MAX_NAME_LEN];
+
+    codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+
     fprintf(ctx->out, "struct %s {\n", struct_name);
     fprintf(ctx->out, "    int refcount;\n");
     fprintf(ctx->out, "    size_t len;\n");
@@ -441,6 +455,20 @@ static void emit_dict_runtime(
     fprintf(ctx->out, "    return values;\n");
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static %s *%s_items(%s *dict)\n{\n", items_struct_name, prefix, struct_name);
+    fprintf(ctx->out, "    %s *items;\n", items_struct_name);
+    fprintf(ctx->out, "    if (dict == NULL) {\n");
+    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+    fprintf(ctx->out, "        exit(1);\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    items = %s_new();\n", items_prefix);
+    fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+    fprintf(ctx->out, "        %s entry = (%s){dict->keys[i], dict->values[i]};\n", tuple_name, tuple_name);
+    fprintf(ctx->out, "        %s_append(items, entry);\n", items_prefix);
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    return items;\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static const char *%s_pop(%s *dict, const char *key)\n{\n", prefix, struct_name);
     fprintf(ctx->out, "    int index;\n");
     fprintf(ctx->out, "    const char *value;\n");
@@ -497,6 +525,10 @@ static void emit_dict_runtime(
 
 void codegen_emit_container_runtime(CodegenContext *ctx)
 {
+    ValueType dict_item_types[2] = {TYPE_STR, TYPE_STR};
+
+    (void)semantic_make_list_type(semantic_make_tuple_type(dict_item_types, 2));
+
     for (size_t i = 0; i < semantic_list_type_count(); i++) {
         emit_list_runtime(ctx, semantic_list_type_at(i));
     }

@@ -14,4 +14,8 @@ native def as_bool(value: Value) -> bool
 native def as_float(value: Value) -> float
 native def as_string(value: Value) -> str
 
+native def len(value: Value) -> int
+native def has(value: Value, key: str) -> bool
+native def keys(value: Value) -> list[str]
 native def get(value: Value, key: str) -> Value
+native def get_index(value: Value, index: int) -> Value

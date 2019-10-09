@@ -837,8 +837,8 @@ ValueType semantic_make_list_type(ValueType element_type)
         semantic_error("list elements cannot use native opaque types yet");
     }
 
-    if (!semantic_type_is_class(element_type)) {
-        semantic_error("list elements must currently be int, float, bool, char, str, or class values");
+    if (!semantic_type_is_class(element_type) && !semantic_type_is_tuple(element_type)) {
+        semantic_error("list elements must currently be int, float, bool, char, str, tuple, or class values");
     }
 
     for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {

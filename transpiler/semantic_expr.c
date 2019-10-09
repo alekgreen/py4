@@ -979,6 +979,16 @@ static ValueType infer_method_call_type(
             return TYPE_LIST_STR;
         }
 
+        if (strcmp(method->value, "items") == 0) {
+            ValueType elements[2] = {TYPE_STR, TYPE_STR};
+            ValueType tuple_type = semantic_make_tuple_type(elements, 2);
+            ValueType list_type = semantic_make_list_type(tuple_type);
+
+            expect_argument_count(method->value, arguments, 0);
+            semantic_record_node_type(info, call, list_type);
+            return list_type;
+        }
+
         if (strcmp(method->value, "pop") == 0) {
             ValueType key_type;
 

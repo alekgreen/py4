@@ -70,6 +70,7 @@ static int is_dict_method_name(const char *name)
         strcmp(name, "get") == 0 ||
         strcmp(name, "contains") == 0 ||
         strcmp(name, "keys") == 0 ||
+        strcmp(name, "items") == 0 ||
         strcmp(name, "values") == 0 ||
         strcmp(name, "pop") == 0 ||
         strcmp(name, "clear") == 0 ||
@@ -869,6 +870,8 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             result = codegen_dict_unary_call(receiver_type, "keys", receiver_name);
         } else if (strcmp(method->value, "values") == 0) {
             result = codegen_dict_unary_call(receiver_type, "values", receiver_name);
+        } else if (strcmp(method->value, "items") == 0) {
+            result = codegen_dict_unary_call(receiver_type, "items", receiver_name);
         } else if (strcmp(method->value, "pop") == 0) {
             char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
 
