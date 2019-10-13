@@ -183,35 +183,31 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
 static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok)
 {
     ParseNode *node;
-    Token key_tok;
-    Token value_tok;
     char *type_name;
+    ParseNode *key_type;
+    ParseNode *value_type;
     size_t len;
 
     expect(ts, TOKEN_LBRACKET);
-    key_tok = get_from_ts(ts);
-    if (!parse_is_type_token(key_tok) || strcmp(key_tok.value, "str") != 0) {
-        parse_error(key_tok, "only dict[str, str] is supported right now");
-    }
+    key_type = parse_TYPE_ATOM(ts);
     expect(ts, TOKEN_COMMA);
-    value_tok = get_from_ts(ts);
-    if (!parse_is_type_token(value_tok) || strcmp(value_tok.value, "str") != 0) {
-        parse_error(value_tok, "only dict[str, str] is supported right now");
-    }
+    value_type = parse_TYPE_ATOM(ts);
     expect(ts, TOKEN_RBRACKET);
 
-    len = strlen("dict[str, str]") + 1;
+    len = strlen("dict[") + strlen(key_type->value) + strlen(", ") + strlen(value_type->value) + strlen("]") + 1;
     type_name = malloc(len);
     if (type_name == NULL) {
         perror("malloc");
         exit(1);
     }
-    memcpy(type_name, "dict[str, str]", len);
+    snprintf(type_name, len, "dict[%s, %s]", key_type->value, value_type->value);
     node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
     node->line = dict_tok.line;
     node->column = dict_tok.column;
     node->source_path = parse_dup_string(dict_tok.path);
     node->source_line = parse_dup_string(dict_tok.line_text);
+    add_child(node, key_type);
+    add_child(node, value_type);
     free(type_name);
     return node;
 }

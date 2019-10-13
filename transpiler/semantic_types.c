@@ -43,6 +43,13 @@ typedef struct {
     char name[192];
 } OptionalTypeInfo;
 
+typedef struct {
+    ValueType id;
+    ValueType key_type;
+    ValueType value_type;
+    char name[192];
+} DictTypeInfo;
+
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
 static size_t TUPLE_TYPE_COUNT = 0;
 static ClassTypeInfo CLASS_TYPES[MAX_CLASS_TYPES];
@@ -53,6 +60,8 @@ static NativeTypeInfo NATIVE_TYPES[MAX_NATIVE_TYPES];
 static size_t NATIVE_TYPE_COUNT = 0;
 static OptionalTypeInfo OPTIONAL_TYPES[MAX_OPTIONAL_TYPES];
 static size_t OPTIONAL_TYPE_COUNT = 0;
+static DictTypeInfo DICT_TYPES[MAX_DICT_TYPES];
+static size_t DICT_TYPE_COUNT = 0;
 
 static const TupleTypeInfo *find_tuple_type(ValueType type)
 {
@@ -114,6 +123,18 @@ static OptionalTypeInfo *find_optional_type_info(ValueType type)
     return NULL;
 }
 
+static DictTypeInfo *find_dict_type_info(ValueType type)
+{
+    for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {
+        if (DICT_TYPES[i].id == type) {
+            return &DICT_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown dict type id %u", type);
+    return NULL;
+}
+
 static int tuple_elements_equal(const TupleTypeInfo *info, const ValueType *elements, size_t count)
 {
     if (info->element_count != count) {
@@ -158,6 +179,9 @@ static const char *type_member_name(ValueType type)
     if (semantic_type_is_optional(type)) {
         return find_optional_type_info(type)->name;
     }
+    if (semantic_type_is_dict(type)) {
+        return find_dict_type_info(type)->name;
+    }
 
     switch (type) {
         case TYPE_INT: return "int";
@@ -171,7 +195,6 @@ static const char *type_member_name(ValueType type)
         case TYPE_LIST_BOOL: return "list[bool]";
         case TYPE_LIST_CHAR: return "list[char]";
         case TYPE_LIST_STR: return "list[str]";
-        case TYPE_DICT_STR_STR: return "dict[str, str]";
         default: return "unknown";
     }
 }
@@ -210,9 +233,6 @@ static ValueType parse_named_type_atom(const char *name)
     }
     if (strcmp(name, "list[str]") == 0) {
         return TYPE_LIST_STR;
-    }
-    if (strcmp(name, "dict[str, str]") == 0) {
-        return TYPE_DICT_STR_STR;
     }
 
     return 0;
@@ -305,6 +325,23 @@ static int split_module_member_name(
     module_name[module_len] = '\0';
     memcpy(member_name, dot + 1, member_len + 1);
     return 1;
+}
+
+static int dict_key_type_supported(ValueType type)
+{
+    return type == TYPE_INT ||
+        type == TYPE_BOOL ||
+        type == TYPE_CHAR ||
+        type == TYPE_STR;
+}
+
+static int dict_value_type_supported(ValueType type)
+{
+    return type == TYPE_INT ||
+        type == TYPE_FLOAT ||
+        type == TYPE_BOOL ||
+        type == TYPE_CHAR ||
+        type == TYPE_STR;
 }
 
 static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
@@ -482,6 +519,19 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
         semantic_error_at_node(node, "unsupported type '%s'", node->value);
     }
 
+    if (strncmp(node->value, "dict[", 5) == 0) {
+        ValueType key_type;
+        ValueType value_type;
+
+        if (node->child_count != 2) {
+            semantic_error_at_node(node, "malformed dict type '%s'", node->value);
+        }
+
+        key_type = parse_type_atom_node(info, semantic_expect_child(node, 0, NODE_PRIMARY));
+        value_type = parse_type_atom_node(info, semantic_expect_child(node, 1, NODE_PRIMARY));
+        return semantic_make_dict_type(key_type, value_type);
+    }
+
     if (node->child_count < 2) {
         semantic_error_at_node(node, "tuple types must have at least two elements");
     }
@@ -505,6 +555,7 @@ int semantic_type_contains(ValueType type, ValueType member)
     }
     if (semantic_type_is_tuple(type) || semantic_type_is_tuple(member) ||
         semantic_type_is_list(type) || semantic_type_is_list(member) ||
+        semantic_type_is_dict(type) || semantic_type_is_dict(member) ||
         semantic_type_is_class(type) || semantic_type_is_class(member) ||
         semantic_type_is_native(type) || semantic_type_is_native(member)) {
         return type == member;
@@ -515,6 +566,7 @@ int semantic_type_contains(ValueType type, ValueType member)
 int semantic_type_is_union(ValueType type)
 {
     if (semantic_type_is_tuple(type) || semantic_type_is_list(type) ||
+        semantic_type_is_dict(type) ||
         semantic_type_is_class(type) || semantic_type_is_native(type) ||
         semantic_type_is_optional(type) ||
         (type & ~TYPE_ATOMIC_MASK) != 0) {
@@ -546,7 +598,7 @@ int semantic_type_is_optional(ValueType type)
 int semantic_type_is_ref(ValueType type)
 {
     return !semantic_type_is_tuple(type) &&
-        (semantic_type_is_list(type) || type == TYPE_DICT_STR_STR || semantic_type_is_native(type));
+        (semantic_type_is_list(type) || semantic_type_is_dict(type) || semantic_type_is_native(type));
 }
 
 int semantic_type_needs_management(ValueType type)
@@ -593,7 +645,7 @@ int semantic_type_is_list(ValueType type)
 
 int semantic_type_is_dict(ValueType type)
 {
-    return type == TYPE_DICT_STR_STR;
+    return type >= TYPE_DICT_BASE && type < TYPE_DICT_BASE + MAX_DICT_TYPES;
 }
 
 ValueType semantic_list_element_type(ValueType type)
@@ -618,6 +670,22 @@ ValueType semantic_list_element_type(ValueType type)
     }
 }
 
+ValueType semantic_dict_key_type(ValueType type)
+{
+    if (!semantic_type_is_dict(type)) {
+        semantic_error("%s is not a dict type", semantic_type_name(type));
+    }
+    return find_dict_type_info(type)->key_type;
+}
+
+ValueType semantic_dict_value_type(ValueType type)
+{
+    if (!semantic_type_is_dict(type)) {
+        semantic_error("%s is not a dict type", semantic_type_name(type));
+    }
+    return find_dict_type_info(type)->value_type;
+}
+
 const char *semantic_type_name(ValueType type)
 {
     static char buffers[8][96];
@@ -636,11 +704,10 @@ const char *semantic_type_name(ValueType type)
         TYPE_LIST_FLOAT,
         TYPE_LIST_BOOL,
         TYPE_LIST_CHAR,
-        TYPE_LIST_STR,
-        TYPE_DICT_STR_STR
+        TYPE_LIST_STR
     };
 
-    if (semantic_type_is_tuple(type) || semantic_type_is_class(type)) {
+    if (semantic_type_is_tuple(type) || semantic_type_is_class(type) || semantic_type_is_dict(type)) {
         return type_member_name(type);
     }
     if (semantic_type_is_optional(type)) {
@@ -772,8 +839,7 @@ int semantic_is_assignable(ValueType target, ValueType value)
         TYPE_BOOL,
         TYPE_CHAR,
         TYPE_STR,
-        TYPE_NONE,
-        TYPE_DICT_STR_STR
+        TYPE_NONE
     };
 
     if (target == 0 || value == 0) {
@@ -791,6 +857,7 @@ int semantic_is_assignable(ValueType target, ValueType value)
 
     if (semantic_type_is_tuple(target) || semantic_type_is_tuple(value) ||
         semantic_type_is_list(target) || semantic_type_is_list(value) ||
+        semantic_type_is_dict(target) || semantic_type_is_dict(value) ||
         semantic_type_is_class(target) || semantic_type_is_class(value) ||
         semantic_type_is_native(target) || semantic_type_is_native(value)) {
         return target == value;
@@ -856,6 +923,38 @@ ValueType semantic_make_list_type(ValueType element_type)
     entry->element_type = element_type;
     snprintf(entry->name, sizeof(entry->name), "list[%s]", semantic_type_name(element_type));
     CLASS_LIST_TYPE_COUNT++;
+    return entry->id;
+}
+
+ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
+{
+    DictTypeInfo *entry;
+
+    if (!dict_key_type_supported(key_type)) {
+        semantic_error("dict keys must currently be int, bool, char, or str");
+    }
+    if (!dict_value_type_supported(value_type)) {
+        semantic_error("dict values must currently be int, float, bool, char, or str");
+    }
+
+    for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {
+        if (DICT_TYPES[i].key_type == key_type && DICT_TYPES[i].value_type == value_type) {
+            return DICT_TYPES[i].id;
+        }
+    }
+
+    if (DICT_TYPE_COUNT >= MAX_DICT_TYPES) {
+        semantic_error("too many dict types in one program");
+    }
+
+    entry = &DICT_TYPES[DICT_TYPE_COUNT];
+    entry->id = TYPE_DICT_BASE + (ValueType)DICT_TYPE_COUNT;
+    entry->key_type = key_type;
+    entry->value_type = value_type;
+    snprintf(entry->name, sizeof(entry->name), "dict[%s, %s]",
+        semantic_type_name(key_type),
+        semantic_type_name(value_type));
+    DICT_TYPE_COUNT++;
     return entry->id;
 }
 
@@ -1006,6 +1105,19 @@ ValueType semantic_list_type_at(size_t index)
             }
             return CLASS_LIST_TYPES[index - 5].id;
     }
+}
+
+size_t semantic_dict_type_count(void)
+{
+    return DICT_TYPE_COUNT;
+}
+
+ValueType semantic_dict_type_at(size_t index)
+{
+    if (index >= DICT_TYPE_COUNT) {
+        semantic_error("dict type index out of bounds");
+    }
+    return DICT_TYPES[index].id;
 }
 
 ValueType semantic_find_class_type(const char *name)
@@ -1274,6 +1386,10 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
             (type != 0 || type_node->child_count > 1)) {
             semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
         }
+        if ((semantic_type_is_dict(atom) || semantic_type_is_dict(type)) &&
+            (type != 0 || type_node->child_count > 1)) {
+            semantic_error_at_node(type_node, "dict types cannot be used inside a union yet");
+        }
 
         if (semantic_type_contains(type, atom)) {
             semantic_error_at_node(member, "duplicate type '%s' in union", member->value);
@@ -1283,14 +1399,14 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         type |= atom;
     }
 
-    if (semantic_type_contains(type, TYPE_DICT_STR_STR) && semantic_type_is_union(type)) {
-        semantic_error_at_node(type_node, "dict types cannot be used inside a union yet");
-    }
     if (semantic_type_is_union(type)) {
         for (size_t i = 0; i < type_node->child_count; i++) {
             ValueType member_type = parse_type_atom_node(info, type_node->children[i]);
             if (semantic_type_is_tuple(member_type)) {
                 semantic_error_at_node(type_node, "tuple types cannot be used inside a union yet");
+            }
+            if (semantic_type_is_dict(member_type)) {
+                semantic_error_at_node(type_node, "dict types cannot be used inside a union yet");
             }
             if (semantic_type_is_class(member_type)) {
                 semantic_error_at_node(type_node, "class types cannot be used inside a union yet");

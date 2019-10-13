@@ -100,24 +100,28 @@ const char *codegen_list_element_c_type(ValueType type)
 
 const char *codegen_dict_struct_name(ValueType type)
 {
-    switch (type) {
-        case TYPE_DICT_STR_STR:
-            return "Py4DictStrStr";
-        default:
-            codegen_error("%s is not a supported dict type", semantic_type_name(type));
-            return "";
+    static char name[MAX_NAME_LEN];
+
+    if (!semantic_type_is_dict(type)) {
+        codegen_error("%s is not a supported dict type", semantic_type_name(type));
     }
+    snprintf(name, sizeof(name), "Py4Dict_%s_%s",
+        codegen_type_suffix(semantic_dict_key_type(type)),
+        codegen_type_suffix(semantic_dict_value_type(type)));
+    return name;
 }
 
 const char *codegen_dict_runtime_prefix(ValueType type)
 {
-    switch (type) {
-        case TYPE_DICT_STR_STR:
-            return "py4_dict_str_str";
-        default:
-            codegen_error("%s is not a supported dict type", semantic_type_name(type));
-            return "";
+    static char name[MAX_NAME_LEN];
+
+    if (!semantic_type_is_dict(type)) {
+        codegen_error("%s is not a supported dict type", semantic_type_name(type));
     }
+    snprintf(name, sizeof(name), "py4_dict_%s_%s",
+        codegen_type_suffix(semantic_dict_key_type(type)),
+        codegen_type_suffix(semantic_dict_value_type(type)));
+    return name;
 }
 
 char *codegen_list_new_call(ValueType type)

@@ -1,0 +1,7 @@
+{todo: 2, done: 5}
+5
+[todo, done]
+[2, 5]
+[(todo, 2), (done, 5)]
+True
+one

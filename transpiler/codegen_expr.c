@@ -356,7 +356,7 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             return codegen_list_new_call(TYPE_LIST_STR);
         }
         if (strcmp(callee->value, "dict_str_str") == 0) {
-            return codegen_dict_new_call(TYPE_DICT_STR_STR);
+            return codegen_dict_new_call(semantic_make_dict_type(TYPE_STR, TYPE_STR));
         }
     } else {
         if (class_type == 0) {
@@ -1002,8 +1002,16 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
     }
 
     if (primary->kind == NODE_DICT_LITERAL) {
+        ValueType dict_type = semantic_type_of(ctx->semantic, primary);
+        ValueType key_type = semantic_dict_key_type(dict_type);
+        ValueType value_type = semantic_dict_value_type(dict_type);
+        char *key_c_type = codegen_type_to_c_string(key_type);
+        char *value_c_type = codegen_type_to_c_string(value_type);
+
         if (primary->child_count == 0) {
-            return codegen_dict_new_call(TYPE_DICT_STR_STR);
+            free(key_c_type);
+            free(value_c_type);
+            return codegen_dict_new_call(dict_type);
         }
 
         {
@@ -1012,8 +1020,8 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             char *result;
 
             for (size_t i = 0; i + 1 < primary->child_count; i += 2) {
-                char *key = codegen_wrapped_expression_to_c_string(ctx, primary->children[i], TYPE_STR);
-                char *value = codegen_wrapped_expression_to_c_string(ctx, primary->children[i + 1], TYPE_STR);
+                char *key = codegen_wrapped_expression_to_c_string(ctx, primary->children[i], key_type);
+                char *value = codegen_wrapped_expression_to_c_string(ctx, primary->children[i + 1], value_type);
                 char *joined_keys = i == 0
                     ? codegen_dup_printf("%s", key)
                     : codegen_dup_printf("%s, %s", keys, key);
@@ -1029,13 +1037,17 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
                 values = joined_values;
             }
 
-            result = codegen_dup_printf("%s_from_pairs(%zu, (const char *[]){%s}, (const char *[]){%s})",
-                codegen_dict_runtime_prefix(TYPE_DICT_STR_STR),
+            result = codegen_dup_printf("%s_from_pairs(%zu, (const %s[]){%s}, (const %s[]){%s})",
+                codegen_dict_runtime_prefix(dict_type),
                 primary->child_count / 2,
+                key_c_type,
                 keys,
+                value_c_type,
                 values);
             free(keys);
             free(values);
+            free(key_c_type);
+            free(value_c_type);
             return result;
         }
     }

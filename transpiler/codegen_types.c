@@ -16,8 +16,7 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
     TYPE_LIST_FLOAT,
     TYPE_LIST_BOOL,
     TYPE_LIST_CHAR,
-    TYPE_LIST_STR,
-    TYPE_DICT_STR_STR
+    TYPE_LIST_STR
 };
 
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
@@ -317,6 +316,12 @@ const char *codegen_type_suffix(ValueType type)
             codegen_type_suffix(semantic_optional_base_type(type)));
         return list_name;
     }
+    if (semantic_type_is_dict(type)) {
+        snprintf(list_name, sizeof(list_name), "dict_%s_%s",
+            codegen_type_suffix(semantic_dict_key_type(type)),
+            codegen_type_suffix(semantic_dict_value_type(type)));
+        return list_name;
+    }
 
     switch (type) {
         case TYPE_INT: return "int";
@@ -325,7 +330,6 @@ const char *codegen_type_suffix(ValueType type)
         case TYPE_CHAR: return "char";
         case TYPE_STR: return "str";
         case TYPE_NONE: return "none";
-        case TYPE_DICT_STR_STR: return "dict_str_str";
         default: return "unknown";
     }
 }
@@ -353,7 +357,6 @@ const char *codegen_type_field(ValueType type)
         case TYPE_LIST_BOOL: return "as_list_bool";
         case TYPE_LIST_CHAR: return "as_list_char";
         case TYPE_LIST_STR: return "as_list_str";
-        case TYPE_DICT_STR_STR: return "as_dict_str_str";
         default: return "";
     }
 }
@@ -481,10 +484,11 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         case TYPE_NONE:
             fputs("void", out);
             return;
-        case TYPE_DICT_STR_STR:
-            fprintf(out, "%s *", codegen_dict_struct_name(type));
-            return;
         default:
+            if (semantic_type_is_dict(type)) {
+                fprintf(out, "%s *", codegen_dict_struct_name(type));
+                return;
+            }
             codegen_error("unsupported scalar type %s", semantic_type_name(type));
     }
 }
@@ -497,6 +501,9 @@ char *codegen_type_to_c_string(ValueType type)
         if (semantic_type_is_list(type)) {
             return codegen_dup_printf("%s *", codegen_list_struct_name(type));
         }
+        if (semantic_type_is_dict(type)) {
+            return codegen_dup_printf("%s *", codegen_dict_struct_name(type));
+        }
         switch (type) {
             case TYPE_INT: return codegen_dup_printf("int");
             case TYPE_FLOAT: return codegen_dup_printf("double");
@@ -504,8 +511,6 @@ char *codegen_type_to_c_string(ValueType type)
             case TYPE_CHAR: return codegen_dup_printf("char");
             case TYPE_STR: return codegen_dup_printf("const char *");
             case TYPE_NONE: return codegen_dup_printf("void");
-            case TYPE_DICT_STR_STR:
-                return codegen_dup_printf("%s *", codegen_dict_struct_name(type));
         }
         if (semantic_type_is_tuple(type)) {
             char tuple_name[MAX_NAME_LEN];
@@ -1146,13 +1151,11 @@ static void emit_managed_field_release(FILE *out, ValueType type, const char *va
 
 static void emit_list_print_definitions(CodegenContext *ctx)
 {
-    for (size_t i = 0; i < CODEGEN_ORDERED_TYPE_COUNT; i++) {
-        ValueType type = CODEGEN_ORDERED_TYPES[i];
+    for (size_t i = 0; i < semantic_dict_type_count(); i++) {
+        ValueType type = semantic_dict_type_at(i);
+        ValueType key_type = semantic_dict_key_type(type);
+        ValueType value_type = semantic_dict_value_type(type);
         char helper_name[MAX_NAME_LEN];
-
-        if (!semantic_type_is_dict(type)) {
-            continue;
-        }
 
         codegen_build_dict_print_name(helper_name, sizeof(helper_name), type);
         fprintf(ctx->out, "static void %s(%s *value)\n{\n", helper_name, codegen_dict_struct_name(type));
@@ -1162,7 +1165,9 @@ static void emit_list_print_definitions(CodegenContext *ctx)
         fputs("            if (i > 0) {\n", ctx->out);
         fputs("                printf(\", \");\n", ctx->out);
         fputs("            }\n", ctx->out);
-        fputs("            printf(\"%s: %s\", value->keys[i], value->values[i]);\n", ctx->out);
+        emit_tuple_value_print(ctx->out, key_type, "value->keys[i]");
+        fputs("            printf(\": \");\n", ctx->out);
+        emit_tuple_value_print(ctx->out, value_type, "value->values[i]");
         fputs("        }\n", ctx->out);
         fputs("    }\n", ctx->out);
         fputs("    printf(\"}\");\n", ctx->out);
@@ -1307,12 +1312,13 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
             semantic_native_c_type(native_type),
             semantic_native_c_type(native_type));
     }
-    {
-        const char *dict_struct = codegen_dict_struct_name(TYPE_DICT_STR_STR);
+    for (size_t i = 0; i < semantic_dict_type_count(); i++) {
+        ValueType dict_type = semantic_dict_type_at(i);
+        const char *dict_struct = codegen_dict_struct_name(dict_type);
 
         fprintf(ctx->out, "typedef struct %s %s;\n", dict_struct, dict_struct);
     }
-    if (semantic_list_type_count() > 0 || semantic_native_type_count() > 0) {
+    if (semantic_list_type_count() > 0 || semantic_native_type_count() > 0 || semantic_dict_type_count() > 0) {
         fputc('\n', ctx->out);
     }
 

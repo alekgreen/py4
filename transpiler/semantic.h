@@ -18,6 +18,8 @@ typedef unsigned int ValueType;
 #define MAX_NATIVE_TYPES 16
 #define TYPE_OPTIONAL_BASE (TYPE_NATIVE_BASE + MAX_NATIVE_TYPES)
 #define MAX_OPTIONAL_TYPES 64
+#define TYPE_DICT_BASE (TYPE_OPTIONAL_BASE + MAX_OPTIONAL_TYPES)
+#define MAX_DICT_TYPES 64
 #define MAX_CLASS_FIELDS 32
 
 enum {
@@ -31,8 +33,7 @@ enum {
     TYPE_LIST_FLOAT = 1u << 7,
     TYPE_LIST_BOOL = 1u << 8,
     TYPE_LIST_CHAR = 1u << 9,
-    TYPE_LIST_STR = 1u << 10,
-    TYPE_DICT_STR_STR = 1u << 11
+    TYPE_LIST_STR = 1u << 10
 };
 
 typedef struct SemanticInfo SemanticInfo;
@@ -52,6 +53,9 @@ int semantic_type_needs_management(ValueType type);
 int semantic_type_is_list(ValueType type);
 int semantic_type_is_dict(ValueType type);
 ValueType semantic_list_element_type(ValueType type);
+ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type);
+ValueType semantic_dict_key_type(ValueType type);
+ValueType semantic_dict_value_type(ValueType type);
 ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_count);
 size_t semantic_tuple_element_count(ValueType type);
 ValueType semantic_tuple_element_type(ValueType type, size_t index);
@@ -61,6 +65,8 @@ int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
 size_t semantic_list_type_count(void);
 ValueType semantic_list_type_at(size_t index);
 ValueType semantic_make_list_type(ValueType element_type);
+size_t semantic_dict_type_count(void);
+ValueType semantic_dict_type_at(size_t index);
 size_t semantic_class_type_count(void);
 ValueType semantic_class_type_at(size_t index);
 const char *semantic_class_name(ValueType type);

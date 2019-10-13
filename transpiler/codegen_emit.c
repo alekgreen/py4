@@ -1807,7 +1807,10 @@ static void emit_local_simple_statement(CodegenContext *ctx, const ParseNode *si
             char *call;
 
             if (semantic_type_is_dict(container_type)) {
-                value = codegen_wrapped_expression_to_c_string(ctx, expr, TYPE_STR);
+                value = codegen_wrapped_expression_to_c_string(
+                    ctx,
+                    expr,
+                    semantic_dict_value_type(container_type));
                 call = codegen_dict_ternary_call(container_type, "set", base, index, value);
             } else {
                 ValueType element_type = semantic_list_element_type(container_type);
@@ -2679,7 +2682,10 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
                 char *call;
 
                 if (semantic_type_is_dict(container_type)) {
-                    value = codegen_wrapped_expression_to_c_string(ctx, expr, TYPE_STR);
+                    value = codegen_wrapped_expression_to_c_string(
+                        ctx,
+                        expr,
+                        semantic_dict_value_type(container_type));
                     call = codegen_dict_ternary_call(container_type, "set", base, index, value);
                 } else {
                     ValueType element_type = semantic_list_element_type(container_type);
@@ -2805,8 +2811,12 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     ctx.root = root;
     ctx.semantic = info;
     codegen_collect_program_state(&ctx, root);
-    {
-        ValueType dict_item_types[2] = {TYPE_STR, TYPE_STR};
+    for (size_t i = 0; i < semantic_dict_type_count(); i++) {
+        ValueType dict_type = semantic_dict_type_at(i);
+        ValueType dict_item_types[2] = {
+            semantic_dict_key_type(dict_type),
+            semantic_dict_value_type(dict_type)
+        };
 
         (void)semantic_make_list_type(semantic_make_tuple_type(dict_item_types, 2));
     }

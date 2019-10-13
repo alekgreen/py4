@@ -257,8 +257,14 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
         case TYPE_LIST_BOOL: append_text(buffer, size, length, "list_bool"); return;
         case TYPE_LIST_CHAR: append_text(buffer, size, length, "list_char"); return;
         case TYPE_LIST_STR: append_text(buffer, size, length, "list_str"); return;
-        case TYPE_DICT_STR_STR: append_text(buffer, size, length, "dict_str_str"); return;
         default:
+            if (semantic_type_is_dict(type)) {
+                append_text(buffer, size, length, "dict_");
+                append_type_mangle(buffer, size, length, semantic_dict_key_type(type));
+                append_text(buffer, size, length, "_");
+                append_type_mangle(buffer, size, length, semantic_dict_value_type(type));
+                return;
+            }
             if (semantic_type_is_class(type)) {
                 append_text(buffer, size, length, "class_");
                 append_text(buffer, size, length, semantic_class_name(type));
@@ -630,14 +636,19 @@ static int typecheck_simple_statement(
             semantic_error_at_node(target, "tuple elements are immutable");
         }
         if (semantic_type_is_dict(container_type)) {
-            if (index_type != TYPE_STR) {
-                semantic_error_at_node(target->children[1], "dict index must be str");
+            ValueType key_type = semantic_dict_key_type(container_type);
+            ValueType value_type = semantic_dict_value_type(container_type);
+
+            if (!semantic_is_assignable(key_type, index_type)) {
+                semantic_error_at_node(target->children[1], "dict index must be %s",
+                    semantic_type_name(key_type));
             }
-            if (!semantic_is_assignable(TYPE_STR, expr_type)) {
-                semantic_error_at_node(expr, "cannot assign %s to str dict value",
-                    semantic_type_name(expr_type));
+            if (!semantic_is_assignable(value_type, expr_type)) {
+                semantic_error_at_node(expr, "cannot assign %s to %s dict value",
+                    semantic_type_name(expr_type),
+                    semantic_type_name(value_type));
             }
-            semantic_record_node_type(info, target, TYPE_STR);
+            semantic_record_node_type(info, target, value_type);
             return 0;
         }
         if (!semantic_type_is_list(container_type)) {
@@ -947,7 +958,7 @@ static int typecheck_for_statement(
                 semantic_type_name(iterable_type));
         }
         target_type = semantic_type_is_dict(iterable_type)
-            ? TYPE_STR
+            ? semantic_dict_key_type(iterable_type)
             : semantic_list_element_type(iterable_type);
     }
 

@@ -264,22 +264,25 @@ static ValueType infer_dict_literal_with_hint(
     Scope *scope,
     ValueType expected_type)
 {
-    (void)expected_type;
+    ValueType key_expected = semantic_dict_key_type(expected_type);
+    ValueType value_expected = semantic_dict_value_type(expected_type);
 
     for (size_t i = 0; i + 1 < literal->child_count; i += 2) {
-        ValueType key_type = semantic_infer_expression_type_with_hint(info, literal->children[i], scope, TYPE_STR);
-        ValueType value_type = semantic_infer_expression_type_with_hint(info, literal->children[i + 1], scope, TYPE_STR);
+        ValueType key_type = semantic_infer_expression_type_with_hint(info, literal->children[i], scope, key_expected);
+        ValueType value_type = semantic_infer_expression_type_with_hint(info, literal->children[i + 1], scope, value_expected);
 
-        if (!semantic_is_assignable(TYPE_STR, key_type)) {
-            semantic_error_at_node(literal->children[i], "dict literal keys must be str");
+        if (!semantic_is_assignable(key_expected, key_type)) {
+            semantic_error_at_node(literal->children[i], "dict literal keys must be %s",
+                semantic_type_name(key_expected));
         }
-        if (!semantic_is_assignable(TYPE_STR, value_type)) {
-            semantic_error_at_node(literal->children[i + 1], "dict literal values must be str");
+        if (!semantic_is_assignable(value_expected, value_type)) {
+            semantic_error_at_node(literal->children[i + 1], "dict literal values must be %s",
+                semantic_type_name(value_expected));
         }
     }
 
-    semantic_record_node_type(info, literal, TYPE_DICT_STR_STR);
-    return TYPE_DICT_STR_STR;
+    semantic_record_node_type(info, literal, expected_type);
+    return expected_type;
 }
 
 int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out)
@@ -926,42 +929,51 @@ static ValueType infer_method_call_type(
     }
 
     if (semantic_type_is_dict(receiver_type)) {
-        if (strcmp(method->value, "set") == 0) {
-            ValueType key_type;
-            ValueType value_type;
+        ValueType key_type = semantic_dict_key_type(receiver_type);
+        ValueType value_type = semantic_dict_value_type(receiver_type);
 
+        if (strcmp(method->value, "set") == 0) {
             expect_argument_count(method->value, arguments, 2);
-            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
-            value_type = semantic_infer_expression_type_with_hint(info, arguments->children[1], scope, TYPE_STR);
-            if (!semantic_is_assignable(TYPE_STR, key_type)) {
-                semantic_error_at_node(arguments->children[0], "method 'set' expects str key");
-            }
-            if (!semantic_is_assignable(TYPE_STR, value_type)) {
-                semantic_error_at_node(arguments->children[1], "method 'set' expects str value");
+            {
+                ValueType actual_key = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, key_type);
+                ValueType actual_value = semantic_infer_expression_type_with_hint(info, arguments->children[1], scope, value_type);
+
+                if (!semantic_is_assignable(key_type, actual_key)) {
+                    semantic_error_at_node(arguments->children[0], "method 'set' expects %s key",
+                        semantic_type_name(key_type));
+                }
+                if (!semantic_is_assignable(value_type, actual_value)) {
+                    semantic_error_at_node(arguments->children[1], "method 'set' expects %s value",
+                        semantic_type_name(value_type));
+                }
             }
             semantic_record_node_type(info, call, TYPE_NONE);
             return TYPE_NONE;
         }
 
         if (strcmp(method->value, "get") == 0) {
-            ValueType key_type;
-
             expect_argument_count(method->value, arguments, 1);
-            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
-            if (!semantic_is_assignable(TYPE_STR, key_type)) {
-                semantic_error_at_node(arguments->children[0], "method 'get' expects str key");
+            {
+                ValueType actual_key = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, key_type);
+
+                if (!semantic_is_assignable(key_type, actual_key)) {
+                    semantic_error_at_node(arguments->children[0], "method 'get' expects %s key",
+                        semantic_type_name(key_type));
+                }
             }
-            semantic_record_node_type(info, call, TYPE_STR);
-            return TYPE_STR;
+            semantic_record_node_type(info, call, value_type);
+            return value_type;
         }
 
         if (strcmp(method->value, "contains") == 0) {
-            ValueType key_type;
-
             expect_argument_count(method->value, arguments, 1);
-            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
-            if (!semantic_is_assignable(TYPE_STR, key_type)) {
-                semantic_error_at_node(arguments->children[0], "method 'contains' expects str key");
+            {
+                ValueType actual_key = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, key_type);
+
+                if (!semantic_is_assignable(key_type, actual_key)) {
+                    semantic_error_at_node(arguments->children[0], "method 'contains' expects %s key",
+                        semantic_type_name(key_type));
+                }
             }
             semantic_record_node_type(info, call, TYPE_BOOL);
             return TYPE_BOOL;
@@ -969,18 +981,18 @@ static ValueType infer_method_call_type(
 
         if (strcmp(method->value, "keys") == 0) {
             expect_argument_count(method->value, arguments, 0);
-            semantic_record_node_type(info, call, TYPE_LIST_STR);
-            return TYPE_LIST_STR;
+            semantic_record_node_type(info, call, semantic_make_list_type(key_type));
+            return semantic_make_list_type(key_type);
         }
 
         if (strcmp(method->value, "values") == 0) {
             expect_argument_count(method->value, arguments, 0);
-            semantic_record_node_type(info, call, TYPE_LIST_STR);
-            return TYPE_LIST_STR;
+            semantic_record_node_type(info, call, semantic_make_list_type(value_type));
+            return semantic_make_list_type(value_type);
         }
 
         if (strcmp(method->value, "items") == 0) {
-            ValueType elements[2] = {TYPE_STR, TYPE_STR};
+            ValueType elements[2] = {key_type, value_type};
             ValueType tuple_type = semantic_make_tuple_type(elements, 2);
             ValueType list_type = semantic_make_list_type(tuple_type);
 
@@ -990,15 +1002,17 @@ static ValueType infer_method_call_type(
         }
 
         if (strcmp(method->value, "pop") == 0) {
-            ValueType key_type;
-
             expect_argument_count(method->value, arguments, 1);
-            key_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
-            if (!semantic_is_assignable(TYPE_STR, key_type)) {
-                semantic_error_at_node(arguments->children[0], "method 'pop' expects str key");
+            {
+                ValueType actual_key = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, key_type);
+
+                if (!semantic_is_assignable(key_type, actual_key)) {
+                    semantic_error_at_node(arguments->children[0], "method 'pop' expects %s key",
+                        semantic_type_name(key_type));
+                }
             }
-            semantic_record_node_type(info, call, TYPE_STR);
-            return TYPE_STR;
+            semantic_record_node_type(info, call, value_type);
+            return value_type;
         }
 
         if (strcmp(method->value, "clear") == 0) {
@@ -1100,8 +1114,11 @@ static ValueType infer_builtin_call_type(
 
     if (strcmp(name, "dict_str_str") == 0) {
         expect_argument_count(name, arguments, 0);
-        semantic_record_node_type(info, call, TYPE_DICT_STR_STR);
-        return TYPE_DICT_STR_STR;
+        {
+            ValueType dict_type = semantic_make_dict_type(TYPE_STR, TYPE_STR);
+            semantic_record_node_type(info, call, dict_type);
+            return dict_type;
+        }
     }
 
     if (strcmp(name, "list_append") == 0) {
@@ -1279,20 +1296,38 @@ ValueType semantic_infer_primary_type(
     }
 
     if (node->kind == NODE_DICT_LITERAL) {
-        for (size_t i = 0; i + 1 < node->child_count; i += 2) {
-            ValueType key_type = semantic_infer_expression_type_with_hint(info, node->children[i], scope, TYPE_STR);
-            ValueType value_type = semantic_infer_expression_type_with_hint(info, node->children[i + 1], scope, TYPE_STR);
+        ValueType key_type = 0;
+        ValueType value_type = 0;
 
-            if (!semantic_is_assignable(TYPE_STR, key_type)) {
-                semantic_error_at_node(node->children[i], "dict literal keys must be str");
+        for (size_t i = 0; i + 1 < node->child_count; i += 2) {
+            ValueType item_key_type = semantic_infer_expression_type(info, node->children[i], scope);
+            ValueType item_value_type = semantic_infer_expression_type(info, node->children[i + 1], scope);
+
+            if (key_type == 0) {
+                key_type = item_key_type;
+            } else if (item_key_type != key_type) {
+                semantic_error_at_node(node->children[i],
+                    "dict literals currently require homogeneous key types");
             }
-            if (!semantic_is_assignable(TYPE_STR, value_type)) {
-                semantic_error_at_node(node->children[i + 1], "dict literal values must be str");
+
+            if (value_type == 0) {
+                value_type = item_value_type;
+            } else if (item_value_type == TYPE_INT && value_type == TYPE_FLOAT) {
+                continue;
+            } else if (item_value_type == TYPE_FLOAT && value_type == TYPE_INT) {
+                value_type = TYPE_FLOAT;
+            } else if (item_value_type != value_type) {
+                semantic_error_at_node(node->children[i + 1],
+                    "dict literals currently require homogeneous value types");
             }
         }
 
-        semantic_record_node_type(info, node, TYPE_DICT_STR_STR);
-        return TYPE_DICT_STR_STR;
+        if (key_type == 0 || value_type == 0) {
+            semantic_error_at_node(node, "empty dict literal requires a type annotation");
+        }
+
+        semantic_record_node_type(info, node, semantic_make_dict_type(key_type, value_type));
+        return semantic_make_dict_type(key_type, value_type);
     }
 
     if (node->kind == NODE_TUPLE_LITERAL) {
@@ -1400,11 +1435,15 @@ ValueType semantic_infer_primary_type(
         }
 
         if (semantic_type_is_dict(container_type)) {
-            if (index_type != TYPE_STR) {
-                semantic_error_at_node(node->children[1], "dict index must be str");
+            ValueType key_type = semantic_dict_key_type(container_type);
+            ValueType value_type = semantic_dict_value_type(container_type);
+
+            if (!semantic_is_assignable(key_type, index_type)) {
+                semantic_error_at_node(node->children[1], "dict index must be %s",
+                    semantic_type_name(key_type));
             }
-            semantic_record_node_type(info, node, TYPE_STR);
-            return TYPE_STR;
+            semantic_record_node_type(info, node, value_type);
+            return value_type;
         }
 
         if (!semantic_type_is_list(container_type)) {
@@ -1662,11 +1701,12 @@ ValueType semantic_infer_expression_type(
     }
 
     if (is_membership_operator(operator_node->value)) {
-        if (rhs_type != TYPE_DICT_STR_STR) {
-            semantic_error_at_node(operator_node, "operator 'in' currently requires dict[str, str] on the right");
+        if (!semantic_type_is_dict(rhs_type)) {
+            semantic_error_at_node(operator_node, "operator 'in' currently requires dict on the right");
         }
-        if (lhs_type != TYPE_STR) {
-            semantic_error_at_node(operator_node, "operator 'in' currently requires str on the left");
+        if (!semantic_is_assignable(semantic_dict_key_type(rhs_type), lhs_type)) {
+            semantic_error_at_node(operator_node, "operator 'in' requires %s on the left",
+                semantic_type_name(semantic_dict_key_type(rhs_type)));
         }
         semantic_record_node_type(info, expr, TYPE_BOOL);
         return TYPE_BOOL;

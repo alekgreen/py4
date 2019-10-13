@@ -1,1 +1,1 @@
-operator 'in' currently requires dict[str, str] on the right
+operator 'in' currently requires dict on the right
