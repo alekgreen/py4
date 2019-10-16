@@ -18,5 +18,4 @@ void parse_skip_newlines(TokenStream *ts);
 
 ParseNode *parse_TYPE(TokenStream *ts);
 ParseNode *parse_ASSIGN_TARGET(TokenStream *ts);
-
 #endif

@@ -945,7 +945,10 @@ static int typecheck_for_statement(
     ValueType target_type;
     ValueType iterable_type;
 
-    target = semantic_expect_child(for_stmt, 0, NODE_PRIMARY);
+    target = for_stmt->children[0];
+    if (target == NULL || (target->kind != NODE_PRIMARY && target->kind != NODE_TUPLE_TARGET)) {
+        semantic_error("malformed for loop target");
+    }
     iterable = semantic_expect_child(for_stmt, 1, NODE_EXPRESSION);
 
     if (is_range_expression(iterable)) {
@@ -969,8 +972,28 @@ static int typecheck_for_statement(
     loop_scope.parent = scope;
     loop_scope.module = scope->module;
     loop_scope.current_class_type = scope->current_class_type;
-    semantic_bind_variable(&loop_scope, target->value, target_type);
-    semantic_record_node_type(info, target, target_type);
+    if (target->kind == NODE_TUPLE_TARGET) {
+        size_t target_count = tuple_target_leaf_count(target);
+
+        if (!semantic_type_is_tuple(target_type)) {
+            semantic_error_at_node(iterable, "tuple for target requires a tuple element type");
+        }
+        if (tuple_type_leaf_count(target_type) != target_count) {
+            semantic_error_at_node(iterable,
+                "tuple for target expects %zu elements but got %zu",
+                target_count,
+                tuple_type_leaf_count(target_type));
+        }
+        if (!tuple_target_matches_type(target, target_type)) {
+            semantic_error_at_node(iterable,
+                "tuple for target shape does not match %s",
+                semantic_type_name(target_type));
+        }
+        bind_tuple_target_declaration(info, target, &loop_scope, target_type);
+    } else {
+        semantic_bind_variable(&loop_scope, target->value, target_type);
+        semantic_record_node_type(info, target, target_type);
+    }
     current_function->loop_depth++;
     typecheck_suite(info, for_stmt->children[3], &loop_scope, current_function);
     current_function->loop_depth--;

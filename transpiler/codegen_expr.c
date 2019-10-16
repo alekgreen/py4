@@ -68,6 +68,7 @@ static int is_dict_method_name(const char *name)
 {
     return strcmp(name, "set") == 0 ||
         strcmp(name, "get") == 0 ||
+        strcmp(name, "get_or") == 0 ||
         strcmp(name, "contains") == 0 ||
         strcmp(name, "keys") == 0 ||
         strcmp(name, "items") == 0 ||
@@ -844,25 +845,35 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     receiver_name = materialize_ref_node(ctx, receiver, receiver_type, 1, &needs_cleanup);
 
     if (semantic_type_is_dict(receiver_type)) {
+        ValueType key_type = semantic_dict_key_type(receiver_type);
+        ValueType value_type = semantic_dict_value_type(receiver_type);
+
         if (!is_dict_method_name(method->value)) {
             free(receiver_name);
             codegen_error("unknown method '%s' during code generation", method->value);
         }
 
         if (strcmp(method->value, "set") == 0) {
-            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
-            char *value = codegen_wrapped_expression_to_c_string(ctx, arguments->children[1], TYPE_STR);
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], key_type);
+            char *value = codegen_wrapped_expression_to_c_string(ctx, arguments->children[1], value_type);
 
             result = codegen_dict_ternary_call(receiver_type, "set", receiver_name, key, value);
             free(key);
             free(value);
         } else if (strcmp(method->value, "get") == 0) {
-            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], key_type);
 
             result = codegen_dict_binary_call(receiver_type, "get", receiver_name, key);
             free(key);
+        } else if (strcmp(method->value, "get_or") == 0) {
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], key_type);
+            char *fallback = codegen_wrapped_expression_to_c_string(ctx, arguments->children[1], value_type);
+
+            result = codegen_dict_ternary_call(receiver_type, "get_or", receiver_name, key, fallback);
+            free(key);
+            free(fallback);
         } else if (strcmp(method->value, "contains") == 0) {
-            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], key_type);
 
             result = codegen_dict_binary_call(receiver_type, "contains", receiver_name, key);
             free(key);
@@ -873,7 +884,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         } else if (strcmp(method->value, "items") == 0) {
             result = codegen_dict_unary_call(receiver_type, "items", receiver_name);
         } else if (strcmp(method->value, "pop") == 0) {
-            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+            char *key = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], key_type);
 
             result = codegen_dict_binary_call(receiver_type, "pop", receiver_name, key);
             free(key);

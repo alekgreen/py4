@@ -439,6 +439,15 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    return dict->values[index];\n");
     fprintf(ctx->out, "}\n\n");
 
+    fprintf(ctx->out, "static %s %s_get_or(%s *dict, %s key, %s fallback)\n{\n",
+        value_c_type, prefix, struct_name, key_c_type, value_c_type);
+    fprintf(ctx->out, "    int index = %s_find_index(dict, key);\n", prefix);
+    fprintf(ctx->out, "    if (index < 0) {\n");
+    fprintf(ctx->out, "        return fallback;\n");
+    fprintf(ctx->out, "    }\n");
+    fprintf(ctx->out, "    return dict->values[index];\n");
+    fprintf(ctx->out, "}\n\n");
+
     fprintf(ctx->out, "static %s %s_key_at(%s *dict, int index)\n{\n", key_c_type, prefix, struct_name);
     fprintf(ctx->out, "    if (dict == NULL) {\n");
     fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);

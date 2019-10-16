@@ -2132,7 +2132,7 @@ static void emit_range_for_statement(CodegenContext *ctx, const ParseNode *for_s
 
 static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
 {
-    const ParseNode *target = codegen_expect_child(for_stmt, 0, NODE_PRIMARY);
+    const ParseNode *target = for_stmt->children[0];
     const ParseNode *iterable = codegen_expect_child(for_stmt, 1, NODE_EXPRESSION);
     const ParseNode *suite = codegen_expect_child(for_stmt, 3, NODE_SUITE);
     ValueType iterable_type;
@@ -2144,6 +2144,10 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     int iterable_owned;
     int loop_id = ctx->temp_counter++;
 
+    if (target == NULL || (target->kind != NODE_PRIMARY && target->kind != NODE_TUPLE_TARGET)) {
+        codegen_error("malformed for loop target");
+    }
+
     if (is_range_expression(iterable)) {
         emit_range_for_statement(ctx, for_stmt);
         return;
@@ -2151,7 +2155,7 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
 
     iterable_type = semantic_type_of(ctx->semantic, iterable);
     element_type = semantic_type_is_dict(iterable_type)
-        ? TYPE_STR
+        ? semantic_dict_key_type(iterable_type)
         : semantic_list_element_type(iterable_type);
     iterable_expr = codegen_wrapped_expression_to_c_string(ctx, iterable, iterable_type);
     iterable_name = codegen_next_temp_name(ctx);
@@ -2190,9 +2194,18 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
             ? codegen_dict_binary_call(iterable_type, "key_at", iterable_name, index_name)
             : codegen_list_binary_call(iterable_type, "get", iterable_name, index_name);
 
-        codegen_emit_indent(ctx);
-        codegen_emit_type_name(ctx, element_type);
-        fprintf(ctx->out, " %s = %s;\n", target->value, get_call);
+        if (target->kind == NODE_TUPLE_TARGET) {
+            char *tuple_temp = codegen_next_temp_name(ctx);
+            char *tuple_type_name = codegen_type_to_c_string(element_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", tuple_type_name, tuple_temp, get_call);
+            emit_tuple_destructuring_from_base(ctx, target, element_type, tuple_temp, 1);
+            free(tuple_temp);
+            free(tuple_type_name);
+        } else {
+            emit_managed_assignment(ctx, element_type, target->value, get_call, 1, 1);
+        }
         free(get_call);
     }
     codegen_push_cleanup_scope(ctx);

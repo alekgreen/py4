@@ -965,6 +965,25 @@ static ValueType infer_method_call_type(
             return value_type;
         }
 
+        if (strcmp(method->value, "get_or") == 0) {
+            expect_argument_count(method->value, arguments, 2);
+            {
+                ValueType actual_key = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, key_type);
+                ValueType fallback_type = semantic_infer_expression_type_with_hint(info, arguments->children[1], scope, value_type);
+
+                if (!semantic_is_assignable(key_type, actual_key)) {
+                    semantic_error_at_node(arguments->children[0], "method 'get_or' expects %s key",
+                        semantic_type_name(key_type));
+                }
+                if (!semantic_is_assignable(value_type, fallback_type)) {
+                    semantic_error_at_node(arguments->children[1], "method 'get_or' expects %s fallback",
+                        semantic_type_name(value_type));
+                }
+            }
+            semantic_record_node_type(info, call, value_type);
+            return value_type;
+        }
+
         if (strcmp(method->value, "contains") == 0) {
             expect_argument_count(method->value, arguments, 1);
             {

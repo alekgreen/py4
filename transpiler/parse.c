@@ -446,11 +446,9 @@ static ParseNode *parse_FOR_STATEMENT(TokenStream *ts)
 {
     Token for_tok = parse_expect_keyword(ts, "for");
     ParseNode *node = create_node_from_token(NODE_FOR_STATEMENT, for_tok);
-    Token iterator_name;
     Token colon_tok;
 
-    iterator_name = expect(ts, TOKEN_IDENTIFIER);
-    add_child(node, create_node_from_token(NODE_PRIMARY, iterator_name));
+    add_child(node, parse_ASSIGN_TARGET(ts));
     parse_expect_keyword(ts, "in");
     add_child(node, parse_EXPRESSION(ts));
     colon_tok = expect(ts, TOKEN_COLON);
