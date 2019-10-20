@@ -2826,6 +2826,8 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     codegen_collect_program_state(&ctx, root);
     for (size_t i = 0; i < semantic_dict_type_count(); i++) {
         ValueType dict_type = semantic_dict_type_at(i);
+        (void)semantic_make_list_type(semantic_dict_key_type(dict_type));
+        (void)semantic_make_list_type(semantic_dict_value_type(dict_type));
         ValueType dict_item_types[2] = {
             semantic_dict_key_type(dict_type),
             semantic_dict_value_type(dict_type)
