@@ -1,0 +1,4 @@
+{a: Point(x=1, y=2), b: Point(x=3, y=4)}
+Point(x=1, y=2)
+Point(x=9, y=9)
+[(a, Point(x=1, y=2)), (b, Point(x=3, y=4))]

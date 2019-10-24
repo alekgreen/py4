@@ -372,6 +372,11 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    dict->refcount--;\n");
     fprintf(ctx->out, "    if (dict->refcount == 0) {\n");
+    if (semantic_type_needs_management(value_type)) {
+        fprintf(ctx->out, "        for (size_t i = 0; i < dict->len; i++) {\n");
+        emit_runtime_value_release(ctx, value_type, "dict->values[i]");
+        fprintf(ctx->out, "        }\n");
+    }
     fprintf(ctx->out, "        free(dict->keys);\n");
     fprintf(ctx->out, "        free(dict->values);\n");
     fprintf(ctx->out, "        free(dict);\n");
@@ -412,12 +417,21 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    index = %s_find_index(dict, key);\n", prefix);
     fprintf(ctx->out, "    if (index >= 0) {\n");
+    if (semantic_type_needs_management(value_type)) {
+        emit_runtime_value_release(ctx, value_type, "dict->values[index]");
+    }
     fprintf(ctx->out, "        dict->values[index] = value;\n");
+    if (semantic_type_needs_management(value_type)) {
+        emit_runtime_value_retain(ctx, value_type, "dict->values[index]");
+    }
     fprintf(ctx->out, "        return;\n");
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    %s_ensure_capacity(dict, dict->len + 1);\n", prefix);
     fprintf(ctx->out, "    dict->keys[dict->len] = key;\n");
     fprintf(ctx->out, "    dict->values[dict->len] = value;\n");
+    if (semantic_type_needs_management(value_type)) {
+        emit_runtime_value_retain(ctx, value_type, "dict->values[dict->len]");
+    }
     fprintf(ctx->out, "    dict->len++;\n");
     fprintf(ctx->out, "}\n\n");
 
@@ -436,16 +450,34 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: key not found in %s\\n\");\n", type_name);
     fprintf(ctx->out, "        exit(1);\n");
     fprintf(ctx->out, "    }\n");
+    if (semantic_type_needs_management(value_type)) {
+        fprintf(ctx->out, "    %s value = dict->values[index];\n", value_c_type);
+        emit_runtime_value_retain(ctx, value_type, "value");
+        fprintf(ctx->out, "    return value;\n");
+    } else {
     fprintf(ctx->out, "    return dict->values[index];\n");
+    }
     fprintf(ctx->out, "}\n\n");
 
     fprintf(ctx->out, "static %s %s_get_or(%s *dict, %s key, %s fallback)\n{\n",
         value_c_type, prefix, struct_name, key_c_type, value_c_type);
     fprintf(ctx->out, "    int index = %s_find_index(dict, key);\n", prefix);
     fprintf(ctx->out, "    if (index < 0) {\n");
-    fprintf(ctx->out, "        return fallback;\n");
+    if (semantic_type_needs_management(value_type)) {
+        fprintf(ctx->out, "        %s value = fallback;\n", value_c_type);
+        emit_runtime_value_retain(ctx, value_type, "value");
+        fprintf(ctx->out, "        return value;\n");
+    } else {
+        fprintf(ctx->out, "        return fallback;\n");
+    }
     fprintf(ctx->out, "    }\n");
-    fprintf(ctx->out, "    return dict->values[index];\n");
+    if (semantic_type_needs_management(value_type)) {
+        fprintf(ctx->out, "    %s value = dict->values[index];\n", value_c_type);
+        emit_runtime_value_retain(ctx, value_type, "value");
+        fprintf(ctx->out, "    return value;\n");
+    } else {
+        fprintf(ctx->out, "    return dict->values[index];\n");
+    }
     fprintf(ctx->out, "}\n\n");
 
     fprintf(ctx->out, "static %s %s_key_at(%s *dict, int index)\n{\n", key_c_type, prefix, struct_name);
@@ -530,9 +562,13 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
     fprintf(ctx->out, "        exit(1);\n");
     fprintf(ctx->out, "    }\n");
+    if (semantic_type_needs_management(value_type)) {
+        fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+        emit_runtime_value_release(ctx, value_type, "dict->values[i]");
+        fprintf(ctx->out, "    }\n");
+    }
     fprintf(ctx->out, "    dict->len = 0;\n");
     fprintf(ctx->out, "}\n\n");
-
     fprintf(ctx->out, "static %s *%s_copy(%s *dict)\n{\n", struct_name, prefix, struct_name);
     fprintf(ctx->out, "    %s *copy;\n", struct_name);
     fprintf(ctx->out, "    if (dict == NULL) {\n");
@@ -544,6 +580,9 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
     fprintf(ctx->out, "        copy->keys[i] = dict->keys[i];\n");
     fprintf(ctx->out, "        copy->values[i] = dict->values[i];\n");
+    if (semantic_type_needs_management(value_type)) {
+        emit_runtime_value_retain(ctx, value_type, "copy->values[i]");
+    }
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    copy->len = dict->len;\n");
     fprintf(ctx->out, "    return copy;\n");

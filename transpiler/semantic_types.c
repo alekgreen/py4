@@ -342,6 +342,7 @@ static int dict_value_type_supported(ValueType type)
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_class(type) ||
         (semantic_type_is_tuple(type) && !semantic_type_needs_management(type));
 }
 
@@ -935,7 +936,7 @@ ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
         semantic_error("dict keys must currently be int, bool, char, or str");
     }
     if (!dict_value_type_supported(value_type)) {
-        semantic_error("dict values must currently be int, float, bool, char, str, or unmanaged tuple values");
+        semantic_error("dict values must currently be int, float, bool, char, str, class values, or unmanaged tuple values");
     }
 
     for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {
