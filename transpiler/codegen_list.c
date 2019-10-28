@@ -73,6 +73,7 @@ const char *codegen_list_element_c_type(ValueType type)
 {
     ValueType element_type = semantic_list_element_type(type);
     static char tuple_name[MAX_NAME_LEN];
+    static char dict_name[MAX_NAME_LEN];
 
     switch (element_type) {
         case TYPE_INT:
@@ -89,6 +90,10 @@ const char *codegen_list_element_c_type(ValueType type)
             if (semantic_type_is_tuple(element_type)) {
                 codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), element_type);
                 return tuple_name;
+            }
+            if (semantic_type_is_dict(element_type)) {
+                snprintf(dict_name, sizeof(dict_name), "%s *", codegen_dict_struct_name(element_type));
+                return dict_name;
             }
             if (semantic_type_is_class(element_type)) {
                 return semantic_class_name(element_type);

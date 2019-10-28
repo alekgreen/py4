@@ -1322,6 +1322,25 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
         fputc('\n', ctx->out);
     }
 
+    for (size_t i = 0; i < semantic_dict_type_count(); i++) {
+        ValueType dict_type = semantic_dict_type_at(i);
+        char print_name[MAX_NAME_LEN];
+
+        codegen_build_dict_print_name(print_name, sizeof(print_name), dict_type);
+        fprintf(ctx->out, "static void %s_incref(%s *dict);\n",
+            codegen_dict_runtime_prefix(dict_type),
+            codegen_dict_struct_name(dict_type));
+        fprintf(ctx->out, "static void %s_decref(%s *dict);\n",
+            codegen_dict_runtime_prefix(dict_type),
+            codegen_dict_struct_name(dict_type));
+        fprintf(ctx->out, "static void %s(%s *value);\n",
+            print_name,
+            codegen_dict_struct_name(dict_type));
+    }
+    if (semantic_dict_type_count() > 0) {
+        fputc('\n', ctx->out);
+    }
+
     for (size_t i = 0; i < semantic_class_type_count(); i++) {
         emit_class_definition_recursive(
             ctx,

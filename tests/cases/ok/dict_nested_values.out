@@ -1,0 +1,9 @@
+{team_a: {wins: 3, losses: 1}, team_b: {wins: 2, losses: 2}}
+3
+{wins: 0, losses: 0}
+[{wins: 3, losses: 1}, {wins: 2, losses: 2}]
+[(team_a, {wins: 3, losses: 1}), (team_b, {wins: 2, losses: 2})]
+team_a
+1
+team_b
+2

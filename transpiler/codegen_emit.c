@@ -2187,6 +2187,7 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
     codegen_emit_indent(ctx);
     fputs("{\n", ctx->out);
     ctx->indent_level++;
+    codegen_push_cleanup_scope(ctx);
     codegen_emit_indent(ctx);
     fprintf(ctx->out, "int py4_loop_action_%d = 0;\n", loop_id);
     {
@@ -2208,7 +2209,6 @@ static void emit_for_statement(CodegenContext *ctx, const ParseNode *for_stmt)
         }
         free(get_call);
     }
-    codegen_push_cleanup_scope(ctx);
     codegen_push_loop(ctx, loop_id);
     codegen_emit_suite(ctx, suite);
     codegen_pop_loop(ctx);

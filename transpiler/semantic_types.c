@@ -342,6 +342,7 @@ static int dict_value_type_supported(ValueType type)
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_dict(type) ||
         semantic_type_is_class(type) ||
         (semantic_type_is_tuple(type) && !semantic_type_needs_management(type));
 }
@@ -446,6 +447,7 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
                 element_type == TYPE_BOOL || element_type == TYPE_CHAR ||
                 element_type == TYPE_STR ||
                 semantic_type_is_class(element_type) ||
+                semantic_type_is_dict(element_type) ||
                 semantic_type_is_native(element_type)) {
                 return semantic_make_list_type(element_type);
             }
@@ -906,8 +908,10 @@ ValueType semantic_make_list_type(ValueType element_type)
         semantic_error("list elements cannot use native opaque types yet");
     }
 
-    if (!semantic_type_is_class(element_type) && !semantic_type_is_tuple(element_type)) {
-        semantic_error("list elements must currently be int, float, bool, char, str, tuple, or class values");
+    if (!semantic_type_is_class(element_type) &&
+        !semantic_type_is_tuple(element_type) &&
+        !semantic_type_is_dict(element_type)) {
+        semantic_error("list elements must currently be int, float, bool, char, str, tuple, dict, or class values");
     }
 
     for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
@@ -936,7 +940,7 @@ ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
         semantic_error("dict keys must currently be int, bool, char, or str");
     }
     if (!dict_value_type_supported(value_type)) {
-        semantic_error("dict values must currently be int, float, bool, char, str, class values, or unmanaged tuple values");
+        semantic_error("dict values must currently be int, float, bool, char, str, dict values, class values, or unmanaged tuple values");
     }
 
     for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {

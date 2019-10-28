@@ -1133,7 +1133,7 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             char *result;
 
             if (semantic_type_is_dict(base_type)) {
-                element_type = TYPE_STR;
+                element_type = semantic_dict_value_type(base_type);
                 call_text = codegen_dict_binary_call(base_type, "get", base, index);
             } else {
                 element_type = semantic_list_element_type(base_type);
