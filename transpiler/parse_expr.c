@@ -21,6 +21,15 @@ static ParseNode *parse_FACTOR(TokenStream *ts);
 static ParseNode *parse_UNARY(TokenStream *ts);
 static ParseNode *parse_PRIMARY(TokenStream *ts);
 
+static void parse_skip_container_layout(TokenStream *ts)
+{
+    while (peek_ts(ts).type == TOKEN_NEWLINE ||
+           peek_ts(ts).type == TOKEN_INDENT ||
+           peek_ts(ts).type == TOKEN_DEDENT) {
+        get_from_ts(ts);
+    }
+}
+
 static ParseNode *wrap_expression(ParseNode *node)
 {
     ParseNode *expr;
@@ -555,6 +564,7 @@ static ParseNode *parse_LIST_LITERAL(TokenStream *ts)
     ParseNode *node = create_node(NODE_LIST_LITERAL, TOKEN_NULL, NULL);
 
     expect(ts, TOKEN_LBRACKET);
+    parse_skip_container_layout(ts);
     if (peek_ts(ts).type == TOKEN_RBRACKET) {
         expect(ts, TOKEN_RBRACKET);
         return node;
@@ -562,12 +572,15 @@ static ParseNode *parse_LIST_LITERAL(TokenStream *ts)
 
     while (1) {
         add_child(node, parse_EXPRESSION(ts));
+        parse_skip_container_layout(ts);
         if (peek_ts(ts).type != TOKEN_COMMA) {
             break;
         }
         get_from_ts(ts);
+        parse_skip_container_layout(ts);
     }
 
+    parse_skip_container_layout(ts);
     expect(ts, TOKEN_RBRACKET);
     return node;
 }
@@ -577,6 +590,7 @@ static ParseNode *parse_DICT_LITERAL(TokenStream *ts)
     ParseNode *node = create_node(NODE_DICT_LITERAL, TOKEN_NULL, NULL);
 
     expect(ts, TOKEN_LBRACE);
+    parse_skip_container_layout(ts);
     if (peek_ts(ts).type == TOKEN_RBRACE) {
         expect(ts, TOKEN_RBRACE);
         return node;
@@ -585,13 +599,17 @@ static ParseNode *parse_DICT_LITERAL(TokenStream *ts)
     while (1) {
         add_child(node, parse_EXPRESSION(ts));
         expect(ts, TOKEN_COLON);
+        parse_skip_container_layout(ts);
         add_child(node, parse_EXPRESSION(ts));
+        parse_skip_container_layout(ts);
         if (peek_ts(ts).type != TOKEN_COMMA) {
             break;
         }
         get_from_ts(ts);
+        parse_skip_container_layout(ts);
     }
 
+    parse_skip_container_layout(ts);
     expect(ts, TOKEN_RBRACE);
     return node;
 }
@@ -600,6 +618,7 @@ static ParseNode *parse_ARGUMENTS(TokenStream *ts)
 {
     ParseNode *node = create_node(NODE_ARGUMENTS, TOKEN_NULL, NULL);
 
+    parse_skip_container_layout(ts);
     if (peek_ts(ts).type == TOKEN_RPAREN) {
         add_child(node, create_node(NODE_EPSILON, TOKEN_NULL, "epsilon"));
         return node;
@@ -607,10 +626,12 @@ static ParseNode *parse_ARGUMENTS(TokenStream *ts)
 
     while (1) {
         add_child(node, parse_EXPRESSION(ts));
+        parse_skip_container_layout(ts);
         if (peek_ts(ts).type != TOKEN_COMMA) {
             break;
         }
         get_from_ts(ts);
+        parse_skip_container_layout(ts);
     }
 
     return node;
