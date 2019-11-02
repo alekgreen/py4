@@ -1,2 +1,4 @@
+import io
+
 def main() -> None:
-    data: dict[str, list[int]] = {}
+    data: dict[str, io.File] = {}

@@ -342,6 +342,7 @@ static int dict_value_type_supported(ValueType type)
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_list(type) ||
         semantic_type_is_dict(type) ||
         semantic_type_is_class(type) ||
         (semantic_type_is_tuple(type) && !semantic_type_needs_management(type));
@@ -910,8 +911,9 @@ ValueType semantic_make_list_type(ValueType element_type)
 
     if (!semantic_type_is_class(element_type) &&
         !semantic_type_is_tuple(element_type) &&
+        !semantic_type_is_list(element_type) &&
         !semantic_type_is_dict(element_type)) {
-        semantic_error("list elements must currently be int, float, bool, char, str, tuple, dict, or class values");
+        semantic_error("list elements must currently be int, float, bool, char, str, tuple, list, dict, or class values");
     }
 
     for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
@@ -940,7 +942,7 @@ ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
         semantic_error("dict keys must currently be int, bool, char, or str");
     }
     if (!dict_value_type_supported(value_type)) {
-        semantic_error("dict values must currently be int, float, bool, char, str, dict values, class values, or unmanaged tuple values");
+        semantic_error("dict values must currently be int, float, bool, char, str, list values, dict values, class values, or unmanaged tuple values");
     }
 
     for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {

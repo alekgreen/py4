@@ -299,7 +299,11 @@ const char *codegen_type_suffix(ValueType type)
         return tuple_name;
     }
     if (semantic_type_is_list(type)) {
-        snprintf(list_name, sizeof(list_name), "list_%s", codegen_type_suffix(semantic_list_element_type(type)));
+        char element_suffix[MAX_NAME_LEN];
+
+        snprintf(element_suffix, sizeof(element_suffix), "%s",
+            codegen_type_suffix(semantic_list_element_type(type)));
+        snprintf(list_name, sizeof(list_name), "list_%s", element_suffix);
         return list_name;
     }
     if (semantic_type_is_class(type)) {
@@ -312,14 +316,22 @@ const char *codegen_type_suffix(ValueType type)
         return list_name;
     }
     if (semantic_type_is_optional(type)) {
-        snprintf(list_name, sizeof(list_name), "optional_%s",
+        char base_suffix[MAX_NAME_LEN];
+
+        snprintf(base_suffix, sizeof(base_suffix), "%s",
             codegen_type_suffix(semantic_optional_base_type(type)));
+        snprintf(list_name, sizeof(list_name), "optional_%s", base_suffix);
         return list_name;
     }
     if (semantic_type_is_dict(type)) {
-        snprintf(list_name, sizeof(list_name), "dict_%s_%s",
-            codegen_type_suffix(semantic_dict_key_type(type)),
+        char key_suffix[MAX_NAME_LEN];
+        char value_suffix[MAX_NAME_LEN];
+
+        snprintf(key_suffix, sizeof(key_suffix), "%s",
+            codegen_type_suffix(semantic_dict_key_type(type)));
+        snprintf(value_suffix, sizeof(value_suffix), "%s",
             codegen_type_suffix(semantic_dict_value_type(type)));
+        snprintf(list_name, sizeof(list_name), "dict_%s_%s", key_suffix, value_suffix);
         return list_name;
     }
 

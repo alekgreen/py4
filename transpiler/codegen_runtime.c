@@ -60,6 +60,11 @@ static void emit_runtime_value_print(CodegenContext *ctx, ValueType type, const 
         fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
         return;
     }
+    if (semantic_type_is_list(type)) {
+        codegen_build_list_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
+        return;
+    }
     if (semantic_type_is_dict(type)) {
         codegen_build_dict_print_name(helper_name, sizeof(helper_name), type);
         fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
