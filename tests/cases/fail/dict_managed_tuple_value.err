@@ -1,1 +1,0 @@
-dict values must currently be int, float, bool, char, str, list values, dict values, class values, or unmanaged tuple values
