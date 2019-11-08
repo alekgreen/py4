@@ -1,1 +1,1 @@
-dict values must currently be int, float, bool, char, str, list values, dict values, class values, or tuple values
+list elements cannot use native opaque types yet

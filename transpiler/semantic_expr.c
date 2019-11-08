@@ -113,6 +113,37 @@ static int tuple_element_type_supported(ValueType type)
         semantic_type_is_class(type);
 }
 
+static int print_type_supported(ValueType type)
+{
+    if (type == TYPE_NONE || semantic_type_is_optional(type) || semantic_type_is_native(type)) {
+        return 0;
+    }
+    if (semantic_type_is_list(type)) {
+        return print_type_supported(semantic_list_element_type(type));
+    }
+    if (semantic_type_is_dict(type)) {
+        return print_type_supported(semantic_dict_key_type(type)) &&
+            print_type_supported(semantic_dict_value_type(type));
+    }
+    if (semantic_type_is_tuple(type)) {
+        for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+            if (!print_type_supported(semantic_tuple_element_type(type, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (semantic_type_is_class(type)) {
+        for (size_t i = 0; i < semantic_class_field_count(type); i++) {
+            if (!print_type_supported(semantic_class_field_type(type, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    return 1;
+}
+
 static ValueType infer_class_constructor_type(
     SemanticInfo *info,
     ValueType class_type,
@@ -1006,12 +1037,21 @@ static ValueType infer_method_call_type(
 
         if (strcmp(method->value, "values") == 0) {
             expect_argument_count(method->value, arguments, 0);
+            if (semantic_type_is_native(value_type)) {
+                semantic_error_at_node(call,
+                    "method 'values' does not support native opaque dict values yet");
+            }
             semantic_record_node_type(info, call, semantic_make_list_type(value_type));
             return semantic_make_list_type(value_type);
         }
 
         if (strcmp(method->value, "items") == 0) {
             ValueType elements[2] = {key_type, value_type};
+
+            if (semantic_type_is_native(value_type)) {
+                semantic_error_at_node(call,
+                    "method 'items' does not support native opaque dict values yet");
+            }
             ValueType tuple_type = semantic_make_tuple_type(elements, 2);
             ValueType list_type = semantic_make_list_type(tuple_type);
 
@@ -1256,6 +1296,11 @@ static ValueType infer_call_type(
             semantic_error_at_node(arguments->children[0],
                 "print cannot print native opaque type %s",
                 type_name);
+        }
+        if (!print_type_supported(arg_type)) {
+            semantic_error_at_node(arguments->children[0],
+                "print cannot print type %s",
+                semantic_type_name(arg_type));
         }
 
         semantic_record_node_type(info, call, TYPE_NONE);

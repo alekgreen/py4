@@ -1,4 +1,4 @@
 import io
 
 def main() -> None:
-    data: dict[str, io.File] = {}
+    data: dict[str, list[io.File]] = {}

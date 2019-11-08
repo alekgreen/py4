@@ -75,6 +75,12 @@ static void emit_runtime_value_print(CodegenContext *ctx, ValueType type, const 
         fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
         return;
     }
+    if (semantic_type_is_native(type)) {
+        fprintf(ctx->out, "            printf(\"<%s.%s>\");\n",
+            semantic_native_type_module(type),
+            semantic_native_type_name(type));
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:
@@ -316,10 +322,11 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     ValueType key_type = semantic_dict_key_type(dict_type);
     ValueType value_type = semantic_dict_value_type(dict_type);
     ValueType item_types[2] = {key_type, value_type};
-    ValueType tuple_type = semantic_make_tuple_type(item_types, 2);
     ValueType keys_list_type = semantic_make_list_type(key_type);
-    ValueType values_list_type = semantic_make_list_type(value_type);
-    ValueType items_list_type = semantic_make_list_type(tuple_type);
+    ValueType tuple_type = 0;
+    ValueType values_list_type = 0;
+    ValueType items_list_type = 0;
+    int supports_value_lists = !semantic_type_is_native(value_type);
     char struct_name[MAX_NAME_LEN];
     char prefix[MAX_NAME_LEN];
     char type_name[MAX_NAME_LEN];
@@ -333,17 +340,25 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     char *key_c_type = codegen_type_to_c_string(key_type);
     char *value_c_type = codegen_type_to_c_string(value_type);
 
+    if (supports_value_lists) {
+        tuple_type = semantic_make_tuple_type(item_types, 2);
+        values_list_type = semantic_make_list_type(value_type);
+        items_list_type = semantic_make_list_type(tuple_type);
+    }
+
     snprintf(struct_name, sizeof(struct_name), "%s", codegen_dict_struct_name(dict_type));
     snprintf(prefix, sizeof(prefix), "%s", codegen_dict_runtime_prefix(dict_type));
     snprintf(type_name, sizeof(type_name), "%s", semantic_type_name(dict_type));
 
     snprintf(keys_struct_name, sizeof(keys_struct_name), "%s", codegen_list_struct_name(keys_list_type));
-    snprintf(values_struct_name, sizeof(values_struct_name), "%s", codegen_list_struct_name(values_list_type));
-    snprintf(items_struct_name, sizeof(items_struct_name), "%s", codegen_list_struct_name(items_list_type));
     snprintf(keys_prefix, sizeof(keys_prefix), "%s", codegen_list_runtime_prefix(keys_list_type));
-    snprintf(values_prefix, sizeof(values_prefix), "%s", codegen_list_runtime_prefix(values_list_type));
-    snprintf(items_prefix, sizeof(items_prefix), "%s", codegen_list_runtime_prefix(items_list_type));
-    codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+    if (supports_value_lists) {
+        snprintf(values_struct_name, sizeof(values_struct_name), "%s", codegen_list_struct_name(values_list_type));
+        snprintf(items_struct_name, sizeof(items_struct_name), "%s", codegen_list_struct_name(items_list_type));
+        snprintf(values_prefix, sizeof(values_prefix), "%s", codegen_list_runtime_prefix(values_list_type));
+        snprintf(items_prefix, sizeof(items_prefix), "%s", codegen_list_runtime_prefix(items_list_type));
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+    }
 
     fprintf(ctx->out, "struct %s {\n", struct_name);
     fprintf(ctx->out, "    int refcount;\n");
@@ -527,32 +542,36 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    return keys;\n");
     fprintf(ctx->out, "}\n\n");
 
-    fprintf(ctx->out, "static %s *%s_values(%s *dict)\n{\n", values_struct_name, prefix, struct_name);
-    fprintf(ctx->out, "    %s *values;\n", values_struct_name);
-    fprintf(ctx->out, "    if (dict == NULL) {\n");
-    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
-    fprintf(ctx->out, "        exit(1);\n");
-    fprintf(ctx->out, "    }\n");
-    fprintf(ctx->out, "    values = %s_new();\n", values_prefix);
-    fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
-    fprintf(ctx->out, "        %s_append(values, dict->values[i]);\n", values_prefix);
-    fprintf(ctx->out, "    }\n");
-    fprintf(ctx->out, "    return values;\n");
-    fprintf(ctx->out, "}\n\n");
+    if (supports_value_lists) {
+        fprintf(ctx->out, "static %s *%s_values(%s *dict)\n{\n", values_struct_name, prefix, struct_name);
+        fprintf(ctx->out, "    %s *values;\n", values_struct_name);
+        fprintf(ctx->out, "    if (dict == NULL) {\n");
+        fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+        fprintf(ctx->out, "        exit(1);\n");
+        fprintf(ctx->out, "    }\n");
+        fprintf(ctx->out, "    values = %s_new();\n", values_prefix);
+        fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+        fprintf(ctx->out, "        %s_append(values, dict->values[i]);\n", values_prefix);
+        fprintf(ctx->out, "    }\n");
+        fprintf(ctx->out, "    return values;\n");
+        fprintf(ctx->out, "}\n\n");
+    }
 
-    fprintf(ctx->out, "static %s *%s_items(%s *dict)\n{\n", items_struct_name, prefix, struct_name);
-    fprintf(ctx->out, "    %s *items;\n", items_struct_name);
-    fprintf(ctx->out, "    if (dict == NULL) {\n");
-    fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
-    fprintf(ctx->out, "        exit(1);\n");
-    fprintf(ctx->out, "    }\n");
-    fprintf(ctx->out, "    items = %s_new();\n", items_prefix);
-    fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
-    fprintf(ctx->out, "        %s entry = (%s){dict->keys[i], dict->values[i]};\n", tuple_name, tuple_name);
-    fprintf(ctx->out, "        %s_append(items, entry);\n", items_prefix);
-    fprintf(ctx->out, "    }\n");
-    fprintf(ctx->out, "    return items;\n");
-    fprintf(ctx->out, "}\n\n");
+    if (supports_value_lists) {
+        fprintf(ctx->out, "static %s *%s_items(%s *dict)\n{\n", items_struct_name, prefix, struct_name);
+        fprintf(ctx->out, "    %s *items;\n", items_struct_name);
+        fprintf(ctx->out, "    if (dict == NULL) {\n");
+        fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
+        fprintf(ctx->out, "        exit(1);\n");
+        fprintf(ctx->out, "    }\n");
+        fprintf(ctx->out, "    items = %s_new();\n", items_prefix);
+        fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+        fprintf(ctx->out, "        %s entry = (%s){dict->keys[i], dict->values[i]};\n", tuple_name, tuple_name);
+        fprintf(ctx->out, "        %s_append(items, entry);\n", items_prefix);
+        fprintf(ctx->out, "    }\n");
+        fprintf(ctx->out, "    return items;\n");
+        fprintf(ctx->out, "}\n\n");
+    }
 
     fprintf(ctx->out, "static %s %s_pop(%s *dict, %s key)\n{\n", value_c_type, prefix, struct_name, key_c_type);
     fprintf(ctx->out, "    int index;\n");

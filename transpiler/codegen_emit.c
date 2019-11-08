@@ -2826,20 +2826,23 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     codegen_collect_program_state(&ctx, root);
     for (size_t i = 0; i < semantic_dict_type_count(); i++) {
         ValueType dict_type = semantic_dict_type_at(i);
+        ValueType value_type = semantic_dict_value_type(dict_type);
         (void)semantic_make_list_type(semantic_dict_key_type(dict_type));
-        (void)semantic_make_list_type(semantic_dict_value_type(dict_type));
-        ValueType dict_item_types[2] = {
-            semantic_dict_key_type(dict_type),
-            semantic_dict_value_type(dict_type)
-        };
+        if (!semantic_type_is_native(value_type)) {
+            ValueType dict_item_types[2] = {
+                semantic_dict_key_type(dict_type),
+                value_type
+            };
 
-        (void)semantic_make_list_type(semantic_make_tuple_type(dict_item_types, 2));
+            (void)semantic_make_list_type(value_type);
+            (void)semantic_make_list_type(semantic_make_tuple_type(dict_item_types, 2));
+        }
     }
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
     codegen_emit_struct_declarations(&ctx);
-    codegen_emit_container_runtime(&ctx);
     emit_native_type_runtime(&ctx);
+    codegen_emit_container_runtime(&ctx);
     emit_native_function_runtime(&ctx, root);
     codegen_emit_struct_types(&ctx);
     codegen_emit_union_runtime(&ctx);

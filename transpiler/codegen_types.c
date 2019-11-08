@@ -859,6 +859,12 @@ static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_
         fprintf(out, "            %s(%s);\n", helper_name, value_expr);
         return;
     }
+    if (semantic_type_is_native(type)) {
+        fprintf(out, "            printf(\"<%s.%s>\");\n",
+            semantic_native_type_module(type),
+            semantic_native_type_name(type));
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:

@@ -345,7 +345,8 @@ static int dict_value_type_supported(ValueType type)
         semantic_type_is_list(type) ||
         semantic_type_is_dict(type) ||
         semantic_type_is_class(type) ||
-        semantic_type_is_tuple(type);
+        semantic_type_is_tuple(type) ||
+        semantic_type_is_native(type);
 }
 
 static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
@@ -712,7 +713,8 @@ const char *semantic_type_name(ValueType type)
         TYPE_LIST_STR
     };
 
-    if (semantic_type_is_tuple(type) || semantic_type_is_class(type) || semantic_type_is_dict(type)) {
+    if (semantic_type_is_tuple(type) || semantic_type_is_class(type) ||
+        semantic_type_is_dict(type) || semantic_type_is_native(type)) {
         return type_member_name(type);
     }
     if (semantic_type_is_optional(type)) {
@@ -942,7 +944,7 @@ ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
         semantic_error("dict keys must currently be int, bool, char, or str");
     }
     if (!dict_value_type_supported(value_type)) {
-        semantic_error("dict values must currently be int, float, bool, char, str, list values, dict values, class values, or tuple values");
+        semantic_error("dict values must currently be int, float, bool, char, str, list values, dict values, class values, tuple values, or native opaque values");
     }
 
     for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {
