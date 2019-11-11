@@ -907,15 +907,12 @@ ValueType semantic_make_list_type(ValueType element_type)
             break;
     }
 
-    if (semantic_type_is_native(element_type)) {
-        semantic_error("list elements cannot use native opaque types yet");
-    }
-
     if (!semantic_type_is_class(element_type) &&
+        !semantic_type_is_native(element_type) &&
         !semantic_type_is_tuple(element_type) &&
         !semantic_type_is_list(element_type) &&
         !semantic_type_is_dict(element_type)) {
-        semantic_error("list elements must currently be int, float, bool, char, str, tuple, list, dict, or class values");
+        semantic_error("list elements must currently be int, float, bool, char, str, tuple, list, dict, class, or native opaque values");
     }
 
     for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
@@ -1021,9 +1018,6 @@ ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_cou
         }
         if (semantic_type_is_optional(elements[i])) {
             semantic_error("tuple elements cannot use optional types yet");
-        }
-        if (semantic_type_is_native(elements[i])) {
-            semantic_error("tuple elements cannot use native opaque types yet");
         }
         if (elements[i] == TYPE_NONE) {
             semantic_error("tuple elements cannot be None");

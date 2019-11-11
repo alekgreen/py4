@@ -7,9 +7,15 @@ def main() -> None:
 
     name = data["name"]
     active = data.get_or("active", json.parse("false"))
+    values = data.values()
+    items = data.items()
+    pair: (str, json.Value) = ("name", name)
 
     assert json.is_string(name)
     assert json.is_bool(active)
 
     print(json.as_string(name))
     print(json.as_bool(active))
+    print(values)
+    print(items)
+    print(pair)

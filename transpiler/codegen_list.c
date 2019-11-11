@@ -103,6 +103,10 @@ const char *codegen_list_element_c_type(ValueType type)
             if (semantic_type_is_class(element_type)) {
                 return semantic_class_name(element_type);
             }
+            if (semantic_type_is_native(element_type)) {
+                snprintf(list_name, sizeof(list_name), "%s *", semantic_native_c_type(element_type));
+                return list_name;
+            }
             codegen_error("%s does not have a supported list element C type", semantic_type_name(type));
             return "";
     }
