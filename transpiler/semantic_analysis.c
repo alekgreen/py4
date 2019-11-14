@@ -388,42 +388,10 @@ static char *build_function_c_name(
     return dup_string(buffer);
 }
 
-static size_t tuple_target_leaf_count(const ParseNode *target)
-{
-    size_t count = 0;
-
-    if (target->kind == NODE_PRIMARY) {
-        return 1;
-    }
-
-    if (target->kind != NODE_TUPLE_TARGET) {
-        semantic_error("malformed tuple target");
-    }
-
-    for (size_t i = 0; i < target->child_count; i++) {
-        count += tuple_target_leaf_count(target->children[i]);
-    }
-    return count;
-}
-
-static size_t tuple_type_leaf_count(ValueType type)
-{
-    size_t count = 0;
-
-    if (!semantic_type_is_tuple(type)) {
-        return 1;
-    }
-
-    for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
-        count += tuple_type_leaf_count(semantic_tuple_element_type(type, i));
-    }
-    return count;
-}
-
 static int tuple_target_matches_type(const ParseNode *target, ValueType type)
 {
     if (target->kind == NODE_PRIMARY) {
-        return !semantic_type_is_tuple(type);
+        return 1;
     }
 
     if (target->kind != NODE_TUPLE_TARGET || !semantic_type_is_tuple(type)) {
@@ -691,19 +659,17 @@ static int typecheck_simple_statement(
 
     if (target->kind == NODE_TUPLE_TARGET) {
         ValueType tuple_type;
-        size_t target_count = tuple_target_leaf_count(target);
 
         if (semantic_is_type_assignment(statement_tail)) {
             tuple_type = semantic_parse_type_node(info, semantic_statement_tail_type_node(statement_tail));
             if (!semantic_type_is_tuple(tuple_type)) {
                 semantic_error_at_node(target, "tuple destructuring requires a tuple type annotation");
             }
-            if (tuple_type_leaf_count(tuple_type) != target_count) {
+            if (target->child_count != semantic_tuple_element_count(tuple_type)) {
                 semantic_error_at_node(target,
-                    "tuple target expects %zu elements but type %s has %zu",
-                    target_count,
-                    semantic_type_name(tuple_type),
-                    tuple_type_leaf_count(tuple_type));
+                    "tuple target expects %zu elements but got %zu",
+                    target->child_count,
+                    semantic_tuple_element_count(tuple_type));
             }
             if (!tuple_target_matches_type(target, tuple_type)) {
                 semantic_error_at_node(target,
@@ -726,11 +692,11 @@ static int typecheck_simple_statement(
         if (!semantic_type_is_tuple(expr_type)) {
             semantic_error_at_node(expr, "tuple destructuring requires a tuple value");
         }
-        if (tuple_type_leaf_count(expr_type) != target_count) {
+        if (target->child_count != semantic_tuple_element_count(expr_type)) {
             semantic_error_at_node(expr,
                 "tuple target expects %zu elements but got %zu",
-                target_count,
-                tuple_type_leaf_count(expr_type));
+                target->child_count,
+                semantic_tuple_element_count(expr_type));
         }
         if (!tuple_target_matches_type(target, expr_type)) {
             semantic_error_at_node(expr,
@@ -973,16 +939,14 @@ static int typecheck_for_statement(
     loop_scope.module = scope->module;
     loop_scope.current_class_type = scope->current_class_type;
     if (target->kind == NODE_TUPLE_TARGET) {
-        size_t target_count = tuple_target_leaf_count(target);
-
         if (!semantic_type_is_tuple(target_type)) {
             semantic_error_at_node(iterable, "tuple for target requires a tuple element type");
         }
-        if (tuple_type_leaf_count(target_type) != target_count) {
+        if (target->child_count != semantic_tuple_element_count(target_type)) {
             semantic_error_at_node(iterable,
                 "tuple for target expects %zu elements but got %zu",
-                target_count,
-                tuple_type_leaf_count(target_type));
+                target->child_count,
+                semantic_tuple_element_count(target_type));
         }
         if (!tuple_target_matches_type(target, target_type)) {
             semantic_error_at_node(iterable,

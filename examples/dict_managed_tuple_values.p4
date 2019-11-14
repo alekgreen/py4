@@ -9,3 +9,7 @@ def main() -> None:
     print(data.get_or("z", ([9], 0)))
     print(data.values())
     print(data.items())
+
+    for (name, pair) in data.items():
+        print(name)
+        print(pair)
