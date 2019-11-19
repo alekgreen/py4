@@ -1254,9 +1254,6 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         if (semantic_type_is_optional(field_type)) {
             semantic_error_at_node(field, "class fields cannot use optional types yet");
         }
-        if (semantic_type_is_native(field_type)) {
-            semantic_error_at_node(field, "class fields cannot use native opaque types yet");
-        }
         if (field_type == TYPE_NONE) {
             semantic_error_at_node(field, "class fields cannot use None");
         }
