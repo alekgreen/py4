@@ -839,6 +839,18 @@ static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_
 {
     char helper_name[MAX_NAME_LEN];
 
+    if (semantic_type_is_optional(type)) {
+        char *inner_expr;
+
+        fprintf(out, "            if (%s.is_none) {\n", value_expr);
+        fprintf(out, "                printf(\"None\");\n");
+        fprintf(out, "            } else {\n");
+        inner_expr = codegen_dup_printf("%s.value", value_expr);
+        emit_tuple_value_print(out, semantic_optional_base_type(type), inner_expr);
+        free(inner_expr);
+        fprintf(out, "            }\n");
+        return;
+    }
     if (semantic_type_is_tuple(type)) {
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), type);
         fprintf(out, "            %s(%s);\n", helper_name, value_expr);
@@ -1101,6 +1113,17 @@ static size_t class_type_index(ValueType type)
     return 0;
 }
 
+static size_t optional_type_index(ValueType type)
+{
+    for (size_t i = 0; i < semantic_optional_type_count(); i++) {
+        if (semantic_optional_type_at(i) == type) {
+            return i;
+        }
+    }
+    codegen_error("unknown optional type index for %s", semantic_type_name(type));
+    return 0;
+}
+
 static void emit_managed_field_retain(FILE *out, ValueType type, const char *value_expr)
 {
     char helper_name[MAX_NAME_LEN];
@@ -1198,6 +1221,8 @@ static void emit_struct_definition_recursive(
     ValueType type,
     unsigned char *emitted_tuples,
     unsigned char *visiting_tuples,
+    unsigned char *emitted_optionals,
+    unsigned char *visiting_optionals,
     unsigned char *emitted_classes,
     unsigned char *visiting_classes);
 
@@ -1206,6 +1231,8 @@ static void emit_tuple_definition_recursive(
     ValueType tuple_type,
     unsigned char *emitted_tuples,
     unsigned char *visiting_tuples,
+    unsigned char *emitted_optionals,
+    unsigned char *visiting_optionals,
     unsigned char *emitted_classes,
     unsigned char *visiting_classes)
 {
@@ -1227,6 +1254,8 @@ static void emit_tuple_definition_recursive(
             semantic_tuple_element_type(tuple_type, i),
             emitted_tuples,
             visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
             emitted_classes,
             visiting_classes);
     }
@@ -1243,11 +1272,56 @@ static void emit_tuple_definition_recursive(
     emitted_tuples[index] = 1;
 }
 
+static void emit_optional_definition_recursive(
+    CodegenContext *ctx,
+    ValueType optional_type,
+    unsigned char *emitted_tuples,
+    unsigned char *visiting_tuples,
+    unsigned char *emitted_optionals,
+    unsigned char *visiting_optionals,
+    unsigned char *emitted_classes,
+    unsigned char *visiting_classes)
+{
+    size_t index = optional_type_index(optional_type);
+    ValueType base_type = semantic_optional_base_type(optional_type);
+    char optional_name[MAX_NAME_LEN];
+
+    if (emitted_optionals[index]) {
+        return;
+    }
+    if (visiting_optionals[index]) {
+        codegen_error("recursive optional type dependency is not supported for %s", semantic_type_name(optional_type));
+    }
+    visiting_optionals[index] = 1;
+
+    emit_struct_definition_recursive(
+        ctx,
+        base_type,
+        emitted_tuples,
+        visiting_tuples,
+        emitted_optionals,
+        visiting_optionals,
+        emitted_classes,
+        visiting_classes);
+
+    codegen_build_optional_base_name(optional_name, sizeof(optional_name), optional_type);
+    fprintf(ctx->out, "typedef struct {\n");
+    fprintf(ctx->out, "    bool is_none;\n");
+    codegen_emit_scalar_c_type(ctx->out, base_type);
+    fprintf(ctx->out, " value;\n");
+    fprintf(ctx->out, "} %s;\n\n", optional_name);
+
+    visiting_optionals[index] = 0;
+    emitted_optionals[index] = 1;
+}
+
 static void emit_class_definition_recursive(
     CodegenContext *ctx,
     ValueType class_type,
     unsigned char *emitted_tuples,
     unsigned char *visiting_tuples,
+    unsigned char *emitted_optionals,
+    unsigned char *visiting_optionals,
     unsigned char *emitted_classes,
     unsigned char *visiting_classes)
 {
@@ -1267,6 +1341,8 @@ static void emit_class_definition_recursive(
             semantic_class_field_type(class_type, i),
             emitted_tuples,
             visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
             emitted_classes,
             visiting_classes);
     }
@@ -1287,6 +1363,8 @@ static void emit_struct_definition_recursive(
     ValueType type,
     unsigned char *emitted_tuples,
     unsigned char *visiting_tuples,
+    unsigned char *emitted_optionals,
+    unsigned char *visiting_optionals,
     unsigned char *emitted_classes,
     unsigned char *visiting_classes)
 {
@@ -1296,6 +1374,18 @@ static void emit_struct_definition_recursive(
             type,
             emitted_tuples,
             visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
+            emitted_classes,
+            visiting_classes);
+    } else if (semantic_type_is_optional(type)) {
+        emit_optional_definition_recursive(
+            ctx,
+            type,
+            emitted_tuples,
+            visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
             emitted_classes,
             visiting_classes);
     } else if (semantic_type_is_class(type)) {
@@ -1304,6 +1394,8 @@ static void emit_struct_definition_recursive(
             type,
             emitted_tuples,
             visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
             emitted_classes,
             visiting_classes);
     }
@@ -1313,6 +1405,8 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
 {
     unsigned char emitted_tuples[MAX_TUPLE_TYPES] = {0};
     unsigned char visiting_tuples[MAX_TUPLE_TYPES] = {0};
+    unsigned char emitted_optionals[MAX_OPTIONAL_TYPES] = {0};
+    unsigned char visiting_optionals[MAX_OPTIONAL_TYPES] = {0};
     unsigned char emitted_classes[MAX_CLASS_TYPES] = {0};
     unsigned char visiting_classes[MAX_CLASS_TYPES] = {0};
     char helper_name[MAX_NAME_LEN];
@@ -1365,6 +1459,8 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
             semantic_class_type_at(i),
             emitted_tuples,
             visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
             emitted_classes,
             visiting_classes);
     }
@@ -1374,20 +1470,21 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
             semantic_tuple_type_at(i),
             emitted_tuples,
             visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
             emitted_classes,
             visiting_classes);
     }
     for (size_t i = 0; i < semantic_optional_type_count(); i++) {
-        ValueType optional_type = semantic_optional_type_at(i);
-        ValueType base_type = semantic_optional_base_type(optional_type);
-        char optional_name[MAX_NAME_LEN];
-
-        codegen_build_optional_base_name(optional_name, sizeof(optional_name), optional_type);
-        fprintf(ctx->out, "typedef struct {\n");
-        fprintf(ctx->out, "    bool is_none;\n");
-        codegen_emit_scalar_c_type(ctx->out, base_type);
-        fprintf(ctx->out, " value;\n");
-        fprintf(ctx->out, "} %s;\n\n", optional_name);
+        emit_optional_definition_recursive(
+            ctx,
+            semantic_optional_type_at(i),
+            emitted_tuples,
+            visiting_tuples,
+            emitted_optionals,
+            visiting_optionals,
+            emitted_classes,
+            visiting_classes);
     }
 
     for (size_t i = 0; i < semantic_class_type_count(); i++) {

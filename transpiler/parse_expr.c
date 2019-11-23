@@ -12,6 +12,7 @@ static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
+static char *build_type_node_name(const ParseNode *node);
 static ParseNode *parse_OR(TokenStream *ts);
 static ParseNode *parse_AND(TokenStream *ts);
 static ParseNode *parse_NOT(TokenStream *ts);
@@ -88,18 +89,56 @@ static char *build_tuple_type_name(ParseNode *node)
     buffer[used++] = '(';
     for (size_t i = 0; i < node->child_count; i++) {
         const ParseNode *child = node->children[i];
-        size_t value_len = strlen(child->value);
+        char *part = build_type_node_name(child);
+        size_t value_len = strlen(part);
 
         if (used + value_len + 3 >= sizeof(buffer)) {
+            free(part);
             parse_error_at_node(node, "tuple type name is too long");
         }
-        memcpy(buffer + used, child->value, value_len);
+        memcpy(buffer + used, part, value_len);
         used += value_len;
+        free(part);
         if (i + 1 < node->child_count) {
             buffer[used++] = ',';
         }
     }
     buffer[used++] = ')';
+    buffer[used] = '\0';
+    return parse_dup_string(buffer);
+}
+
+static char *build_type_node_name(const ParseNode *node)
+{
+    char buffer[256];
+    size_t used = 0;
+
+    if (node == NULL) {
+        parse_error_at_node(node, "missing type node");
+    }
+    if (node->kind == NODE_PRIMARY) {
+        return parse_dup_string(node->value);
+    }
+    if (node->kind != NODE_TYPE) {
+        parse_error_at_node(node, "malformed type node");
+    }
+
+    for (size_t i = 0; i < node->child_count; i++) {
+        char *part = build_type_node_name(node->children[i]);
+        size_t value_len = strlen(part);
+
+        if (used + value_len + 4 >= sizeof(buffer)) {
+            free(part);
+            parse_error_at_node(node, "type name is too long");
+        }
+        memcpy(buffer + used, part, value_len);
+        used += value_len;
+        free(part);
+        if (i + 1 < node->child_count) {
+            memcpy(buffer + used, " | ", 3);
+            used += 3;
+        }
+    }
     buffer[used] = '\0';
     return parse_dup_string(buffer);
 }
@@ -124,22 +163,25 @@ static ParseNode *parse_TYPE_ATOM(TokenStream *ts)
 
     if (parse_is_keyword_token(type_tok, "list")) {
         ParseNode *member_node;
+        char *member_name;
         char *type_name;
 
         expect(ts, TOKEN_LBRACKET);
-        member_node = parse_TYPE_ATOM(ts);
-        if (member_node == NULL || member_node->value == NULL) {
+        member_node = parse_TYPE(ts);
+        if (member_node == NULL || member_node->child_count == 0) {
             parse_error(type_tok, "expected type name inside list[...]");
         }
         expect(ts, TOKEN_RBRACKET);
 
-        type_name = parse_join_type_name("list", member_node->value);
+        member_name = build_type_node_name(member_node);
+        type_name = parse_join_type_name("list", member_name);
         node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
         node->line = type_tok.line;
         node->column = type_tok.column;
         node->source_path = parse_dup_string(type_tok.path);
         node->source_line = parse_dup_string(type_tok.line_text);
-        free_tree(member_node);
+        add_child(node, member_node);
+        free(member_name);
         free(type_name);
         return node;
     }
@@ -195,21 +237,25 @@ static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok)
     char *type_name;
     ParseNode *key_type;
     ParseNode *value_type;
+    char *key_name;
+    char *value_name;
     size_t len;
 
     expect(ts, TOKEN_LBRACKET);
-    key_type = parse_TYPE_ATOM(ts);
+    key_type = parse_TYPE(ts);
     expect(ts, TOKEN_COMMA);
-    value_type = parse_TYPE_ATOM(ts);
+    value_type = parse_TYPE(ts);
     expect(ts, TOKEN_RBRACKET);
 
-    len = strlen("dict[") + strlen(key_type->value) + strlen(", ") + strlen(value_type->value) + strlen("]") + 1;
+    key_name = build_type_node_name(key_type);
+    value_name = build_type_node_name(value_type);
+    len = strlen("dict[") + strlen(key_name) + strlen(", ") + strlen(value_name) + strlen("]") + 1;
     type_name = malloc(len);
     if (type_name == NULL) {
         perror("malloc");
         exit(1);
     }
-    snprintf(type_name, len, "dict[%s, %s]", key_type->value, value_type->value);
+    snprintf(type_name, len, "dict[%s, %s]", key_name, value_name);
     node = create_node(NODE_PRIMARY, TOKEN_KEYWORD, type_name);
     node->line = dict_tok.line;
     node->column = dict_tok.column;
@@ -217,6 +263,8 @@ static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok)
     node->source_line = parse_dup_string(dict_tok.line_text);
     add_child(node, key_type);
     add_child(node, value_type);
+    free(key_name);
+    free(value_name);
     free(type_name);
     return node;
 }
@@ -226,14 +274,14 @@ static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok)
     ParseNode *tuple_node = create_node_from_token(NODE_PRIMARY, lparen_tok);
     char *type_name;
 
-    add_child(tuple_node, parse_TYPE_ATOM(ts));
+    add_child(tuple_node, parse_TYPE(ts));
     if (peek_ts(ts).type != TOKEN_COMMA) {
         parse_error(peek_ts(ts), "tuple type must have at least two elements");
     }
 
     while (peek_ts(ts).type == TOKEN_COMMA) {
         get_from_ts(ts);
-        add_child(tuple_node, parse_TYPE_ATOM(ts));
+        add_child(tuple_node, parse_TYPE(ts));
     }
 
     expect(ts, TOKEN_RPAREN);

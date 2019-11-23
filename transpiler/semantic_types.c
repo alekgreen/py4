@@ -342,6 +342,7 @@ static int dict_value_type_supported(ValueType type)
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_optional(type) ||
         semantic_type_is_list(type) ||
         semantic_type_is_dict(type) ||
         semantic_type_is_class(type) ||
@@ -525,6 +526,20 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
         semantic_error_at_node(node, "unsupported type '%s'", node->value);
     }
 
+    if (strncmp(node->value, "list[", 5) == 0) {
+        ValueType element_type;
+
+        if (node->child_count != 1) {
+            semantic_error_at_node(node, "malformed list type '%s'", node->value);
+        }
+        if (node->children[0]->kind == NODE_TYPE) {
+            element_type = semantic_parse_type_node(info, node->children[0]);
+        } else {
+            element_type = parse_type_atom_node(info, semantic_expect_child(node, 0, NODE_PRIMARY));
+        }
+        return semantic_make_list_type(element_type);
+    }
+
     if (strncmp(node->value, "dict[", 5) == 0) {
         ValueType key_type;
         ValueType value_type;
@@ -533,8 +548,16 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
             semantic_error_at_node(node, "malformed dict type '%s'", node->value);
         }
 
-        key_type = parse_type_atom_node(info, semantic_expect_child(node, 0, NODE_PRIMARY));
-        value_type = parse_type_atom_node(info, semantic_expect_child(node, 1, NODE_PRIMARY));
+        if (node->children[0]->kind == NODE_TYPE) {
+            key_type = semantic_parse_type_node(info, node->children[0]);
+        } else {
+            key_type = parse_type_atom_node(info, semantic_expect_child(node, 0, NODE_PRIMARY));
+        }
+        if (node->children[1]->kind == NODE_TYPE) {
+            value_type = semantic_parse_type_node(info, node->children[1]);
+        } else {
+            value_type = parse_type_atom_node(info, semantic_expect_child(node, 1, NODE_PRIMARY));
+        }
         return semantic_make_dict_type(key_type, value_type);
     }
 
@@ -546,7 +569,11 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
     }
 
     for (size_t i = 0; i < node->child_count; i++) {
-        elements[i] = parse_type_atom_node(info, semantic_expect_child(node, i, NODE_PRIMARY));
+        if (node->children[i]->kind == NODE_TYPE) {
+            elements[i] = semantic_parse_type_node(info, node->children[i]);
+        } else {
+            elements[i] = parse_type_atom_node(info, semantic_expect_child(node, i, NODE_PRIMARY));
+        }
     }
 
     return semantic_make_tuple_type(elements, node->child_count);
@@ -908,11 +935,12 @@ ValueType semantic_make_list_type(ValueType element_type)
     }
 
     if (!semantic_type_is_class(element_type) &&
+        !semantic_type_is_optional(element_type) &&
         !semantic_type_is_native(element_type) &&
         !semantic_type_is_tuple(element_type) &&
         !semantic_type_is_list(element_type) &&
         !semantic_type_is_dict(element_type)) {
-        semantic_error("list elements must currently be int, float, bool, char, str, tuple, list, dict, class, or native opaque values");
+        semantic_error("list elements must currently be int, float, bool, char, str, optional, tuple, list, dict, class, or native opaque values");
     }
 
     for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
@@ -941,7 +969,7 @@ ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
         semantic_error("dict keys must currently be int, bool, char, or str");
     }
     if (!dict_value_type_supported(value_type)) {
-        semantic_error("dict values must currently be int, float, bool, char, str, list values, dict values, class values, tuple values, or native opaque values");
+        semantic_error("dict values must currently be int, float, bool, char, str, optional values, list values, dict values, class values, tuple values, or native opaque values");
     }
 
     for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {
@@ -1015,9 +1043,6 @@ ValueType semantic_make_tuple_type(const ValueType *elements, size_t element_cou
     for (size_t i = 0; i < element_count; i++) {
         if (semantic_type_is_union(elements[i])) {
             semantic_error("tuple elements cannot be union types yet");
-        }
-        if (semantic_type_is_optional(elements[i])) {
-            semantic_error("tuple elements cannot use optional types yet");
         }
         if (elements[i] == TYPE_NONE) {
             semantic_error("tuple elements cannot be None");
@@ -1250,9 +1275,6 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         }
         if (semantic_type_is_union(field_type)) {
             semantic_error_at_node(field, "class fields cannot use union types yet");
-        }
-        if (semantic_type_is_optional(field_type)) {
-            semantic_error_at_node(field, "class fields cannot use optional types yet");
         }
         if (field_type == TYPE_NONE) {
             semantic_error_at_node(field, "class fields cannot use None");

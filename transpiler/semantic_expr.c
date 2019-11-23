@@ -116,8 +116,11 @@ static int tuple_element_type_supported(ValueType type)
 
 static int print_type_supported(ValueType type)
 {
-    if (type == TYPE_NONE || semantic_type_is_optional(type)) {
+    if (type == TYPE_NONE) {
         return 0;
+    }
+    if (semantic_type_is_optional(type)) {
+        return print_type_supported(semantic_optional_base_type(type));
     }
     if (semantic_type_is_native(type)) {
         return 1;

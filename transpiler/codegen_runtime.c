@@ -24,6 +24,11 @@ static void emit_runtime_value_retain(CodegenContext *ctx, ValueType type, const
         fprintf(ctx->out, "    %s(&%s);\n", helper_name, expr);
         return;
     }
+    if (semantic_type_is_optional(type)) {
+        codegen_build_optional_retain_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "    %s(&%s);\n", helper_name, expr);
+        return;
+    }
     codegen_error("unsupported managed list element type %s", semantic_type_name(type));
 }
 
@@ -45,6 +50,11 @@ static void emit_runtime_value_release(CodegenContext *ctx, ValueType type, cons
     }
     if (semantic_type_is_tuple(type)) {
         codegen_build_tuple_release_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "        %s(&%s);\n", helper_name, expr);
+        return;
+    }
+    if (semantic_type_is_optional(type)) {
+        codegen_build_optional_release_name(helper_name, sizeof(helper_name), type);
         fprintf(ctx->out, "        %s(&%s);\n", helper_name, expr);
         return;
     }
@@ -73,6 +83,18 @@ static void emit_runtime_value_print(CodegenContext *ctx, ValueType type, const 
     if (semantic_type_is_tuple(type)) {
         codegen_build_tuple_print_name(helper_name, sizeof(helper_name), type);
         fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
+        return;
+    }
+    if (semantic_type_is_optional(type)) {
+        ValueType base_type = semantic_optional_base_type(type);
+        char *value_expr = codegen_dup_printf("%s.value", expr);
+
+        fprintf(ctx->out, "            if (%s.is_none) {\n", expr);
+        fprintf(ctx->out, "                printf(\"None\");\n");
+        fprintf(ctx->out, "            } else {\n");
+        emit_runtime_value_print(ctx, base_type, value_expr);
+        fprintf(ctx->out, "            }\n");
+        free(value_expr);
         return;
     }
     if (semantic_type_is_native(type)) {
@@ -220,6 +242,11 @@ static void emit_list_runtime(CodegenContext *ctx, ValueType list_type)
             char helper_name[MAX_NAME_LEN];
 
             codegen_build_class_retain_name(helper_name, sizeof(helper_name), element_type);
+            fprintf(ctx->out, "    %s(&value);\n", helper_name);
+        } else if (semantic_type_is_optional(element_type)) {
+            char helper_name[MAX_NAME_LEN];
+
+            codegen_build_optional_retain_name(helper_name, sizeof(helper_name), element_type);
             fprintf(ctx->out, "    %s(&value);\n", helper_name);
         } else {
             char helper_name[MAX_NAME_LEN];

@@ -88,6 +88,9 @@ const char *codegen_list_element_c_type(ValueType type)
         case TYPE_STR:
             return "const char *";
         default:
+            if (semantic_type_is_optional(element_type)) {
+                return codegen_type_to_c_string(element_type);
+            }
             if (semantic_type_is_tuple(element_type)) {
                 codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), element_type);
                 return tuple_name;
