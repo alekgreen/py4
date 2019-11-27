@@ -16,9 +16,13 @@ typedef struct {
     ValueType id;
     const char *name;
     const ParseNode *node;
+    ValueType base_type;
     size_t field_count;
     const char *field_names[MAX_CLASS_FIELDS];
+    ValueType field_owner_types[MAX_CLASS_FIELDS];
     ValueType field_types[MAX_CLASS_FIELDS];
+    int fields_defined;
+    int defining_fields;
 } ClassTypeInfo;
 
 typedef struct {
@@ -348,6 +352,21 @@ static int dict_value_type_supported(ValueType type)
         semantic_type_is_class(type) ||
         semantic_type_is_tuple(type) ||
         semantic_type_is_native(type);
+}
+
+static const ParseNode *class_base_type_node(const ParseNode *class_def)
+{
+    if (class_def != NULL &&
+        class_def->child_count > 1 &&
+        class_def->children[1]->kind == NODE_TYPE) {
+        return class_def->children[1];
+    }
+    return NULL;
+}
+
+static size_t class_member_start_index(const ParseNode *class_def)
+{
+    return class_base_type_node(class_def) != NULL ? 3 : 2;
 }
 
 static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
@@ -1234,7 +1253,10 @@ ValueType semantic_register_class(const ParseNode *class_def)
     entry->id = TYPE_CLASS_BASE + (ValueType)CLASS_TYPE_COUNT;
     entry->name = name;
     entry->node = class_def;
+    entry->base_type = 0;
     entry->field_count = 0;
+    entry->fields_defined = 0;
+    entry->defining_fields = 0;
     CLASS_TYPE_COUNT++;
     return entry->id;
 }
@@ -1243,14 +1265,46 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
 {
     ClassTypeInfo *entry;
     ValueType class_type;
+    const ParseNode *base_node;
 
     class_type = semantic_find_class_type(semantic_expect_child(class_def, 0, NODE_PRIMARY)->value);
     if (class_type == 0) {
         semantic_error("class definition missing from registry");
     }
     entry = find_class_type(class_type);
+    if (entry->fields_defined) {
+        return;
+    }
+    if (entry->defining_fields) {
+        semantic_error_at_node(class_def->children[0], "inheritance cycle detected for class '%s'", entry->name);
+    }
+    entry->defining_fields = 1;
 
-    for (size_t i = 2; i < class_def->child_count; i++) {
+    base_node = class_base_type_node(class_def);
+    if (base_node != NULL) {
+        ValueType base_type = semantic_parse_type_node(info, base_node);
+        ClassTypeInfo *base_entry;
+
+        if (!semantic_type_is_class(base_type)) {
+            semantic_error_at_node(base_node, "base type for class '%s' must be a class", entry->name);
+        }
+        if (base_type == class_type) {
+            semantic_error_at_node(base_node, "class '%s' cannot inherit from itself", entry->name);
+        }
+
+        base_entry = find_class_type(base_type);
+        semantic_define_class_fields(info, base_entry->node);
+        entry->base_type = base_type;
+
+        for (size_t i = 0; i < base_entry->field_count; i++) {
+            entry->field_names[entry->field_count] = base_entry->field_names[i];
+            entry->field_owner_types[entry->field_count] = base_entry->field_owner_types[i];
+            entry->field_types[entry->field_count] = base_entry->field_types[i];
+            entry->field_count++;
+        }
+    }
+
+    for (size_t i = class_member_start_index(class_def); i < class_def->child_count; i++) {
         const ParseNode *field = class_def->children[i];
         const ParseNode *type_node;
         ValueType field_type;
@@ -1281,10 +1335,13 @@ void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def
         }
 
         entry->field_names[entry->field_count] = field->value;
+        entry->field_owner_types[entry->field_count] = class_type;
         entry->field_types[entry->field_count] = field_type;
         entry->field_count++;
         semantic_record_node_type(info, field, field_type);
     }
+    entry->defining_fields = 0;
+    entry->fields_defined = 1;
 }
 
 size_t semantic_class_type_count(void)
@@ -1305,6 +1362,11 @@ const char *semantic_class_name(ValueType type)
     return find_class_type(type)->name;
 }
 
+ValueType semantic_class_base_type(ValueType type)
+{
+    return find_class_type(type)->base_type;
+}
+
 size_t semantic_class_field_count(ValueType type)
 {
     return find_class_type(type)->field_count;
@@ -1318,6 +1380,16 @@ const char *semantic_class_field_name(ValueType type, size_t index)
         semantic_error("class field index out of bounds for %s", info->name);
     }
     return info->field_names[index];
+}
+
+ValueType semantic_class_field_owner_type(ValueType type, size_t index)
+{
+    ClassTypeInfo *info = find_class_type(type);
+
+    if (index >= info->field_count) {
+        semantic_error("class field index out of bounds for %s", info->name);
+    }
+    return info->field_owner_types[index];
 }
 
 ValueType semantic_class_field_type(ValueType type, size_t index)

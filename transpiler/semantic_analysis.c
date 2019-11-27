@@ -51,6 +51,19 @@ static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *pro
 static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope);
 
+static int is_private_member_name(const char *name)
+{
+    return name != NULL &&
+        name[0] == '_' &&
+        name[1] == '_' &&
+        name[2] != '\0';
+}
+
+static size_t class_member_start_index(const ParseNode *class_def)
+{
+    return (class_def->child_count > 1 && class_def->children[1]->kind == NODE_TYPE) ? 3 : 2;
+}
+
 static char *dup_string(const char *value)
 {
     size_t len;
@@ -1033,6 +1046,104 @@ static char *build_method_c_name(ValueType owner_type, const char *method_name)
     return name;
 }
 
+static size_t class_type_index(ValueType type)
+{
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        if (semantic_class_type_at(i) == type) {
+            return i;
+        }
+    }
+
+    semantic_error("unknown class type index for %s", semantic_type_name(type));
+    return 0;
+}
+
+static void synthesize_class_methods_recursive(
+    SemanticInfo *info,
+    ValueType class_type,
+    unsigned char *visiting,
+    unsigned char *done)
+{
+    size_t index = class_type_index(class_type);
+    ValueType base_type = semantic_class_base_type(class_type);
+
+    if (done[index]) {
+        return;
+    }
+    if (visiting[index]) {
+        semantic_error("inheritance cycle detected while collecting methods for %s",
+            semantic_class_name(class_type));
+    }
+    visiting[index] = 1;
+
+    if (base_type != 0) {
+        synthesize_class_methods_recursive(info, base_type, visiting, done);
+
+        for (MethodInfo *method = info->methods; method != NULL; method = method->next) {
+            MethodInfo *inherited;
+
+            if (method->owner_type != base_type) {
+                continue;
+            }
+            if (strcmp(method->name, "__init__") == 0 || is_private_member_name(method->name)) {
+                continue;
+            }
+            if (semantic_find_method(info->methods, class_type, method->name) != NULL) {
+                continue;
+            }
+            for (size_t i = 0; i < semantic_class_field_count(class_type); i++) {
+                if (strcmp(semantic_class_field_name(class_type, i), method->name) == 0) {
+                    semantic_error("inherited method '%s' on class '%s' conflicts with field",
+                        method->name,
+                        semantic_class_name(class_type));
+                }
+            }
+
+            inherited = malloc(sizeof(MethodInfo));
+            if (inherited == NULL) {
+                perror("malloc");
+                exit(1);
+            }
+            inherited->owner_type = class_type;
+            inherited->source_owner_type = base_type;
+            inherited->name = method->name;
+            inherited->c_name = build_method_c_name(class_type, method->name);
+            inherited->return_type = method->return_type;
+            inherited->param_count = method->param_count;
+            inherited->param_types = method->param_count > 0
+                ? malloc(sizeof(ValueType) * method->param_count)
+                : NULL;
+            inherited->node = NULL;
+            inherited->next = info->methods;
+            info->methods = inherited;
+
+            if (method->param_count > 0 && inherited->param_types == NULL) {
+                perror("malloc");
+                exit(1);
+            }
+            if (method->param_count > 0) {
+                inherited->param_types[0] = class_type;
+            }
+            for (size_t i = 1; i < method->param_count; i++) {
+                inherited->param_types[i] = method->param_types[i];
+            }
+        }
+    }
+
+    visiting[index] = 0;
+    done[index] = 1;
+}
+
+static void synthesize_inherited_methods(SemanticInfo *info)
+{
+    unsigned char visiting[MAX_CLASS_TYPES] = {0};
+    unsigned char done[MAX_CLASS_TYPES] = {0};
+
+    for (size_t i = 0; i < semantic_class_type_count(); i++) {
+        synthesize_class_methods_recursive(info, semantic_class_type_at(i), visiting, done);
+    }
+}
+
 static void collect_methods(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -1044,7 +1155,7 @@ static void collect_methods(SemanticInfo *info, const ParseNode *root)
         }
 
         owner_type = semantic_find_class_type(semantic_expect_child(payload, 0, NODE_PRIMARY)->value);
-        for (size_t j = 2; j < payload->child_count; j++) {
+        for (size_t j = class_member_start_index(payload); j < payload->child_count; j++) {
             const ParseNode *member = payload->children[j];
             const ParseNode *parameters;
             size_t count;
@@ -1093,6 +1204,7 @@ static void collect_methods(SemanticInfo *info, const ParseNode *root)
                 exit(1);
             }
             method->owner_type = owner_type;
+            method->source_owner_type = owner_type;
             method->name = name;
             method->c_name = build_method_c_name(owner_type, name);
             method->return_type = semantic_function_return_type(info, member);
@@ -1338,7 +1450,7 @@ static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_d
     Scope class_scope = *global_scope;
     class_scope.current_class_type = semantic_find_class_type(semantic_expect_child(class_def, 0, NODE_PRIMARY)->value);
 
-    for (size_t i = 2; i < class_def->child_count; i++) {
+    for (size_t i = class_member_start_index(class_def); i < class_def->child_count; i++) {
         if (class_def->children[i]->kind == NODE_NATIVE_FUNCTION_DEF) {
             semantic_error_at_node(class_def->children[i]->children[0], "native methods are not supported");
         }
@@ -1436,6 +1548,7 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
     validate_class_definitions(info, root);
     collect_global_bindings(info, program);
     collect_methods(info, root);
+    synthesize_inherited_methods(info);
     collect_functions(info, root);
 
     for (size_t i = 0; i < root->child_count; i++) {

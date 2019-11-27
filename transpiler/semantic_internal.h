@@ -43,6 +43,7 @@ typedef struct ConstructorTargetInfo {
 
 typedef struct MethodInfo {
     ValueType owner_type;
+    ValueType source_owner_type;
     const char *name;
     char *c_name;
     ValueType return_type;

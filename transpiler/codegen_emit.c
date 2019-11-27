@@ -3,8 +3,14 @@
 #include <string.h>
 
 #include "codegen_internal.h"
+#include "semantic_internal.h"
 
 static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters, int is_c_main);
+
+static size_t class_member_start_index(const ParseNode *class_def)
+{
+    return (class_def->child_count > 1 && class_def->children[1]->kind == NODE_TYPE) ? 3 : 2;
+}
 
 static void codegen_module_name_from_path(const char *path, char *buffer, size_t size)
 {
@@ -2288,7 +2294,7 @@ static void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters
 
 static const ParseNode *find_class_init_definition(const ParseNode *class_def)
 {
-    for (size_t i = 2; i < class_def->child_count; i++) {
+    for (size_t i = class_member_start_index(class_def); i < class_def->child_count; i++) {
         const ParseNode *member = class_def->children[i];
 
         if (member->kind == NODE_FUNCTION_DEF &&
@@ -2347,7 +2353,7 @@ static ValueType codegen_method_owner_type(CodegenContext *ctx, const ParseNode 
         if (payload->kind != NODE_CLASS_DEF) {
             continue;
         }
-        for (size_t j = 2; j < payload->child_count; j++) {
+        for (size_t j = class_member_start_index(payload); j < payload->child_count; j++) {
             if (payload->children[j] == function_def) {
                 return semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value);
             }
@@ -2437,6 +2443,73 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     ctx->current_function_is_main = prev_is_main;
     ctx->current_function_is_init = prev_is_init;
     ctx->current_function_return_type = prev_return_type;
+    ctx->indent_level--;
+    fputs("}\n", ctx->out);
+}
+
+static void emit_synthetic_method_signature(CodegenContext *ctx, const MethodInfo *method, int prototype_only)
+{
+    codegen_emit_type_name(ctx, method->return_type);
+    fprintf(ctx->out, " %s(", method->c_name);
+    for (size_t i = 0; i < method->param_count; i++) {
+        if (i > 0) {
+            fputs(", ", ctx->out);
+        }
+        codegen_emit_type_name(ctx, method->param_types[i]);
+        if (i == 0) {
+            fputs(" self", ctx->out);
+        } else {
+            fprintf(ctx->out, " arg%zu", i);
+        }
+    }
+    if (method->param_count == 0) {
+        fputs("void", ctx->out);
+    }
+    fputc(')', ctx->out);
+    if (prototype_only) {
+        fputs(";\n", ctx->out);
+    }
+}
+
+static void emit_synthetic_method_definition(CodegenContext *ctx, const MethodInfo *method)
+{
+    MethodInfo *source_method = semantic_find_method(ctx->semantic->methods, method->source_owner_type, method->name);
+    size_t field_count = semantic_class_field_count(method->source_owner_type);
+
+    if (source_method == NULL) {
+        codegen_error("missing inherited source method '%s' on %s",
+            method->name,
+            semantic_type_name(method->source_owner_type));
+    }
+
+    emit_synthetic_method_signature(ctx, method, 0);
+    fputs("\n{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    codegen_emit_type_name(ctx, method->source_owner_type);
+    fputs(" base_self = ", ctx->out);
+    if (field_count == 0) {
+        fputs("{0};\n", ctx->out);
+    } else {
+        fputc('{', ctx->out);
+        for (size_t i = 0; i < field_count; i++) {
+            if (i > 0) {
+                fputs(", ", ctx->out);
+            }
+            fprintf(ctx->out, "self.%s", semantic_class_field_name(method->owner_type, i));
+        }
+        fputs("};\n", ctx->out);
+    }
+
+    codegen_emit_indent(ctx);
+    if (method->return_type != TYPE_NONE) {
+        fputs("return ", ctx->out);
+    }
+    fprintf(ctx->out, "%s(base_self", source_method->c_name);
+    for (size_t i = 1; i < method->param_count; i++) {
+        fprintf(ctx->out, ", arg%zu", i);
+    }
+    fputs(");\n", ctx->out);
     ctx->indent_level--;
     fputs("}\n", ctx->out);
 }
@@ -2601,9 +2674,17 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
-            for (size_t j = 2; j < payload->child_count; j++) {
+            ValueType class_type = semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value);
+
+            for (size_t j = class_member_start_index(payload); j < payload->child_count; j++) {
                 if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
                     emit_function_signature(ctx, payload->children[j], 1);
+                    wrote_any = 1;
+                }
+            }
+            for (MethodInfo *method = ctx->semantic->methods; method != NULL; method = method->next) {
+                if (method->owner_type == class_type && method->node == NULL) {
+                    emit_synthetic_method_signature(ctx, method, 1);
                     wrote_any = 1;
                 }
             }
@@ -2613,7 +2694,7 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
                 if (init_def != NULL) {
                     emit_constructor_helper_signature(
                         ctx,
-                        semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value),
+                        class_type,
                         init_def,
                         1);
                     wrote_any = 1;
@@ -2767,17 +2848,24 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
             continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
             const ParseNode *init_def = find_class_init_definition(payload);
+            ValueType class_type = semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value);
 
-            for (size_t j = 2; j < payload->child_count; j++) {
+            for (size_t j = class_member_start_index(payload); j < payload->child_count; j++) {
                 if (payload->children[j]->kind == NODE_FUNCTION_DEF) {
                     emit_function_definition(ctx, payload->children[j]);
+                    fputc('\n', ctx->out);
+                }
+            }
+            for (MethodInfo *method = ctx->semantic->methods; method != NULL; method = method->next) {
+                if (method->owner_type == class_type && method->node == NULL) {
+                    emit_synthetic_method_definition(ctx, method);
                     fputc('\n', ctx->out);
                 }
             }
             if (init_def != NULL) {
                 emit_constructor_helper_definition(
                     ctx,
-                    semantic_find_class_type(codegen_expect_child(payload, 0, NODE_PRIMARY)->value),
+                    class_type,
                     init_def);
                 fputc('\n', ctx->out);
             }

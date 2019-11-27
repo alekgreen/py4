@@ -1462,10 +1462,12 @@ ValueType semantic_infer_primary_type(
 
         for (size_t i = 0; i < semantic_class_field_count(base_type); i++) {
             if (strcmp(semantic_class_field_name(base_type, i), field->value) == 0) {
-                if (is_private_member_name(field->value) && scope_class_type(scope) != base_type) {
+                ValueType owner_type = semantic_class_field_owner_type(base_type, i);
+
+                if (is_private_member_name(field->value) && scope_class_type(scope) != owner_type) {
                     semantic_error_at_node(field, "field '%s' is private to class '%s'",
                         field->value,
-                        semantic_class_name(base_type));
+                        semantic_class_name(owner_type));
                 }
                 type = semantic_class_field_type(base_type, i);
                 semantic_record_node_type(info, field, type);

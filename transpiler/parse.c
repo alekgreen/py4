@@ -496,9 +496,16 @@ static ParseNode *parse_CLASS_DEF(TokenStream *ts)
     ParseNode *node = create_node_from_token(NODE_CLASS_DEF, class_tok);
     Token name;
     Token colon_tok;
+    size_t member_start_index;
 
     name = expect(ts, TOKEN_IDENTIFIER);
     add_child(node, create_node_from_token(NODE_PRIMARY, name));
+
+    if (peek_ts(ts).type == TOKEN_LPAREN) {
+        expect(ts, TOKEN_LPAREN);
+        add_child(node, parse_TYPE(ts));
+        expect(ts, TOKEN_RPAREN);
+    }
 
     colon_tok = expect(ts, TOKEN_COLON);
     add_child(node, create_node_from_token(NODE_COLON, colon_tok));
@@ -520,8 +527,9 @@ static ParseNode *parse_CLASS_DEF(TokenStream *ts)
         parse_skip_newlines(ts);
     }
 
-    if (node->child_count == 2) {
-        parse_error_at_node(node, "class body must declare at least one field");
+    member_start_index = (node->child_count > 1 && node->children[1]->kind == NODE_TYPE) ? 3 : 2;
+    if (node->child_count == member_start_index) {
+        parse_error_at_node(node, "class body must declare at least one member");
     }
 
     expect(ts, TOKEN_DEDENT);
