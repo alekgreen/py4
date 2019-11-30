@@ -33,6 +33,7 @@ typedef struct {
     int has_top_level_executable_statements;
     int current_function_is_main;
     int current_function_is_init;
+    ValueType current_method_owner_type;
     ValueType current_function_return_type;
     ValueType union_types[MAX_UNION_TYPES];
     size_t union_type_count;

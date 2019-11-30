@@ -2400,6 +2400,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     const ParseNode *parameters = codegen_function_parameters(function_def);
     int prev_is_main = ctx->current_function_is_main;
     int prev_is_init = ctx->current_function_is_init;
+    ValueType prev_method_owner_type = ctx->current_method_owner_type;
     ValueType prev_return_type = ctx->current_function_return_type;
 
     ctx->current_function_is_init = is_init_method;
@@ -2407,6 +2408,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
     fputs("\n{\n", ctx->out);
     ctx->indent_level++;
     ctx->current_function_is_main = is_c_main;
+    ctx->current_method_owner_type = owner_type;
     ctx->current_function_return_type = return_type;
     codegen_push_cleanup_scope(ctx);
 
@@ -2442,6 +2444,7 @@ static void emit_function_definition(CodegenContext *ctx, const ParseNode *funct
 
     ctx->current_function_is_main = prev_is_main;
     ctx->current_function_is_init = prev_is_init;
+    ctx->current_method_owner_type = prev_method_owner_type;
     ctx->current_function_return_type = prev_return_type;
     ctx->indent_level--;
     fputs("}\n", ctx->out);

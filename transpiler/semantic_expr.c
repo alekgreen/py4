@@ -60,6 +60,24 @@ static int is_private_member_name(const char *name)
     return name != NULL && strncmp(name, "__", 2) == 0;
 }
 
+static int is_super_call_node(const ParseNode *node)
+{
+    const ParseNode *callee;
+    const ParseNode *arguments;
+
+    if (node == NULL || node->kind != NODE_CALL || node->child_count != 2) {
+        return 0;
+    }
+
+    callee = semantic_expect_child(node, 0, NODE_PRIMARY);
+    arguments = semantic_expect_child(node, 1, NODE_ARGUMENTS);
+    return callee->token_type == TOKEN_IDENTIFIER &&
+        callee->value != NULL &&
+        strcmp(callee->value, "super") == 0 &&
+        arguments->child_count == 1 &&
+        semantic_is_epsilon_node(arguments->children[0]);
+}
+
 static int is_module_private_name(const char *name)
 {
     return name != NULL && name[0] == '_' && (name[1] == '\0' || name[1] != '_');
@@ -914,6 +932,68 @@ static ValueType infer_method_call_type(
             }
         }
         free(receiver_module_name);
+    }
+
+    if (is_super_call_node(receiver)) {
+        ValueType owner_type = scope_class_type(scope);
+        ValueType base_type;
+        MethodInfo *method_info;
+
+        if (owner_type == 0) {
+            semantic_error_at_node(method, "super() can only be used inside class methods");
+        }
+
+        base_type = semantic_class_base_type(owner_type);
+        if (base_type == 0) {
+            semantic_error_at_node(method, "class '%s' has no base class for super()",
+                semantic_class_name(owner_type));
+        }
+
+        method_info = semantic_find_method(info->methods, base_type, method->value);
+        if (method_info == NULL) {
+            semantic_error_at_node(method, "base class '%s' has no method '%s'",
+                semantic_class_name(base_type),
+                method->value);
+        }
+        if (strcmp(method->value, "__init__") != 0 &&
+            is_private_member_name(method->value) &&
+            scope_class_type(scope) != base_type) {
+            semantic_error_at_node(method, "method '%s' is private to class '%s'",
+                method->value,
+                semantic_class_name(base_type));
+        }
+
+        if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
+            if (method_info->param_count != 1) {
+                semantic_error_at_node(call, "method '%s' expects %zu arguments",
+                    method->value,
+                    method_info->param_count - 1);
+            }
+        } else if (arguments->child_count != method_info->param_count - 1) {
+            semantic_error_at_node(call, "method '%s' expects %zu arguments",
+                method->value,
+                method_info->param_count - 1);
+        }
+
+        for (size_t i = 0; i + 1 < method_info->param_count; i++) {
+            ValueType actual = semantic_infer_expression_type_with_hint(
+                info,
+                arguments->children[i],
+                scope,
+                method_info->param_types[i + 1]);
+            if (!semantic_is_assignable(method_info->param_types[i + 1], actual)) {
+                semantic_error_at_node(arguments->children[i],
+                    "method '%s' argument %zu expects %s but got %s",
+                    method->value,
+                    i + 1,
+                    semantic_type_name(method_info->param_types[i + 1]),
+                    semantic_type_name(actual));
+            }
+        }
+
+        semantic_record_node_type(info, receiver, base_type);
+        semantic_record_node_type(info, call, method_info->return_type);
+        return method_info->return_type;
     }
 
     receiver_type = semantic_infer_primary_type(info, receiver, scope);

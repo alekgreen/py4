@@ -88,6 +88,78 @@ static int is_init_self_identifier(CodegenContext *ctx, const ParseNode *primary
         strcmp(primary->value, "self") == 0;
 }
 
+static int is_super_call_node(const ParseNode *node)
+{
+    const ParseNode *callee;
+    const ParseNode *arguments;
+
+    if (node == NULL || node->kind != NODE_CALL || node->child_count != 2) {
+        return 0;
+    }
+
+    callee = codegen_expect_child(node, 0, NODE_PRIMARY);
+    arguments = codegen_expect_child(node, 1, NODE_ARGUMENTS);
+    return callee->token_type == TOKEN_IDENTIFIER &&
+        callee->value != NULL &&
+        strcmp(callee->value, "super") == 0 &&
+        arguments->child_count == 1 &&
+        codegen_is_epsilon_node(arguments->children[0]);
+}
+
+static char *codegen_build_base_self_value(CodegenContext *ctx, ValueType owner_type, ValueType base_type)
+{
+    size_t base_field_count = semantic_class_field_count(base_type);
+    char *parts = codegen_dup_printf("");
+
+    if (base_field_count == 0) {
+        free(parts);
+        return codegen_dup_printf("((%s){0})", semantic_class_name(base_type));
+    }
+
+    for (size_t i = 0; i < base_field_count; i++) {
+        char *field_expr = ctx->current_function_is_init
+            ? codegen_dup_printf("self->%s", semantic_class_field_name(owner_type, i))
+            : codegen_dup_printf("self.%s", semantic_class_field_name(owner_type, i));
+        char *joined = i == 0
+            ? codegen_dup_printf("%s", field_expr)
+            : codegen_dup_printf("%s, %s", parts, field_expr);
+
+        free(parts);
+        free(field_expr);
+        parts = joined;
+    }
+
+    {
+        char *result = codegen_dup_printf("((%s){%s})", semantic_class_name(base_type), parts);
+        free(parts);
+        return result;
+    }
+}
+
+static void codegen_emit_base_self_writeback(
+    CodegenContext *ctx,
+    ValueType owner_type,
+    ValueType base_type,
+    const char *base_name)
+{
+    size_t base_field_count = semantic_class_field_count(base_type);
+
+    for (size_t i = 0; i < base_field_count; i++) {
+        codegen_emit_indent(ctx);
+        if (ctx->current_function_is_init) {
+            fprintf(ctx->out, "self->%s = %s.%s;\n",
+                semantic_class_field_name(owner_type, i),
+                base_name,
+                semantic_class_field_name(base_type, i));
+        } else {
+            fprintf(ctx->out, "self.%s = %s.%s;\n",
+                semantic_class_field_name(owner_type, i),
+                base_name,
+                semantic_class_field_name(base_type, i));
+        }
+    }
+}
+
 static int node_is_owned_ref_value(CodegenContext *ctx, const ParseNode *node);
 
 char *codegen_next_temp_name(CodegenContext *ctx)
@@ -744,6 +816,141 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                 }
                 return constructed;
             }
+        }
+    }
+
+    if (is_super_call_node(receiver)) {
+        ValueType owner_type = ctx->current_method_owner_type;
+        ValueType base_type;
+        size_t arg_count;
+        ValueType return_type;
+        ValueType cleanup_types[32];
+        char *cleanup_names[32];
+        size_t cleanup_count = 0;
+        char *args;
+        char *result;
+
+        if (owner_type == 0) {
+            codegen_error("super() can only be used inside class methods");
+        }
+        base_type = semantic_class_base_type(owner_type);
+        if (base_type == 0) {
+            codegen_error("class '%s' has no base class for super()",
+                semantic_class_name(owner_type));
+        }
+
+        arg_count = (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))
+            ? 0
+            : arguments->child_count;
+        return_type = semantic_type_of(ctx->semantic, call);
+        args = codegen_dup_printf("");
+
+        for (size_t i = 0; i < arg_count; i++) {
+            ValueType target_type = semantic_method_parameter_type(ctx->semantic, base_type, method->value, i);
+            ValueType arg_type = semantic_type_of(ctx->semantic, arguments->children[i]);
+            char *arg;
+            char *joined;
+
+            if (semantic_type_needs_management(target_type) &&
+                semantic_type_needs_management(arg_type) &&
+                node_is_owned_ref_value(ctx, arguments->children[i])) {
+                char *temp_name = codegen_next_temp_name(ctx);
+                char *type_name = codegen_type_to_c_string(target_type);
+                char *part = codegen_wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, part);
+                free(type_name);
+                free(part);
+                cleanup_names[cleanup_count] = codegen_dup_printf("%s", temp_name);
+                cleanup_types[cleanup_count] = target_type;
+                cleanup_count++;
+                arg = temp_name;
+            } else {
+                arg = codegen_wrapped_expression_to_c_string(ctx, arguments->children[i], target_type);
+            }
+
+            joined = i == 0
+                ? codegen_dup_printf("%s", arg)
+                : codegen_dup_printf("%s, %s", args, arg);
+            free(args);
+            free(arg);
+            args = joined;
+        }
+
+        if (strcmp(method->value, "__init__") == 0) {
+            char *base_name = codegen_next_temp_name(ctx);
+            char *base_expr = codegen_build_base_self_value(ctx, owner_type, base_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n",
+                semantic_class_name(base_type),
+                base_name,
+                base_expr);
+            free(base_expr);
+
+            {
+                char *call_args = arg_count == 0
+                    ? codegen_dup_printf("&%s", base_name)
+                    : codegen_dup_printf("&%s, %s", base_name, args);
+                result = codegen_dup_printf("%s(%s)",
+                    semantic_method_c_name(ctx->semantic, base_type, method->value),
+                    call_args);
+                free(call_args);
+            }
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s;\n", result);
+            codegen_emit_base_self_writeback(ctx, owner_type, base_type, base_name);
+            for (size_t i = cleanup_count; i > 0; i--) {
+                codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                free(cleanup_names[i - 1]);
+            }
+            free(base_name);
+            free(args);
+            free(result);
+            return codegen_dup_printf("(void)0");
+        }
+
+        {
+            char *base_expr = codegen_build_base_self_value(ctx, owner_type, base_type);
+            char *call_args = arg_count == 0
+                ? codegen_dup_printf("%s", base_expr)
+                : codegen_dup_printf("%s, %s", base_expr, args);
+            result = codegen_dup_printf("%s(%s)",
+                semantic_method_c_name(ctx->semantic, base_type, method->value),
+                call_args);
+            free(base_expr);
+            free(call_args);
+        }
+        free(args);
+
+        if (cleanup_count == 0) {
+            return result;
+        }
+        if (return_type == TYPE_NONE) {
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s;\n", result);
+            free(result);
+            for (size_t i = cleanup_count; i > 0; i--) {
+                codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                free(cleanup_names[i - 1]);
+            }
+            return codegen_dup_printf("(void)0");
+        }
+
+        {
+            char *result_name = codegen_next_temp_name(ctx);
+            char *type_name = codegen_type_to_c_string(return_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s %s = %s;\n", type_name, result_name, result);
+            free(type_name);
+            free(result);
+            for (size_t i = cleanup_count; i > 0; i--) {
+                codegen_emit_value_release(ctx, cleanup_types[i - 1], cleanup_names[i - 1]);
+                free(cleanup_names[i - 1]);
+            }
+            return result_name;
         }
     }
 
