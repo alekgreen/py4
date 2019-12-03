@@ -22,6 +22,70 @@ const ValueType CODEGEN_ORDERED_TYPES[] = {
 const size_t CODEGEN_ORDERED_TYPE_COUNT =
     sizeof(CODEGEN_ORDERED_TYPES) / sizeof(CODEGEN_ORDERED_TYPES[0]);
 
+#define CODEGEN_NAME_SLOT_COUNT 32
+
+static const char *codegen_store_generated_name(char *owned)
+{
+    static char *slots[CODEGEN_NAME_SLOT_COUNT];
+    static size_t next_slot = 0;
+
+    free(slots[next_slot]);
+    slots[next_slot] = owned;
+    next_slot = (next_slot + 1) % CODEGEN_NAME_SLOT_COUNT;
+    return slots[(next_slot + CODEGEN_NAME_SLOT_COUNT - 1) % CODEGEN_NAME_SLOT_COUNT];
+}
+
+static char *codegen_type_suffix_dup(ValueType type)
+{
+    if (semantic_type_is_tuple(type)) {
+        char tuple_name[MAX_NAME_LEN];
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
+        return codegen_dup_printf("%s", tuple_name);
+    }
+    if (semantic_type_is_list(type)) {
+        char *element_suffix = codegen_type_suffix_dup(semantic_list_element_type(type));
+        char *result = codegen_dup_printf("list_%s", element_suffix);
+
+        free(element_suffix);
+        return result;
+    }
+    if (semantic_type_is_class(type)) {
+        return codegen_dup_printf("%s", semantic_class_name(type));
+    }
+    if (semantic_type_is_native(type)) {
+        return codegen_dup_printf("%s_%s",
+            semantic_native_type_module(type),
+            semantic_native_type_name(type));
+    }
+    if (semantic_type_is_optional(type)) {
+        char *base_suffix = codegen_type_suffix_dup(semantic_optional_base_type(type));
+        char *result = codegen_dup_printf("optional_%s", base_suffix);
+
+        free(base_suffix);
+        return result;
+    }
+    if (semantic_type_is_dict(type)) {
+        char *key_suffix = codegen_type_suffix_dup(semantic_dict_key_type(type));
+        char *value_suffix = codegen_type_suffix_dup(semantic_dict_value_type(type));
+        char *result = codegen_dup_printf("dict_%s_%s", key_suffix, value_suffix);
+
+        free(key_suffix);
+        free(value_suffix);
+        return result;
+    }
+
+    switch (type) {
+        case TYPE_INT: return codegen_dup_printf("int");
+        case TYPE_FLOAT: return codegen_dup_printf("float");
+        case TYPE_BOOL: return codegen_dup_printf("bool");
+        case TYPE_CHAR: return codegen_dup_printf("char");
+        case TYPE_STR: return codegen_dup_printf("str");
+        case TYPE_NONE: return codegen_dup_printf("none");
+        default: return codegen_dup_printf("unknown");
+    }
+}
+
 void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type)
 {
     size_t count;
@@ -291,59 +355,7 @@ const ParseNode *codegen_find_function_definition(const ParseNode *root, const c
 
 const char *codegen_type_suffix(ValueType type)
 {
-    static char tuple_name[MAX_NAME_LEN];
-    static char list_name[MAX_NAME_LEN];
-
-    if (semantic_type_is_tuple(type)) {
-        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), type);
-        return tuple_name;
-    }
-    if (semantic_type_is_list(type)) {
-        char element_suffix[MAX_NAME_LEN];
-
-        snprintf(element_suffix, sizeof(element_suffix), "%s",
-            codegen_type_suffix(semantic_list_element_type(type)));
-        snprintf(list_name, sizeof(list_name), "list_%s", element_suffix);
-        return list_name;
-    }
-    if (semantic_type_is_class(type)) {
-        return semantic_class_name(type);
-    }
-    if (semantic_type_is_native(type)) {
-        snprintf(list_name, sizeof(list_name), "%s_%s",
-            semantic_native_type_module(type),
-            semantic_native_type_name(type));
-        return list_name;
-    }
-    if (semantic_type_is_optional(type)) {
-        char base_suffix[MAX_NAME_LEN];
-
-        snprintf(base_suffix, sizeof(base_suffix), "%s",
-            codegen_type_suffix(semantic_optional_base_type(type)));
-        snprintf(list_name, sizeof(list_name), "optional_%s", base_suffix);
-        return list_name;
-    }
-    if (semantic_type_is_dict(type)) {
-        char key_suffix[MAX_NAME_LEN];
-        char value_suffix[MAX_NAME_LEN];
-
-        snprintf(key_suffix, sizeof(key_suffix), "%s",
-            codegen_type_suffix(semantic_dict_key_type(type)));
-        snprintf(value_suffix, sizeof(value_suffix), "%s",
-            codegen_type_suffix(semantic_dict_value_type(type)));
-        snprintf(list_name, sizeof(list_name), "dict_%s_%s", key_suffix, value_suffix);
-        return list_name;
-    }
-
-    switch (type) {
-        case TYPE_INT: return "int";
-        case TYPE_FLOAT: return "float";
-        case TYPE_BOOL: return "bool";
-        case TYPE_CHAR: return "char";
-        case TYPE_STR: return "str";
-        case TYPE_NONE: return "none";
-        default: return "unknown";
-    }
+    return codegen_store_generated_name(codegen_type_suffix_dup(type));
 }
 
 const char *codegen_type_field(ValueType type)

@@ -4,6 +4,19 @@
 
 #include "codegen_internal.h"
 
+#define CODEGEN_LIST_NAME_SLOT_COUNT 16
+
+static const char *codegen_store_list_name(char *owned)
+{
+    static char *slots[CODEGEN_LIST_NAME_SLOT_COUNT];
+    static size_t next_slot = 0;
+
+    free(slots[next_slot]);
+    slots[next_slot] = owned;
+    next_slot = (next_slot + 1) % CODEGEN_LIST_NAME_SLOT_COUNT;
+    return slots[(next_slot + CODEGEN_LIST_NAME_SLOT_COUNT - 1) % CODEGEN_LIST_NAME_SLOT_COUNT];
+}
+
 char *codegen_dup_printf(const char *fmt, ...)
 {
     va_list args;
@@ -49,24 +62,20 @@ const char *codegen_ref_runtime_prefix(ValueType type)
 
 const char *codegen_list_struct_name(ValueType type)
 {
-    static char name[MAX_NAME_LEN];
-
     if (!semantic_type_is_list(type)) {
         codegen_error("%s is not a supported list type", semantic_type_name(type));
     }
-    snprintf(name, sizeof(name), "Py4List_%s", codegen_type_suffix(semantic_list_element_type(type)));
-    return name;
+    return codegen_store_list_name(
+        codegen_dup_printf("Py4List_%s", codegen_type_suffix(semantic_list_element_type(type))));
 }
 
 const char *codegen_list_runtime_prefix(ValueType type)
 {
-    static char name[MAX_NAME_LEN];
-
     if (!semantic_type_is_list(type)) {
         codegen_error("%s is not a supported list type", semantic_type_name(type));
     }
-    snprintf(name, sizeof(name), "py4_list_%s", codegen_type_suffix(semantic_list_element_type(type)));
-    return name;
+    return codegen_store_list_name(
+        codegen_dup_printf("py4_list_%s", codegen_type_suffix(semantic_list_element_type(type))));
 }
 
 const char *codegen_list_element_c_type(ValueType type)
@@ -117,36 +126,24 @@ const char *codegen_list_element_c_type(ValueType type)
 
 const char *codegen_dict_struct_name(ValueType type)
 {
-    static char name[MAX_NAME_LEN];
-    char key_suffix[MAX_NAME_LEN];
-    char value_suffix[MAX_NAME_LEN];
-
     if (!semantic_type_is_dict(type)) {
         codegen_error("%s is not a supported dict type", semantic_type_name(type));
     }
-    snprintf(key_suffix, sizeof(key_suffix), "%s",
-        codegen_type_suffix(semantic_dict_key_type(type)));
-    snprintf(value_suffix, sizeof(value_suffix), "%s",
-        codegen_type_suffix(semantic_dict_value_type(type)));
-    snprintf(name, sizeof(name), "Py4Dict_%s_%s", key_suffix, value_suffix);
-    return name;
+    return codegen_store_list_name(
+        codegen_dup_printf("Py4Dict_%s_%s",
+            codegen_type_suffix(semantic_dict_key_type(type)),
+            codegen_type_suffix(semantic_dict_value_type(type))));
 }
 
 const char *codegen_dict_runtime_prefix(ValueType type)
 {
-    static char name[MAX_NAME_LEN];
-    char key_suffix[MAX_NAME_LEN];
-    char value_suffix[MAX_NAME_LEN];
-
     if (!semantic_type_is_dict(type)) {
         codegen_error("%s is not a supported dict type", semantic_type_name(type));
     }
-    snprintf(key_suffix, sizeof(key_suffix), "%s",
-        codegen_type_suffix(semantic_dict_key_type(type)));
-    snprintf(value_suffix, sizeof(value_suffix), "%s",
-        codegen_type_suffix(semantic_dict_value_type(type)));
-    snprintf(name, sizeof(name), "py4_dict_%s_%s", key_suffix, value_suffix);
-    return name;
+    return codegen_store_list_name(
+        codegen_dup_printf("py4_dict_%s_%s",
+            codegen_type_suffix(semantic_dict_key_type(type)),
+            codegen_type_suffix(semantic_dict_value_type(type))));
 }
 
 char *codegen_list_new_call(ValueType type)
