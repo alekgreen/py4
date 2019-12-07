@@ -17,5 +17,8 @@ native def as_string(value: Value) -> str
 native def len(value: Value) -> int
 native def has(value: Value, key: str) -> bool
 native def keys(value: Value) -> list[str]
+native def values(value: Value) -> list[Value]
+native def items(value: Value) -> list[(str, Value)]
 native def get(value: Value, key: str) -> Value
+native def get_or(value: Value, key: str, fallback: Value) -> Value
 native def get_index(value: Value, index: int) -> Value

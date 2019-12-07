@@ -218,7 +218,7 @@ static void emit_list_runtime(CodegenContext *ctx, ValueType list_type)
     }
     fprintf(ctx->out, "}\n\n");
 
-    fprintf(ctx->out, "static %s *%s_from_values(size_t count, const %s *values)\n{\n",
+    fprintf(ctx->out, "static %s *%s_from_values(size_t count, %s *values)\n{\n",
         struct_name, prefix, item_c_type);
     fprintf(ctx->out, "    %s *list = %s_new();\n", struct_name, prefix);
     fprintf(ctx->out, "    %s_ensure_capacity(list, count);\n", prefix);

@@ -1182,6 +1182,117 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
 
     if (module_name != NULL &&
         strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "values") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+        const char *list_struct = codegen_list_struct_name(return_type);
+        const char *list_prefix = codegen_list_runtime_prefix(return_type);
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"cannot get values from null json value handle\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (!cJSON_IsObject(%s->node)) {\n", value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"json.values expects an object value\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s *values = %s_new();\n", list_struct, list_prefix);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "for (cJSON *child = %s->node->child; child != NULL; child = child->next) {\n", value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "Py4JsonValue *item = py4_json_value_new(%s->owner, child);\n", value_name);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s_append(values, item);\n", list_prefix);
+        codegen_emit_indent(ctx);
+        fputs("py4_json_value_decref(item);\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return values;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "items") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+        ValueType tuple_type = semantic_list_element_type(return_type);
+        char tuple_name[MAX_NAME_LEN];
+        char tuple_release_name[MAX_NAME_LEN];
+        const char *list_struct = codegen_list_struct_name(return_type);
+        const char *list_prefix = codegen_list_runtime_prefix(return_type);
+
+        codegen_build_tuple_base_name(tuple_name, sizeof(tuple_name), tuple_type);
+        codegen_build_tuple_release_name(tuple_release_name, sizeof(tuple_release_name), tuple_type);
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"cannot get items from null json value handle\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (!cJSON_IsObject(%s->node)) {\n", value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"json.items expects an object value\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s *items = %s_new();\n", list_struct, list_prefix);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "for (cJSON *child = %s->node->child; child != NULL; child = child->next) {\n", value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s entry;\n", tuple_name);
+        codegen_emit_indent(ctx);
+        fputs("entry.item0 = child->string != NULL ? child->string : \"\";\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "entry.item1 = py4_json_value_new(%s->owner, child);\n", value_name);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s_append(items, entry);\n", list_prefix);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "%s(&entry);\n", tuple_release_name);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fputs("return items;\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
         strcmp(name->value, "get_index") == 0 &&
         parameters->child_count == 2 &&
         semantic_type_is_native(first_param_type)) {
@@ -1235,6 +1346,55 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         fputs("}\n", ctx->out);
         codegen_emit_indent(ctx);
         fputs("py4_json_fail(\"json array index out of bounds\");\n", ctx->out);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "get_or") == 0 &&
+        parameters->child_count == 3 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+        const char *key_name = parameters->children[1]->value;
+        const char *fallback_name = parameters->children[2]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"cannot get from null json value handle\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "if (!cJSON_IsObject(%s->node)) {\n", value_name);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("py4_json_fail(\"json.get_or expects an object value\");\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "cJSON *child = cJSON_GetObjectItemCaseSensitive(%s->node, %s);\n", value_name, key_name);
+        codegen_emit_indent(ctx);
+        fputs("if (child == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "py4_json_value_incref(%s);\n", fallback_name);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return %s;\n", fallback_name);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_json_value_new(%s->owner, child);\n", value_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return;
