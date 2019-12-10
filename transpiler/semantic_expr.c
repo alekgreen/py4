@@ -169,6 +169,79 @@ static int print_type_supported(ValueType type)
     return 1;
 }
 
+static int json_from_string_type_supported(ValueType type)
+{
+    if (type == TYPE_INT || type == TYPE_FLOAT || type == TYPE_BOOL || type == TYPE_STR) {
+        return 1;
+    }
+    if (type == TYPE_CHAR) {
+        return 0;
+    }
+    if (semantic_type_is_class(type)) {
+        for (size_t i = 0; i < semantic_class_field_count(type); i++) {
+            if (!json_from_string_type_supported(semantic_class_field_type(type, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (semantic_type_is_optional(type)) {
+        return json_from_string_type_supported(semantic_optional_base_type(type));
+    }
+    if (semantic_type_is_list(type)) {
+        return json_from_string_type_supported(semantic_list_element_type(type));
+    }
+    return 0;
+}
+
+static const ModuleInfo *scope_module(Scope *scope);
+static ImportBinding *find_module_binding_for_receiver(const ModuleInfo *module, const ParseNode *receiver);
+
+static ValueType infer_typed_call_type(
+    SemanticInfo *info,
+    const ParseNode *call,
+    Scope *scope)
+{
+    const ParseNode *callee = call->children[0];
+    const ParseNode *receiver = callee->children[0];
+    const ParseNode *name = semantic_expect_child(callee, 1, NODE_PRIMARY);
+    const ParseNode *type_node = semantic_expect_child(call, 1, NODE_TYPE);
+    const ParseNode *arguments = semantic_expect_child(call, 2, NODE_ARGUMENTS);
+    const ModuleInfo *current_module = scope_module(scope);
+    ImportBinding *module_binding = find_module_binding_for_receiver(current_module, receiver);
+    ValueType target_type;
+    ValueType arg_type;
+
+    if (callee->kind != NODE_FIELD_ACCESS || module_binding == NULL) {
+        semantic_error_at_node(call, "unsupported typed call syntax");
+    }
+
+    if (strcmp(module_binding->module_name, "json") != 0 || strcmp(name->value, "from_string") != 0) {
+        semantic_error_at_node(call, "unsupported typed call '%s.%s[...]'",
+            module_binding->module_name,
+            name->value);
+    }
+
+    target_type = semantic_parse_type_node(info, type_node);
+    if (!semantic_type_is_class(target_type)) {
+        semantic_error_at_node(type_node, "json.from_string[...] currently supports only class types");
+    }
+    if (!json_from_string_type_supported(target_type)) {
+        semantic_error_at_node(type_node,
+            "json.from_string[%s] supports only classes built from int, float, bool, str, lists, nested classes, and optionals",
+            semantic_type_name(target_type));
+    }
+
+    expect_argument_count("from_string", arguments, 1);
+    arg_type = semantic_infer_expression_type_with_hint(info, arguments->children[0], scope, TYPE_STR);
+    if (!semantic_is_assignable(TYPE_STR, arg_type)) {
+        semantic_error_at_node(arguments->children[0], "function 'json.from_string' expects str input");
+    }
+
+    semantic_record_node_type(info, call, target_type);
+    return target_type;
+}
+
 static ValueType infer_class_constructor_type(
     SemanticInfo *info,
     ValueType class_type,
@@ -1600,6 +1673,12 @@ ValueType semantic_infer_primary_type(
 
         semantic_record_node_type(info, node, semantic_list_element_type(container_type));
         return semantic_list_element_type(container_type);
+    }
+
+    if (node->kind == NODE_TYPED_CALL) {
+        type = infer_typed_call_type(info, node, scope);
+        semantic_record_node_type(info, node, type);
+        return type;
     }
 
     if (node->kind == NODE_CALL) {

@@ -77,6 +77,7 @@ ValueType semantic_class_field_owner_type(ValueType type, size_t index);
 ValueType semantic_class_field_type(ValueType type, size_t index);
 ValueType semantic_find_class_type(const char *name);
 size_t semantic_native_type_count(void);
+ValueType semantic_find_native_type(const char *module_name, const char *name);
 ValueType semantic_native_type_at(size_t index);
 const char *semantic_native_type_name(ValueType type);
 const char *semantic_native_type_module(ValueType type);

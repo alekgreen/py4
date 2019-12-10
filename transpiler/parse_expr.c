@@ -22,6 +22,21 @@ static ParseNode *parse_FACTOR(TokenStream *ts);
 static ParseNode *parse_UNARY(TokenStream *ts);
 static ParseNode *parse_PRIMARY(TokenStream *ts);
 
+static int is_json_from_string_target(const ParseNode *node)
+{
+    const ParseNode *field;
+
+    if (node == NULL || node->kind != NODE_FIELD_ACCESS || node->child_count != 2) {
+        return 0;
+    }
+
+    field = node->children[1];
+    return field != NULL &&
+        field->kind == NODE_PRIMARY &&
+        field->value != NULL &&
+        strcmp(field->value, "from_string") == 0;
+}
+
 static void parse_skip_container_layout(TokenStream *ts)
 {
     while (peek_ts(ts).type == TOKEN_NEWLINE ||
@@ -564,6 +579,20 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
         }
 
         if (peek_ts(ts).type == TOKEN_LBRACKET) {
+            if (is_json_from_string_target(base)) {
+                ParseNode *typed_call = create_node(NODE_TYPED_CALL, TOKEN_NULL, NULL);
+
+                expect(ts, TOKEN_LBRACKET);
+                add_child(typed_call, base);
+                add_child(typed_call, parse_TYPE(ts));
+                expect(ts, TOKEN_RBRACKET);
+                expect(ts, TOKEN_LPAREN);
+                add_child(typed_call, parse_ARGUMENTS(ts));
+                expect(ts, TOKEN_RPAREN);
+                base = typed_call;
+                continue;
+            }
+
             ParseNode *index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
 
             expect(ts, TOKEN_LBRACKET);

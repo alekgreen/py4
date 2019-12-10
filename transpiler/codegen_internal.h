@@ -81,6 +81,8 @@ void codegen_build_class_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_retain_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_release_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_ctor_name(char *buffer, size_t size, ValueType type);
+void codegen_build_class_json_decode_name(char *buffer, size_t size, ValueType type);
+void codegen_build_class_json_from_string_name(char *buffer, size_t size, ValueType type);
 void codegen_build_optional_base_name(char *buffer, size_t size, ValueType type);
 void codegen_build_optional_retain_name(char *buffer, size_t size, ValueType type);
 void codegen_build_optional_release_name(char *buffer, size_t size, ValueType type);
