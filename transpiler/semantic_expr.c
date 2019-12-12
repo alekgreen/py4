@@ -194,6 +194,19 @@ static int json_from_string_type_supported(ValueType type)
     return 0;
 }
 
+static int json_to_string_type_supported(ValueType type)
+{
+    ValueType json_value_type = semantic_find_native_type("json", "Value");
+
+    if (type == json_value_type) {
+        return 1;
+    }
+    if (!semantic_type_is_class(type)) {
+        return 0;
+    }
+    return json_from_string_type_supported(type);
+}
+
 static const ModuleInfo *scope_module(Scope *scope);
 static ImportBinding *find_module_binding_for_receiver(const ModuleInfo *module, const ParseNode *receiver);
 
@@ -800,6 +813,32 @@ static ValueType resolve_function_call_type(
 
     if (arguments->child_count == 1 && semantic_is_epsilon_node(arguments->children[0])) {
         actual_count = 0;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(function_name, "to_string") == 0) {
+        ValueType arg_type;
+        ValueType json_value_type = semantic_find_native_type("json", "Value");
+
+        expect_argument_count("to_string", arguments, 1);
+        arg_type = semantic_infer_expression_type(info, arguments->children[0], scope);
+        if (arg_type == json_value_type) {
+            semantic_record_node_type(info, call, TYPE_STR);
+            return TYPE_STR;
+        }
+        if (!semantic_type_is_class(arg_type)) {
+            semantic_error_at_node(arguments->children[0],
+                "json.to_string(...) currently supports only json.Value and class values");
+        }
+        if (!json_to_string_type_supported(arg_type)) {
+            semantic_error_at_node(arguments->children[0],
+                "json.to_string(%s) supports only classes built from int, float, bool, str, lists, nested classes, and optionals",
+                semantic_type_name(arg_type));
+        }
+
+        semantic_record_node_type(info, call, TYPE_STR);
+        return TYPE_STR;
     }
 
     for (FunctionInfo *fn = info->functions; fn != NULL; fn = fn->next) {

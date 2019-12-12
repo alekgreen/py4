@@ -619,6 +619,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     const ParseNode *receiver;
     const ParseNode *method = codegen_expect_child(call, 1, NODE_PRIMARY);
     const ParseNode *arguments = codegen_expect_child(call, 2, NODE_ARGUMENTS);
+    const char *receiver_module_name;
     ValueType receiver_type;
     int needs_cleanup = 0;
     char *receiver_name;
@@ -629,6 +630,59 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 
     receiver = call->children[0];
+    receiver_module_name = semantic_module_name_for_receiver(ctx->semantic, receiver);
+    if (receiver_module_name != NULL && strcmp(receiver_module_name, "json") == 0 &&
+        strcmp(method->value, "to_string") == 0) {
+        const ParseNode *arg_node = arguments->children[0];
+        ValueType arg_type = semantic_type_of(ctx->semantic, arg_node);
+        ValueType json_value_type = semantic_find_native_type("json", "Value");
+        char *arg_text;
+        char *call_text;
+        int cleanup_needed = 0;
+
+        if (arg_type == json_value_type) {
+            arg_text = materialize_ref_node(ctx, arg_node, arg_type, 0, &cleanup_needed);
+            call_text = codegen_dup_printf("py4_json_stringify_handle(%s)", arg_text);
+        } else {
+            char helper_name[MAX_NAME_LEN];
+            if (semantic_type_needs_management(arg_type) && node_is_owned_ref_value(ctx, arg_node)) {
+                char *temp_name = codegen_next_temp_name(ctx);
+                char *type_name = codegen_type_to_c_string(arg_type);
+                char *part = codegen_wrapped_expression_to_c_string(ctx, arg_node, arg_type);
+
+                codegen_emit_indent(ctx);
+                fprintf(ctx->out, "%s %s = %s;\n", type_name, temp_name, part);
+                free(type_name);
+                free(part);
+                arg_text = temp_name;
+                cleanup_needed = 2;
+            } else {
+                arg_text = codegen_wrapped_expression_to_c_string(ctx, arg_node, arg_type);
+            }
+            codegen_build_class_json_to_string_name(helper_name, sizeof(helper_name), arg_type);
+            call_text = codegen_dup_printf("%s(%s)", helper_name, arg_text);
+        }
+
+        if (!cleanup_needed) {
+            free(arg_text);
+            return call_text;
+        }
+
+        {
+            char *result_name = codegen_next_temp_name(ctx);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "const char *%s = %s;\n", result_name, call_text);
+            if (cleanup_needed == 1) {
+                codegen_emit_ref_decref(ctx, arg_type, arg_text);
+            } else {
+                codegen_emit_value_release(ctx, arg_type, arg_text);
+            }
+            free(call_text);
+            free(arg_text);
+            return result_name;
+        }
+    }
     if (semantic_has_call_target(ctx->semantic, call)) {
         ValueType return_type = semantic_type_of(ctx->semantic, call);
         size_t arg_count = (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))

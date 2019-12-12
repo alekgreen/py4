@@ -1685,6 +1685,86 @@ const char *semantic_module_name_for_path(const SemanticInfo *info, const char *
     return NULL;
 }
 
+static char *semantic_module_ref_string(const ParseNode *node)
+{
+    if (node == NULL) {
+        return NULL;
+    }
+
+    if (node->kind == NODE_PRIMARY && node->token_type == TOKEN_IDENTIFIER && node->value != NULL) {
+        size_t len = strlen(node->value) + 1;
+        char *copy = malloc(len);
+
+        if (copy == NULL) {
+            perror("malloc");
+            exit(1);
+        }
+
+        memcpy(copy, node->value, len);
+        return copy;
+    }
+
+    if (node->kind == NODE_FIELD_ACCESS) {
+        char *base = semantic_module_ref_string(node->children[0]);
+        const ParseNode *field = semantic_expect_child(node, 1, NODE_PRIMARY);
+        char *joined;
+        size_t len;
+
+        if (base == NULL || field->value == NULL) {
+            free(base);
+            return NULL;
+        }
+
+        len = strlen(base) + strlen(field->value) + 2;
+        joined = malloc(len);
+        if (joined == NULL) {
+            perror("malloc");
+            exit(1);
+        }
+        snprintf(joined, len, "%s.%s", base, field->value);
+        free(base);
+        return joined;
+    }
+
+    return NULL;
+}
+
+const char *semantic_module_name_for_receiver(const SemanticInfo *info, const ParseNode *receiver)
+{
+    const char *current_module_name;
+    ModuleInfo *module;
+    char *name;
+
+    if (receiver == NULL || receiver->source_path == NULL) {
+        return NULL;
+    }
+
+    current_module_name = semantic_module_name_for_path(info, receiver->source_path);
+    if (current_module_name == NULL) {
+        return NULL;
+    }
+
+    module = semantic_find_module_info(info->modules, current_module_name);
+    if (module == NULL) {
+        return NULL;
+    }
+
+    name = semantic_module_ref_string(receiver);
+    if (name == NULL) {
+        return NULL;
+    }
+
+    for (ImportBinding *binding = module->imports; binding != NULL; binding = binding->next) {
+        if (binding->is_module_import && strcmp(binding->local_name, name) == 0) {
+            free(name);
+            return binding->module_name;
+        }
+    }
+
+    free(name);
+    return NULL;
+}
+
 size_t semantic_native_type_count(void)
 {
     return NATIVE_TYPE_COUNT;

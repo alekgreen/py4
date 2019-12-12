@@ -140,7 +140,7 @@ static void emit_native_type_runtime(CodegenContext *ctx)
                 continue;
             }
 
-            fputs("typedef struct cJSON {\n", ctx->out);
+            fputs("struct cJSON {\n", ctx->out);
             fputs("    struct cJSON *next;\n", ctx->out);
             fputs("    struct cJSON *prev;\n", ctx->out);
             fputs("    struct cJSON *child;\n", ctx->out);
@@ -149,11 +149,19 @@ static void emit_native_type_runtime(CodegenContext *ctx)
             fputs("    int valueint;\n", ctx->out);
             fputs("    double valuedouble;\n", ctx->out);
             fputs("    char *string;\n", ctx->out);
-            fputs("} cJSON;\n\n", ctx->out);
+            fputs("};\n\n", ctx->out);
 
             fputs("extern cJSON *cJSON_Parse(const char *value);\n", ctx->out);
             fputs("extern void cJSON_Delete(cJSON *item);\n", ctx->out);
             fputs("extern char *cJSON_PrintUnformatted(const cJSON *item);\n", ctx->out);
+            fputs("extern cJSON *cJSON_CreateObject(void);\n", ctx->out);
+            fputs("extern cJSON *cJSON_CreateArray(void);\n", ctx->out);
+            fputs("extern cJSON *cJSON_CreateString(const char *string);\n", ctx->out);
+            fputs("extern cJSON *cJSON_CreateNumber(double num);\n", ctx->out);
+            fputs("extern cJSON *cJSON_CreateBool(int boolean);\n", ctx->out);
+            fputs("extern cJSON *cJSON_CreateNull(void);\n", ctx->out);
+            fputs("extern int cJSON_AddItemToObject(cJSON *object, const char *string, cJSON *item);\n", ctx->out);
+            fputs("extern int cJSON_AddItemToArray(cJSON *array, cJSON *item);\n", ctx->out);
             fputs("extern cJSON *cJSON_GetObjectItemCaseSensitive(const cJSON *object, const char *string);\n", ctx->out);
             fputs("extern const char *cJSON_GetErrorPtr(void);\n", ctx->out);
             fputs("extern int cJSON_IsInvalid(const cJSON *item);\n", ctx->out);
@@ -259,6 +267,18 @@ static void emit_native_type_runtime(CodegenContext *ctx)
             fputs("        py4_json_owner_decref(value->owner);\n", ctx->out);
             fputs("        free(value);\n", ctx->out);
             fputs("    }\n", ctx->out);
+            fputs("}\n\n", ctx->out);
+
+            fputs("static char *py4_json_stringify_handle(Py4JsonValue *value)\n{\n", ctx->out);
+            fputs("    char *text;\n", ctx->out);
+            fputs("    if (value == NULL || value->node == NULL) {\n", ctx->out);
+            fputs("        py4_json_fail(\"cannot stringify null json value handle\");\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    text = cJSON_PrintUnformatted(value->node);\n", ctx->out);
+            fputs("    if (text == NULL) {\n", ctx->out);
+            fputs("        py4_json_fail(\"failed to stringify json value\");\n", ctx->out);
+            fputs("    }\n", ctx->out);
+            fputs("    return text;\n", ctx->out);
             fputs("}\n\n", ctx->out);
 
             fputs("static Py4JsonValue *py4_json_parse_text(const char *text)\n{\n", ctx->out);
@@ -1015,25 +1035,26 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "if (%s == NULL || %s->node == NULL) {\n", value_name, value_name);
+        fprintf(ctx->out, "return py4_json_stringify_handle(%s);\n", value_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "json") == 0 &&
+        strcmp(name->value, "to_string") == 0 &&
+        parameters->child_count == 1 &&
+        semantic_type_is_native(first_param_type)) {
+        const char *value_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fputs("py4_json_fail(\"cannot stringify null json value handle\");\n", ctx->out);
-        ctx->indent_level--;
-        codegen_emit_indent(ctx);
-        fputs("}\n", ctx->out);
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "char *text = cJSON_PrintUnformatted(%s->node);\n", value_name);
-        codegen_emit_indent(ctx);
-        fputs("if (text == NULL) {\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fputs("py4_json_fail(\"failed to stringify json value\");\n", ctx->out);
-        ctx->indent_level--;
-        codegen_emit_indent(ctx);
-        fputs("}\n", ctx->out);
-        codegen_emit_indent(ctx);
-        fputs("return text;\n", ctx->out);
+        fprintf(ctx->out, "return py4_json_stringify_handle(%s);\n", value_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return;

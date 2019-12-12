@@ -1,0 +1,1 @@
+json.to_string(Config) supports only classes built from int, float, bool, str, lists, nested classes, and optionals
