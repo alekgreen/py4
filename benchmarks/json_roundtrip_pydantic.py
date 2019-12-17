@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class Owner(BaseModel):
     name: str
     team: str
-    email: str
+    email: str | None
 
 
 class Metric(BaseModel):
@@ -16,7 +16,7 @@ class Metric(BaseModel):
     value: float
     active: bool
     tags: list[str]
-    note: str
+    note: str | None
 
 
 class Report(BaseModel):

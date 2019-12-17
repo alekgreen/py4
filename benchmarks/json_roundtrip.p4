@@ -5,7 +5,7 @@ import json
 class Owner:
     name: str
     team: str
-    email: str
+    email: str | None
 
 
 class Metric:
@@ -13,7 +13,7 @@ class Metric:
     value: float
     active: bool
     tags: list[str]
-    note: str
+    note: str | None
 
 
 class Report:

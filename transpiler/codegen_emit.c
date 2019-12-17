@@ -1721,6 +1721,11 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
         codegen_emit_indent(ctx);
         if (ctx->current_function_is_main) {
             fputs("return 0;\n", ctx->out);
+        } else if (semantic_type_is_optional(ctx->current_function_return_type)) {
+            char optional_name[MAX_NAME_LEN];
+
+            codegen_build_optional_base_name(optional_name, sizeof(optional_name), ctx->current_function_return_type);
+            fprintf(ctx->out, "return ((%s){ .is_none = true });\n", optional_name);
         } else if (semantic_type_is_union(ctx->current_function_return_type)) {
             fputs("return ", ctx->out);
             emit_union_constructor_call(ctx, ctx->current_function_return_type, TYPE_NONE);

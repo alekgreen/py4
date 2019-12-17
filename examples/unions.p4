@@ -17,7 +17,7 @@ def main() -> None:
     numeric = echo(2.5)
     print(numeric)
 
-    maybe: str | None = maybe_word(True)
-    print(maybe)
-    maybe = maybe_word(False)
-    print(maybe)
+    holder: (str | None, int) = (maybe_word(True), 1)
+    print(holder)
+    holder = (maybe_word(False), 2)
+    print(holder)

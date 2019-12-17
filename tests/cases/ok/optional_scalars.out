@@ -1,0 +1,2 @@
+Contact(name=ann, email=None, score=3.5)
+Contact(name=bob, email=bob@example.com, score=None)

@@ -7,9 +7,9 @@ import (
 )
 
 type Owner struct {
-	Name  string `json:"name"`
-	Team  string `json:"team"`
-	Email string `json:"email"`
+	Name  string  `json:"name"`
+	Team  string  `json:"team"`
+	Email *string `json:"email"`
 }
 
 type Metric struct {
@@ -17,7 +17,7 @@ type Metric struct {
 	Value  float64  `json:"value"`
 	Active bool     `json:"active"`
 	Tags   []string `json:"tags"`
-	Note   string   `json:"note"`
+	Note   *string  `json:"note"`
 }
 
 type Report struct {

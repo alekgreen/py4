@@ -1,0 +1,4 @@
+Data(name=None, score=3.5)
+Data(name=bob, score=None)
+{"name":null,"score":3.5}
+{"name":"bob","score":null}

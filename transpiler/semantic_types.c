@@ -1016,8 +1016,10 @@ ValueType semantic_make_optional_type(ValueType base_type)
 {
     OptionalTypeInfo *entry;
 
-    if (!semantic_type_is_class(base_type) && !semantic_type_is_native(base_type)) {
-        semantic_error("optional base type must be class or native, got %s",
+    if (base_type == TYPE_NONE ||
+        semantic_type_is_union(base_type) ||
+        semantic_type_is_optional(base_type)) {
+        semantic_error("optional base type must be a concrete non-union type, got %s",
             semantic_type_name(base_type));
     }
 
@@ -1451,10 +1453,15 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
         semantic_record_node_type(info, type_node->children[0], first_type);
         semantic_record_node_type(info, type_node->children[1], second_type);
 
-        if (first_type == TYPE_NONE && (semantic_type_is_class(second_type) || semantic_type_is_native(second_type))) {
+        if (first_type == TYPE_NONE &&
+            second_type != TYPE_NONE &&
+            !semantic_type_is_union(second_type) &&
+            !semantic_type_is_optional(second_type)) {
             base_type = second_type;
         } else if (second_type == TYPE_NONE &&
-            (semantic_type_is_class(first_type) || semantic_type_is_native(first_type))) {
+            first_type != TYPE_NONE &&
+            !semantic_type_is_union(first_type) &&
+            !semantic_type_is_optional(first_type)) {
             base_type = first_type;
         }
 

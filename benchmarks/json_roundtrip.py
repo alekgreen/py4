@@ -10,7 +10,7 @@ from dataclasses import dataclass
 class Owner:
     name: str
     team: str
-    email: str
+    email: str | None
 
 
 @dataclass
@@ -19,7 +19,7 @@ class Metric:
     value: float
     active: bool
     tags: list[str]
-    note: str
+    note: str | None
 
 
 @dataclass
@@ -36,7 +36,7 @@ def decode_owner(data: dict[str, object]) -> Owner:
     return Owner(
         name=str(data["name"]),
         team=str(data["team"]),
-        email=str(data["email"]),
+        email=None if data["email"] is None else str(data["email"]),
     )
 
 
@@ -46,7 +46,7 @@ def decode_metric(data: dict[str, object]) -> Metric:
         value=float(data["value"]),
         active=bool(data["active"]),
         tags=[str(tag) for tag in data["tags"]],
-        note=str(data["note"]),
+        note=None if data["note"] is None else str(data["note"]),
     )
 
 
