@@ -2,7 +2,7 @@ import json
 
 
 class Config:
-    mapping: dict[str, int]
+    mapping: dict[int, int]
 
 
 def main() -> None:

@@ -423,6 +423,11 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    dict->refcount--;\n");
     fprintf(ctx->out, "    if (dict->refcount == 0) {\n");
+    if (key_type == TYPE_STR) {
+        fprintf(ctx->out, "        for (size_t i = 0; i < dict->len; i++) {\n");
+        fprintf(ctx->out, "            free((void *)dict->keys[i]);\n");
+        fprintf(ctx->out, "        }\n");
+    }
     if (semantic_type_needs_management(value_type)) {
         fprintf(ctx->out, "        for (size_t i = 0; i < dict->len; i++) {\n");
         emit_runtime_value_release(ctx, value_type, "dict->values[i]");
@@ -478,7 +483,20 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "        return;\n");
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    %s_ensure_capacity(dict, dict->len + 1);\n", prefix);
-    fprintf(ctx->out, "    dict->keys[dict->len] = key;\n");
+    if (key_type == TYPE_STR) {
+        fprintf(ctx->out, "    {\n");
+        fprintf(ctx->out, "        size_t key_len = strlen(key) + 1;\n");
+        fprintf(ctx->out, "        char *key_copy = malloc(key_len);\n");
+        fprintf(ctx->out, "        if (key_copy == NULL) {\n");
+        fprintf(ctx->out, "            perror(\"malloc\");\n");
+        fprintf(ctx->out, "            exit(1);\n");
+        fprintf(ctx->out, "        }\n");
+        fprintf(ctx->out, "        memcpy(key_copy, key, key_len);\n");
+        fprintf(ctx->out, "        dict->keys[dict->len] = key_copy;\n");
+        fprintf(ctx->out, "    }\n");
+    } else {
+        fprintf(ctx->out, "    dict->keys[dict->len] = key;\n");
+    }
     fprintf(ctx->out, "    dict->values[dict->len] = value;\n");
     if (semantic_type_needs_management(value_type)) {
         emit_runtime_value_retain(ctx, value_type, "dict->values[dict->len]");
@@ -600,6 +618,9 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "        exit(1);\n");
     fprintf(ctx->out, "    }\n");
     fprintf(ctx->out, "    value = dict->values[index];\n");
+    if (key_type == TYPE_STR) {
+        fprintf(ctx->out, "    free((void *)dict->keys[index]);\n");
+    }
     fprintf(ctx->out, "    for (size_t i = (size_t)index + 1; i < dict->len; i++) {\n");
     fprintf(ctx->out, "        dict->keys[i - 1] = dict->keys[i];\n");
     fprintf(ctx->out, "        dict->values[i - 1] = dict->values[i];\n");
@@ -613,6 +634,11 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "        fprintf(stderr, \"Runtime error: %s is null\\n\");\n", type_name);
     fprintf(ctx->out, "        exit(1);\n");
     fprintf(ctx->out, "    }\n");
+    if (key_type == TYPE_STR) {
+        fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
+        fprintf(ctx->out, "        free((void *)dict->keys[i]);\n");
+        fprintf(ctx->out, "    }\n");
+    }
     if (semantic_type_needs_management(value_type)) {
         fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
         emit_runtime_value_release(ctx, value_type, "dict->values[i]");
@@ -629,7 +655,18 @@ static void emit_dict_runtime(CodegenContext *ctx, ValueType dict_type)
     fprintf(ctx->out, "    copy = %s_new();\n", prefix);
     fprintf(ctx->out, "    %s_ensure_capacity(copy, dict->len);\n", prefix);
     fprintf(ctx->out, "    for (size_t i = 0; i < dict->len; i++) {\n");
-    fprintf(ctx->out, "        copy->keys[i] = dict->keys[i];\n");
+    if (key_type == TYPE_STR) {
+        fprintf(ctx->out, "        size_t key_len = strlen(dict->keys[i]) + 1;\n");
+        fprintf(ctx->out, "        char *key_copy = malloc(key_len);\n");
+        fprintf(ctx->out, "        if (key_copy == NULL) {\n");
+        fprintf(ctx->out, "            perror(\"malloc\");\n");
+        fprintf(ctx->out, "            exit(1);\n");
+        fprintf(ctx->out, "        }\n");
+        fprintf(ctx->out, "        memcpy(key_copy, dict->keys[i], key_len);\n");
+        fprintf(ctx->out, "        copy->keys[i] = key_copy;\n");
+    } else {
+        fprintf(ctx->out, "        copy->keys[i] = dict->keys[i];\n");
+    }
     fprintf(ctx->out, "        copy->values[i] = dict->values[i];\n");
     if (semantic_type_needs_management(value_type)) {
         emit_runtime_value_retain(ctx, value_type, "copy->values[i]");

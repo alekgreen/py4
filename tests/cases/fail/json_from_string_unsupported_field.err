@@ -1,1 +1,1 @@
-json.from_string[Config] supports only classes built from int, float, bool, str, lists, nested classes, and optionals
+json.from_string[Config] currently supports int, float, bool, str, tuples, list[...], dict[str, ...], classes, and optionals

@@ -125,6 +125,7 @@ static int tuple_element_type_supported(ValueType type)
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_optional(type) ||
         semantic_type_is_list(type) ||
         semantic_type_is_dict(type) ||
         semantic_type_is_tuple(type) ||
@@ -177,6 +178,14 @@ static int json_from_string_type_supported(ValueType type)
     if (type == TYPE_CHAR) {
         return 0;
     }
+    if (semantic_type_is_tuple(type)) {
+        for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+            if (!json_from_string_type_supported(semantic_tuple_element_type(type, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
     if (semantic_type_is_class(type)) {
         for (size_t i = 0; i < semantic_class_field_count(type); i++) {
             if (!json_from_string_type_supported(semantic_class_field_type(type, i))) {
@@ -191,6 +200,10 @@ static int json_from_string_type_supported(ValueType type)
     if (semantic_type_is_list(type)) {
         return json_from_string_type_supported(semantic_list_element_type(type));
     }
+    if (semantic_type_is_dict(type)) {
+        return semantic_dict_key_type(type) == TYPE_STR &&
+            json_from_string_type_supported(semantic_dict_value_type(type));
+    }
     return 0;
 }
 
@@ -200,9 +213,6 @@ static int json_to_string_type_supported(ValueType type)
 
     if (type == json_value_type) {
         return 1;
-    }
-    if (!semantic_type_is_class(type)) {
-        return 0;
     }
     return json_from_string_type_supported(type);
 }
@@ -236,12 +246,9 @@ static ValueType infer_typed_call_type(
     }
 
     target_type = semantic_parse_type_node(info, type_node);
-    if (!semantic_type_is_class(target_type)) {
-        semantic_error_at_node(type_node, "json.from_string[...] currently supports only class types");
-    }
     if (!json_from_string_type_supported(target_type)) {
         semantic_error_at_node(type_node,
-            "json.from_string[%s] supports only classes built from int, float, bool, str, lists, nested classes, and optionals",
+            "json.from_string[%s] currently supports int, float, bool, str, tuples, list[...], dict[str, ...], classes, and optionals",
             semantic_type_name(target_type));
     }
 
@@ -827,13 +834,9 @@ static ValueType resolve_function_call_type(
             semantic_record_node_type(info, call, TYPE_STR);
             return TYPE_STR;
         }
-        if (!semantic_type_is_class(arg_type)) {
-            semantic_error_at_node(arguments->children[0],
-                "json.to_string(...) currently supports only json.Value and class values");
-        }
         if (!json_to_string_type_supported(arg_type)) {
             semantic_error_at_node(arguments->children[0],
-                "json.to_string(%s) supports only classes built from int, float, bool, str, lists, nested classes, and optionals",
+                "json.to_string(%s) currently supports int, float, bool, str, tuples, list[...], dict[str, ...], classes, and optionals",
                 semantic_type_name(arg_type));
         }
 
@@ -1599,7 +1602,7 @@ ValueType semantic_infer_primary_type(
 
             if (!tuple_element_type_supported(item_type)) {
             semantic_error_at_node(node->children[i],
-                "tuple elements currently support only int, float, bool, char, str, lists, dicts, classes, and tuples");
+                "tuple elements currently support only int, float, bool, char, str, optionals, lists, dicts, classes, and tuples");
             }
             element_types[i] = item_type;
         }

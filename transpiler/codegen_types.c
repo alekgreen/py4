@@ -26,6 +26,8 @@ const size_t CODEGEN_ORDERED_TYPE_COUNT =
 
 static int json_decode_type_supported(ValueType type);
 static int json_encode_type_supported(ValueType type);
+static void emit_json_helper_declarations_for_type(CodegenContext *ctx, ValueType type, int emit_decode, int emit_encode);
+static void emit_json_helper_definitions_for_type(CodegenContext *ctx, ValueType type, int emit_decode, int emit_encode);
 static void emit_json_decode_assign(
     CodegenContext *ctx,
     ValueType type,
@@ -215,24 +217,44 @@ void codegen_build_class_ctor_name(char *buffer, size_t size, ValueType type)
     snprintf(buffer, size, "%s__ctor", semantic_class_name(type));
 }
 
+void codegen_build_json_decode_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_json_decode_%s", codegen_type_suffix(type));
+}
+
+void codegen_build_json_from_string_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_json_from_string_%s", codegen_type_suffix(type));
+}
+
+void codegen_build_json_encode_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_json_encode_%s", codegen_type_suffix(type));
+}
+
+void codegen_build_json_to_string_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_json_to_string_%s", codegen_type_suffix(type));
+}
+
 void codegen_build_class_json_decode_name(char *buffer, size_t size, ValueType type)
 {
-    snprintf(buffer, size, "py4_json_decode_%s", semantic_class_name(type));
+    codegen_build_json_decode_name(buffer, size, type);
 }
 
 void codegen_build_class_json_from_string_name(char *buffer, size_t size, ValueType type)
 {
-    snprintf(buffer, size, "py4_json_from_string_%s", semantic_class_name(type));
+    codegen_build_json_from_string_name(buffer, size, type);
 }
 
 void codegen_build_class_json_encode_name(char *buffer, size_t size, ValueType type)
 {
-    snprintf(buffer, size, "py4_json_encode_%s", semantic_class_name(type));
+    codegen_build_json_encode_name(buffer, size, type);
 }
 
 void codegen_build_class_json_to_string_name(char *buffer, size_t size, ValueType type)
 {
-    snprintf(buffer, size, "py4_json_to_string_%s", semantic_class_name(type));
+    codegen_build_json_to_string_name(buffer, size, type);
 }
 
 void codegen_build_optional_base_name(char *buffer, size_t size, ValueType type)
@@ -1399,6 +1421,14 @@ static int json_decode_type_supported(ValueType type)
     if (type == TYPE_CHAR) {
         return 0;
     }
+    if (semantic_type_is_tuple(type)) {
+        for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+            if (!json_decode_type_supported(semantic_tuple_element_type(type, i))) {
+                return 0;
+            }
+        }
+        return 1;
+    }
     if (semantic_type_is_class(type)) {
         for (size_t i = 0; i < semantic_class_field_count(type); i++) {
             if (!json_decode_type_supported(semantic_class_field_type(type, i))) {
@@ -1413,6 +1443,10 @@ static int json_decode_type_supported(ValueType type)
     if (semantic_type_is_list(type)) {
         return json_decode_type_supported(semantic_list_element_type(type));
     }
+    if (semantic_type_is_dict(type)) {
+        return semantic_dict_key_type(type) == TYPE_STR &&
+            json_decode_type_supported(semantic_dict_value_type(type));
+    }
     return 0;
 }
 
@@ -1423,6 +1457,14 @@ static int json_encode_type_supported(ValueType type)
     }
     if (type == TYPE_CHAR) {
         return 0;
+    }
+    if (semantic_type_is_tuple(type)) {
+        for (size_t i = 0; i < semantic_tuple_element_count(type); i++) {
+            if (!json_encode_type_supported(semantic_tuple_element_type(type, i))) {
+                return 0;
+            }
+        }
+        return 1;
     }
     if (semantic_type_is_class(type)) {
         for (size_t i = 0; i < semantic_class_field_count(type); i++) {
@@ -1438,7 +1480,82 @@ static int json_encode_type_supported(ValueType type)
     if (semantic_type_is_list(type)) {
         return json_encode_type_supported(semantic_list_element_type(type));
     }
+    if (semantic_type_is_dict(type)) {
+        return semantic_dict_key_type(type) == TYPE_STR &&
+            json_encode_type_supported(semantic_dict_value_type(type));
+    }
     return 0;
+}
+
+static void emit_json_helper_declarations_for_type(CodegenContext *ctx, ValueType type, int emit_decode, int emit_encode)
+{
+    char helper_name[MAX_NAME_LEN];
+    char *type_name = codegen_type_to_c_string(type);
+
+    if (emit_decode && json_decode_type_supported(type)) {
+        codegen_build_json_decode_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static %s %s(Py4JsonValue *value);\n", type_name, helper_name);
+        codegen_build_json_from_string_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static %s %s(const char *text);\n", type_name, helper_name);
+    }
+    if (emit_encode && json_encode_type_supported(type)) {
+        codegen_build_json_encode_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static cJSON *%s(%s value);\n", helper_name, type_name);
+        codegen_build_json_to_string_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static char *%s(%s value);\n", helper_name, type_name);
+    }
+
+    free(type_name);
+}
+
+static void emit_json_helper_definitions_for_type(CodegenContext *ctx, ValueType type, int emit_decode, int emit_encode)
+{
+    char helper_name[MAX_NAME_LEN];
+    char *type_name = codegen_type_to_c_string(type);
+
+    if (emit_decode && json_decode_type_supported(type)) {
+        codegen_build_json_decode_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static %s %s(Py4JsonValue *value)\n{\n", type_name, helper_name);
+        fprintf(ctx->out, "    %s result;\n", type_name);
+        emit_json_decode_assign(ctx, type, "result", "value", semantic_type_name(type));
+        fprintf(ctx->out, "    return result;\n");
+        fprintf(ctx->out, "}\n\n");
+
+        codegen_build_json_from_string_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static %s %s(const char *text)\n{\n", type_name, helper_name);
+        fprintf(ctx->out, "    Py4JsonValue *value = py4_json_parse_text(text);\n");
+        fprintf(ctx->out, "    %s result = ", type_name);
+        codegen_build_json_decode_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "%s(value);\n", helper_name);
+        fprintf(ctx->out, "    py4_json_value_decref(value);\n");
+        fprintf(ctx->out, "    return result;\n");
+        fprintf(ctx->out, "}\n\n");
+    }
+
+    if (emit_encode && json_encode_type_supported(type)) {
+        codegen_build_json_encode_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static cJSON *%s(%s value)\n{\n", helper_name, type_name);
+        fprintf(ctx->out, "    cJSON *result = NULL;\n");
+        emit_json_encode_assign(ctx, type, "result", "value", semantic_type_name(type));
+        fprintf(ctx->out, "    return result;\n");
+        fprintf(ctx->out, "}\n\n");
+
+        codegen_build_json_to_string_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "static char *%s(%s value)\n{\n", helper_name, type_name);
+        fprintf(ctx->out, "    cJSON *object = NULL;\n");
+        fprintf(ctx->out, "    char *text = NULL;\n");
+        codegen_build_json_encode_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "    object = %s(value);\n", helper_name);
+        fprintf(ctx->out, "    text = cJSON_PrintUnformatted(object);\n");
+        fprintf(ctx->out, "    cJSON_Delete(object);\n");
+        fprintf(ctx->out, "    if (text == NULL) {\n");
+        fprintf(ctx->out, "        py4_json_fail(\"failed to stringify %s\");\n", semantic_type_name(type));
+        fprintf(ctx->out, "    }\n");
+        fprintf(ctx->out, "    return text;\n");
+        fprintf(ctx->out, "}\n\n");
+    }
+
+    free(type_name);
 }
 
 static void emit_json_decode_assign(
@@ -1521,6 +1638,57 @@ static void emit_json_decode_assign(
         free(element_c_type);
         return;
     }
+    if (semantic_type_is_tuple(type)) {
+        size_t element_count = semantic_tuple_element_count(type);
+
+        fprintf(out, "    if (!cJSON_IsArray(%s->node)) {\n", json_expr);
+        fprintf(out, "        py4_json_fail(\"expected array for %s\");\n", context);
+        fprintf(out, "    }\n");
+        fprintf(out, "    if ((size_t)cJSON_GetArraySize(%s->node) != %zu) {\n", json_expr, element_count);
+        fprintf(out, "        py4_json_fail(\"expected tuple of length %zu for %s\");\n", element_count, context);
+        fprintf(out, "    }\n");
+        for (size_t i = 0; i < element_count; i++) {
+            char item_target[MAX_NAME_LEN];
+            char item_context[MAX_NAME_LEN];
+
+            snprintf(item_target, sizeof(item_target), "%s.item%zu", target_expr, i);
+            snprintf(item_context, sizeof(item_context), "%s[%zu]", context, i);
+            fprintf(out, "    {\n");
+            fprintf(out, "        cJSON *child = cJSON_GetArrayItem(%s->node, %zu);\n", json_expr, i);
+            fprintf(out, "        Py4JsonValue *item_json = py4_json_value_new(%s->owner, child);\n", json_expr);
+            emit_json_decode_assign(ctx, semantic_tuple_element_type(type, i), item_target, "item_json", item_context);
+            fprintf(out, "        py4_json_value_decref(item_json);\n");
+            fprintf(out, "    }\n");
+        }
+        return;
+    }
+    if (semantic_type_is_dict(type)) {
+        ValueType key_type = semantic_dict_key_type(type);
+        ValueType value_type = semantic_dict_value_type(type);
+        char *value_c_type = codegen_type_to_c_string(value_type);
+        const char *prefix = codegen_dict_runtime_prefix(type);
+
+        if (key_type != TYPE_STR) {
+            codegen_error("json.from_string does not support %s", semantic_type_name(type));
+        }
+
+        fprintf(out, "    if (!cJSON_IsObject(%s->node)) {\n", json_expr);
+        fprintf(out, "        py4_json_fail(\"expected object for %s\");\n", context);
+        fprintf(out, "    }\n");
+        fprintf(out, "    %s = %s_new();\n", target_expr, prefix);
+        fprintf(out, "    for (cJSON *child = %s->node->child; child != NULL; child = child->next) {\n", json_expr);
+        fprintf(out, "        Py4JsonValue *item_json = py4_json_value_new(%s->owner, child);\n", json_expr);
+        fprintf(out, "        %s item_value;\n", value_c_type);
+        emit_json_decode_assign(ctx, value_type, "item_value", "item_json", context);
+        fprintf(out, "        %s_set(%s, child->string, item_value);\n", prefix, target_expr);
+        if (semantic_type_needs_management(value_type)) {
+            emit_managed_field_release(out, value_type, "item_value");
+        }
+        fprintf(out, "        py4_json_value_decref(item_json);\n");
+        fprintf(out, "    }\n");
+        free(value_c_type);
+        return;
+    }
 
     codegen_error("json.from_string does not support %s", semantic_type_name(type));
 }
@@ -1597,6 +1765,58 @@ static void emit_json_encode_assign(
         fprintf(ctx->out, "            }\n");
         fprintf(ctx->out, "        }\n");
         free(element_c_type);
+        return;
+    }
+    if (semantic_type_is_tuple(type)) {
+        size_t element_count = semantic_tuple_element_count(type);
+
+        fprintf(ctx->out, "        %s = cJSON_CreateArray();\n", target_expr);
+        fprintf(ctx->out, "        if (%s == NULL) {\n", target_expr);
+        fprintf(ctx->out, "            py4_json_fail(\"failed to encode %s\");\n", context);
+        fprintf(ctx->out, "        }\n");
+        for (size_t i = 0; i < element_count; i++) {
+            char item_expr[MAX_NAME_LEN];
+            char item_context[MAX_NAME_LEN];
+
+            snprintf(item_expr, sizeof(item_expr), "%s.item%zu", value_expr, i);
+            snprintf(item_context, sizeof(item_context), "%s[%zu]", context, i);
+            fprintf(ctx->out, "        {\n");
+            fprintf(ctx->out, "            cJSON *item_json = NULL;\n");
+            emit_json_encode_assign(ctx, semantic_tuple_element_type(type, i), "item_json", item_expr, item_context);
+            fprintf(ctx->out, "            if (!cJSON_AddItemToArray(%s, item_json)) {\n", target_expr);
+            fprintf(ctx->out, "                cJSON_Delete(item_json);\n");
+            fprintf(ctx->out, "                py4_json_fail(\"failed to encode %s\");\n", item_context);
+            fprintf(ctx->out, "            }\n");
+            fprintf(ctx->out, "        }\n");
+        }
+        return;
+    }
+    if (semantic_type_is_dict(type)) {
+        ValueType key_type = semantic_dict_key_type(type);
+        ValueType value_type = semantic_dict_value_type(type);
+        char *value_c_type = codegen_type_to_c_string(value_type);
+
+        if (key_type != TYPE_STR) {
+            free(value_c_type);
+            codegen_error("json.to_string does not support %s", semantic_type_name(type));
+        }
+
+        fprintf(ctx->out, "        %s = cJSON_CreateObject();\n", target_expr);
+        fprintf(ctx->out, "        if (%s == NULL) {\n", target_expr);
+        fprintf(ctx->out, "            py4_json_fail(\"failed to encode %s\");\n", context);
+        fprintf(ctx->out, "        }\n");
+        fprintf(ctx->out, "        if (%s != NULL) {\n", value_expr);
+        fprintf(ctx->out, "            for (size_t i = 0; i < %s->len; i++) {\n", value_expr);
+        fprintf(ctx->out, "                cJSON *item_json = NULL;\n");
+        fprintf(ctx->out, "                %s item_value = %s->values[i];\n", value_c_type, value_expr);
+        emit_json_encode_assign(ctx, value_type, "item_json", "item_value", context);
+        fprintf(ctx->out, "                if (!cJSON_AddItemToObject(%s, %s->keys[i], item_json)) {\n", target_expr, value_expr);
+        fprintf(ctx->out, "                    cJSON_Delete(item_json);\n");
+        fprintf(ctx->out, "                    py4_json_fail(\"failed to encode %s\");\n", context);
+        fprintf(ctx->out, "                }\n");
+        fprintf(ctx->out, "            }\n");
+        fprintf(ctx->out, "        }\n");
+        free(value_c_type);
         return;
     }
 
@@ -1944,6 +2164,42 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
         semantic_optional_type_count() > 0) {
         fputc('\n', ctx->out);
     }
+
+    if (emit_json_decode_helpers || emit_json_encode_helpers) {
+        emit_json_helper_declarations_for_type(ctx, TYPE_INT, emit_json_decode_helpers, emit_json_encode_helpers);
+        emit_json_helper_declarations_for_type(ctx, TYPE_FLOAT, emit_json_decode_helpers, emit_json_encode_helpers);
+        emit_json_helper_declarations_for_type(ctx, TYPE_BOOL, emit_json_decode_helpers, emit_json_encode_helpers);
+        emit_json_helper_declarations_for_type(ctx, TYPE_STR, emit_json_decode_helpers, emit_json_encode_helpers);
+        for (size_t i = 0; i < semantic_list_type_count(); i++) {
+            emit_json_helper_declarations_for_type(
+                ctx,
+                semantic_list_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        for (size_t i = 0; i < semantic_dict_type_count(); i++) {
+            emit_json_helper_declarations_for_type(
+                ctx,
+                semantic_dict_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+            emit_json_helper_declarations_for_type(
+                ctx,
+                semantic_tuple_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        for (size_t i = 0; i < semantic_optional_type_count(); i++) {
+            emit_json_helper_declarations_for_type(
+                ctx,
+                semantic_optional_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        fputc('\n', ctx->out);
+    }
 }
 
 void codegen_emit_struct_types(CodegenContext *ctx)
@@ -2169,6 +2425,41 @@ void codegen_emit_struct_types(CodegenContext *ctx)
         fputs("    }\n", ctx->out);
         emit_managed_field_release(ctx->out, base_type, "value->value");
         fputs("}\n\n", ctx->out);
+    }
+
+    if (emit_json_decode_helpers || emit_json_encode_helpers) {
+        emit_json_helper_definitions_for_type(ctx, TYPE_INT, emit_json_decode_helpers, emit_json_encode_helpers);
+        emit_json_helper_definitions_for_type(ctx, TYPE_FLOAT, emit_json_decode_helpers, emit_json_encode_helpers);
+        emit_json_helper_definitions_for_type(ctx, TYPE_BOOL, emit_json_decode_helpers, emit_json_encode_helpers);
+        emit_json_helper_definitions_for_type(ctx, TYPE_STR, emit_json_decode_helpers, emit_json_encode_helpers);
+        for (size_t i = 0; i < semantic_list_type_count(); i++) {
+            emit_json_helper_definitions_for_type(
+                ctx,
+                semantic_list_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        for (size_t i = 0; i < semantic_dict_type_count(); i++) {
+            emit_json_helper_definitions_for_type(
+                ctx,
+                semantic_dict_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        for (size_t i = 0; i < semantic_tuple_type_count(); i++) {
+            emit_json_helper_definitions_for_type(
+                ctx,
+                semantic_tuple_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
+        for (size_t i = 0; i < semantic_optional_type_count(); i++) {
+            emit_json_helper_definitions_for_type(
+                ctx,
+                semantic_optional_type_at(i),
+                emit_json_decode_helpers,
+                emit_json_encode_helpers);
+        }
     }
 }
 

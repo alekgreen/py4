@@ -163,6 +163,8 @@ static void emit_native_type_runtime(CodegenContext *ctx)
             fputs("extern int cJSON_AddItemToObject(cJSON *object, const char *string, cJSON *item);\n", ctx->out);
             fputs("extern int cJSON_AddItemToArray(cJSON *array, cJSON *item);\n", ctx->out);
             fputs("extern cJSON *cJSON_GetObjectItemCaseSensitive(const cJSON *object, const char *string);\n", ctx->out);
+            fputs("extern int cJSON_GetArraySize(const cJSON *array);\n", ctx->out);
+            fputs("extern cJSON *cJSON_GetArrayItem(const cJSON *array, int index);\n", ctx->out);
             fputs("extern const char *cJSON_GetErrorPtr(void);\n", ctx->out);
             fputs("extern int cJSON_IsInvalid(const cJSON *item);\n", ctx->out);
             fputs("extern int cJSON_IsBool(const cJSON *item);\n", ctx->out);

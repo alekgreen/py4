@@ -1,1 +1,1 @@
-json.to_string(...) currently supports only json.Value and class values
+json.to_string(char) currently supports int, float, bool, str, tuples, list[...], dict[str, ...], classes, and optionals

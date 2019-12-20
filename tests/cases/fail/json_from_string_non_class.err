@@ -1,1 +1,1 @@
-json.from_string[...] currently supports only class types
+json.from_string[char] currently supports int, float, bool, str, tuples, list[...], dict[str, ...], classes, and optionals

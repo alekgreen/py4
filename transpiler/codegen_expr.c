@@ -659,7 +659,7 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
             } else {
                 arg_text = codegen_wrapped_expression_to_c_string(ctx, arg_node, arg_type);
             }
-            codegen_build_class_json_to_string_name(helper_name, sizeof(helper_name), arg_type);
+            codegen_build_json_to_string_name(helper_name, sizeof(helper_name), arg_type);
             call_text = codegen_dup_printf("%s(%s)", helper_name, arg_text);
         }
 
@@ -1234,7 +1234,7 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         char *argument = codegen_wrapped_expression_to_c_string(ctx, primary->children[2]->children[0], TYPE_STR);
         char *result;
 
-        codegen_build_class_json_from_string_name(helper_name, sizeof(helper_name), target_type);
+        codegen_build_json_from_string_name(helper_name, sizeof(helper_name), target_type);
         result = codegen_dup_printf("%s(%s)", helper_name, argument);
         free(argument);
         return result;
