@@ -3102,6 +3102,38 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     }
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
+    fputs("static char *py4_str_concat(const char *lhs, const char *rhs)\n{\n", out);
+    fputs("    size_t lhs_len;\n", out);
+    fputs("    size_t rhs_len;\n", out);
+    fputs("    char *result;\n", out);
+    fputs("    if (lhs == NULL || rhs == NULL) {\n", out);
+    fputs("        fprintf(stderr, \"Runtime error: str concat received null\\n\");\n", out);
+    fputs("        exit(1);\n", out);
+    fputs("    }\n", out);
+    fputs("    lhs_len = strlen(lhs);\n", out);
+    fputs("    rhs_len = strlen(rhs);\n", out);
+    fputs("    result = malloc(lhs_len + rhs_len + 1);\n", out);
+    fputs("    if (result == NULL) {\n", out);
+    fputs("        perror(\"malloc\");\n", out);
+    fputs("        exit(1);\n", out);
+    fputs("    }\n", out);
+    fputs("    memcpy(result, lhs, lhs_len);\n", out);
+    fputs("    memcpy(result + lhs_len, rhs, rhs_len + 1);\n", out);
+    fputs("    return result;\n", out);
+    fputs("}\n\n", out);
+    fputs("static char py4_str_get(const char *value, int index)\n{\n", out);
+    fputs("    size_t len;\n", out);
+    fputs("    if (value == NULL) {\n", out);
+    fputs("        fprintf(stderr, \"Runtime error: str index on null\\n\");\n", out);
+    fputs("        exit(1);\n", out);
+    fputs("    }\n", out);
+    fputs("    len = strlen(value);\n", out);
+    fputs("    if (index < 0 || (size_t)index >= len) {\n", out);
+    fputs("        fprintf(stderr, \"Runtime error: str index out of bounds\\n\");\n", out);
+    fputs("        exit(1);\n", out);
+    fputs("    }\n", out);
+    fputs("    return value[index];\n", out);
+    fputs("}\n\n", out);
     codegen_emit_struct_declarations(&ctx);
     emit_native_type_runtime(&ctx);
     codegen_emit_container_runtime(&ctx);

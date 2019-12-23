@@ -1405,7 +1405,24 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
             char *call_text;
             char *result;
 
-            if (semantic_type_is_dict(base_type)) {
+            if (base_type == TYPE_STR) {
+                call_text = codegen_dup_printf("py4_str_get(%s, %s)", base, index);
+                if (needs_cleanup) {
+                    char *result_name = codegen_next_temp_name(ctx);
+
+                    codegen_emit_indent(ctx);
+                    fprintf(ctx->out, "char %s = %s;\n", result_name, call_text);
+                    codegen_emit_ref_decref(ctx, base_type, base);
+                    result = result_name;
+                } else {
+                    result = codegen_dup_printf("%s", call_text);
+                }
+
+                free(base);
+                free(index);
+                free(call_text);
+                return result;
+            } else if (semantic_type_is_dict(base_type)) {
                 element_type = semantic_dict_value_type(base_type);
                 call_text = codegen_dict_binary_call(base_type, "get", base, index);
             } else {
@@ -1559,6 +1576,17 @@ char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr)
 
         free(rhs_name);
         return call_text;
+    }
+
+    if (strcmp(operator_node->value, "+") == 0 &&
+        semantic_type_of(ctx->semantic, expr->children[0]) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, expr->children[2]) == TYPE_STR) {
+        lhs = codegen_primary_to_c_string(ctx, expr->children[0]);
+        rhs = codegen_primary_to_c_string(ctx, expr->children[2]);
+        result = codegen_dup_printf("py4_str_concat(%s, %s)", lhs, rhs);
+        free(lhs);
+        free(rhs);
+        return result;
     }
 
     lhs = codegen_primary_to_c_string(ctx, expr->children[0]);

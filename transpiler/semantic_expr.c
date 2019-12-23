@@ -1705,8 +1705,16 @@ ValueType semantic_infer_primary_type(
             return value_type;
         }
 
+        if (container_type == TYPE_STR) {
+            if (index_type != TYPE_INT) {
+                semantic_error_at_node(node->children[1], "str index must be int");
+            }
+            semantic_record_node_type(info, node, TYPE_CHAR);
+            return TYPE_CHAR;
+        }
+
         if (!semantic_type_is_list(container_type)) {
-            semantic_error_at_node(node->children[0], "indexing requires list, dict, or tuple but got %s",
+            semantic_error_at_node(node->children[0], "indexing requires list, dict, str, or tuple but got %s",
                 semantic_type_name(container_type));
         }
         if (index_type != TYPE_INT) {
@@ -1936,6 +1944,10 @@ ValueType semantic_infer_expression_type(
 
         if (semantic_type_is_union(lhs_type) || semantic_type_is_union(rhs_type)) {
             semantic_error_at_node(operator_node, "operator '%s' does not support union operands yet", operator_node->value);
+        }
+        if (strcmp(operator_node->value, "+") == 0 && lhs_type == TYPE_STR && rhs_type == TYPE_STR) {
+            semantic_record_node_type(info, expr, TYPE_STR);
+            return TYPE_STR;
         }
         if (!semantic_is_numeric_type(lhs_type) || !semantic_is_numeric_type(rhs_type)) {
             semantic_error_at_node(operator_node, "operator '%s' requires numeric operands", operator_node->value);
