@@ -336,11 +336,20 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
 
         if (peek_ts(ts).type == TOKEN_LBRACKET) {
             ParseNode *index_node;
+            ParseNode *index_expr;
 
             expect(ts, TOKEN_LBRACKET);
-            index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
+            index_expr = parse_EXPRESSION(ts);
+            index_node = create_node(
+                peek_ts(ts).type == TOKEN_COLON ? NODE_SLICE : NODE_INDEX,
+                TOKEN_NULL,
+                NULL);
             add_child(index_node, node);
-            add_child(index_node, parse_EXPRESSION(ts));
+            add_child(index_node, index_expr);
+            if (peek_ts(ts).type == TOKEN_COLON) {
+                expect(ts, TOKEN_COLON);
+                add_child(index_node, parse_EXPRESSION(ts));
+            }
             expect(ts, TOKEN_RBRACKET);
             node = index_node;
             continue;
@@ -593,11 +602,21 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
                 continue;
             }
 
-            ParseNode *index_node = create_node(NODE_INDEX, TOKEN_NULL, NULL);
+            ParseNode *index_node;
+            ParseNode *index_expr;
 
             expect(ts, TOKEN_LBRACKET);
+            index_expr = parse_EXPRESSION(ts);
+            index_node = create_node(
+                peek_ts(ts).type == TOKEN_COLON ? NODE_SLICE : NODE_INDEX,
+                TOKEN_NULL,
+                NULL);
             add_child(index_node, base);
-            add_child(index_node, parse_EXPRESSION(ts));
+            add_child(index_node, index_expr);
+            if (peek_ts(ts).type == TOKEN_COLON) {
+                expect(ts, TOKEN_COLON);
+                add_child(index_node, parse_EXPRESSION(ts));
+            }
             expect(ts, TOKEN_RBRACKET);
             base = index_node;
             continue;

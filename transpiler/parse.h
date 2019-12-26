@@ -44,6 +44,7 @@ typedef enum {
     NODE_METHOD_CALL,
     NODE_FIELD_ACCESS,
     NODE_INDEX,
+    NODE_SLICE,
     NODE_ARGUMENTS,
     NODE_COLON,
     NODE_ASSIGN,

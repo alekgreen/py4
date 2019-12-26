@@ -1450,6 +1450,18 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         }
     }
 
+    if (primary->kind == NODE_SLICE) {
+        char *base = codegen_primary_to_c_string(ctx, primary->children[0]);
+        char *start = codegen_expression_to_c_string(ctx, primary->children[1]);
+        char *end = codegen_expression_to_c_string(ctx, primary->children[2]);
+        char *result = codegen_dup_printf("py4_str_slice(%s, %s, %s)", base, start, end);
+
+        free(base);
+        free(start);
+        free(end);
+        return result;
+    }
+
     if (primary->kind == NODE_EXPRESSION) {
         return codegen_expression_to_c_string(ctx, primary);
     }

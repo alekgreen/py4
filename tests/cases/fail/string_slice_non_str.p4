@@ -1,0 +1,3 @@
+def main() -> None:
+    xs = [1, 2, 3]
+    print(xs[0:2])
