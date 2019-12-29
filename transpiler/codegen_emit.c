@@ -440,6 +440,103 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
     }
 
     if (module_name != NULL &&
+        strcmp(module_name, "strings") == 0 &&
+        strcmp(name->value, "starts_with") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR) {
+        const char *value = parameters->children[0]->value;
+        const char *prefix = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "size_t prefix_len = strlen(%s);\n", prefix);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "size_t value_len = strlen(%s);\n", value);
+        codegen_emit_indent(ctx);
+        fputs("if (prefix_len > value_len) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("return false;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return strncmp(%s, %s, prefix_len) == 0;\n", value, prefix);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "strings") == 0 &&
+        strcmp(name->value, "ends_with") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR) {
+        const char *value = parameters->children[0]->value;
+        const char *suffix = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "size_t suffix_len = strlen(%s);\n", suffix);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "size_t value_len = strlen(%s);\n", value);
+        codegen_emit_indent(ctx);
+        fputs("if (suffix_len > value_len) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("return false;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out,
+            "return strcmp(%s + (value_len - suffix_len), %s) == 0;\n",
+            value,
+            suffix);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "strings") == 0 &&
+        strcmp(name->value, "find") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR) {
+        const char *value = parameters->children[0]->value;
+        const char *needle = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "const char *match = strstr(%s, %s);\n", value, needle);
+        codegen_emit_indent(ctx);
+        fputs("if (match == NULL) {\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fputs("return -1;\n", ctx->out);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return (int)(match - %s);\n", value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
         strcmp(module_name, "io") == 0 &&
         strcmp(name->value, "read_text") == 0 &&
         parameters->child_count == 1 &&

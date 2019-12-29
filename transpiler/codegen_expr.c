@@ -1400,29 +1400,23 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         } else {
             ValueType element_type;
             int needs_cleanup = 0;
-            char *base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
+            char *base;
             char *index = codegen_expression_to_c_string(ctx, primary->children[1]);
             char *call_text;
             char *result;
 
             if (base_type == TYPE_STR) {
+                base = codegen_primary_to_c_string(ctx, primary->children[0]);
                 call_text = codegen_dup_printf("py4_str_get(%s, %s)", base, index);
-                if (needs_cleanup) {
-                    char *result_name = codegen_next_temp_name(ctx);
-
-                    codegen_emit_indent(ctx);
-                    fprintf(ctx->out, "char %s = %s;\n", result_name, call_text);
-                    codegen_emit_ref_decref(ctx, base_type, base);
-                    result = result_name;
-                } else {
-                    result = codegen_dup_printf("%s", call_text);
-                }
-
+                result = codegen_dup_printf("%s", call_text);
                 free(base);
                 free(index);
                 free(call_text);
                 return result;
-            } else if (semantic_type_is_dict(base_type)) {
+            }
+
+            base = materialize_ref_node(ctx, primary->children[0], base_type, 1, &needs_cleanup);
+            if (semantic_type_is_dict(base_type)) {
                 element_type = semantic_dict_value_type(base_type);
                 call_text = codegen_dict_binary_call(base_type, "get", base, index);
             } else {

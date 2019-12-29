@@ -530,10 +530,8 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     if (tok.type == TOKEN_NUMBER || tok.type == TOKEN_STRING || tok.type == TOKEN_CHAR ||
         parse_is_bool_literal(tok) || parse_is_keyword_token(tok, "None")) {
         tok = get_from_ts(ts);
-        return create_node_from_token(NODE_PRIMARY, tok);
-    }
-
-    if (tok.type == TOKEN_IDENTIFIER) {
+        base = create_node_from_token(NODE_PRIMARY, tok);
+    } else if (tok.type == TOKEN_IDENTIFIER) {
         tok = get_from_ts(ts);
         base = create_node_from_token(NODE_PRIMARY, tok);
     } else if (tok.type == TOKEN_LPAREN) {
