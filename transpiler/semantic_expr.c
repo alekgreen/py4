@@ -1161,6 +1161,37 @@ static ValueType infer_method_call_type(
         return method_info->return_type;
     }
 
+    if (receiver_type == TYPE_STR) {
+        expect_argument_count(method->value, arguments, 1);
+
+        {
+            ValueType arg_type = semantic_infer_expression_type_with_hint(
+                info,
+                arguments->children[0],
+                scope,
+                TYPE_STR);
+
+            if (!semantic_is_assignable(TYPE_STR, arg_type)) {
+                semantic_error_at_node(arguments->children[0],
+                    "method '%s' expects str argument",
+                    method->value);
+            }
+        }
+
+        if (strcmp(method->value, "starts_with") == 0 ||
+            strcmp(method->value, "ends_with") == 0) {
+            semantic_record_node_type(info, call, TYPE_BOOL);
+            return TYPE_BOOL;
+        }
+
+        if (strcmp(method->value, "find") == 0) {
+            semantic_record_node_type(info, call, TYPE_INT);
+            return TYPE_INT;
+        }
+
+        semantic_error_at_node(method, "unknown str method '%s'", method->value);
+    }
+
     if (semantic_type_is_dict(receiver_type)) {
         ValueType key_type = semantic_dict_key_type(receiver_type);
         ValueType value_type = semantic_dict_value_type(receiver_type);
@@ -1283,7 +1314,7 @@ static ValueType infer_method_call_type(
     }
 
     if (!semantic_type_is_list(receiver_type)) {
-        semantic_error_at_node(receiver, "method '%s' requires list, dict, or class receiver", method->value);
+        semantic_error_at_node(receiver, "method '%s' requires str, list, dict, or class receiver", method->value);
     }
     element_type = semantic_list_element_type(receiver_type);
 

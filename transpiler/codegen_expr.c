@@ -1009,6 +1009,72 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
     }
 
     receiver_type = semantic_type_of(ctx->semantic, receiver);
+    if (receiver_type == TYPE_STR) {
+        char *receiver_text = codegen_primary_to_c_string(ctx, receiver);
+        char *arg = codegen_wrapped_expression_to_c_string(ctx, arguments->children[0], TYPE_STR);
+        char *receiver_name = codegen_next_temp_name(ctx);
+        char *arg_name = codegen_next_temp_name(ctx);
+        char *result_name = codegen_next_temp_name(ctx);
+        ValueType return_type = semantic_type_of(ctx->semantic, call);
+        char *result_type_name = codegen_type_to_c_string(return_type);
+
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "const char *%s = %s;\n", receiver_name, receiver_text);
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "const char *%s = %s;\n", arg_name, arg);
+
+        if (strcmp(method->value, "starts_with") == 0) {
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out,
+                "%s %s = ((strlen(%s) >= strlen(%s)) && strncmp(%s, %s, strlen(%s)) == 0);\n",
+                result_type_name,
+                result_name,
+                receiver_name,
+                arg_name,
+                receiver_name,
+                arg_name,
+                arg_name);
+        } else if (strcmp(method->value, "ends_with") == 0) {
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out,
+                "%s %s = ((strlen(%s) >= strlen(%s)) && strcmp(%s + (strlen(%s) - strlen(%s)), %s) == 0);\n",
+                result_type_name,
+                result_name,
+                receiver_name,
+                arg_name,
+                receiver_name,
+                receiver_name,
+                arg_name,
+                arg_name);
+        } else if (strcmp(method->value, "find") == 0) {
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out,
+                "%s %s = (strstr(%s, %s) == NULL ? -1 : (int)(strstr(%s, %s) - %s));\n",
+                result_type_name,
+                result_name,
+                receiver_name,
+                arg_name,
+                receiver_name,
+                arg_name,
+                receiver_name);
+        } else {
+            free(receiver_text);
+            free(arg);
+            free(receiver_name);
+            free(arg_name);
+            free(result_name);
+            free(result_type_name);
+            codegen_error("unknown method '%s' during code generation", method->value);
+        }
+
+        free(receiver_text);
+        free(arg);
+        free(receiver_name);
+        free(arg_name);
+        free(result_type_name);
+        return result_name;
+    }
+
     if (semantic_type_is_class(receiver_type)) {
         size_t arg_count = (arguments->child_count == 1 && codegen_is_epsilon_node(arguments->children[0]))
             ? 0
