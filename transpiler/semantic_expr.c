@@ -1162,19 +1162,23 @@ static ValueType infer_method_call_type(
     }
 
     if (receiver_type == TYPE_STR) {
-        expect_argument_count(method->value, arguments, 1);
+        if (strcmp(method->value, "starts_with") == 0 ||
+            strcmp(method->value, "ends_with") == 0 ||
+            strcmp(method->value, "find") == 0 ||
+            strcmp(method->value, "split") == 0) {
+            expect_argument_count(method->value, arguments, 1);
+            {
+                ValueType arg_type = semantic_infer_expression_type_with_hint(
+                    info,
+                    arguments->children[0],
+                    scope,
+                    TYPE_STR);
 
-        {
-            ValueType arg_type = semantic_infer_expression_type_with_hint(
-                info,
-                arguments->children[0],
-                scope,
-                TYPE_STR);
-
-            if (!semantic_is_assignable(TYPE_STR, arg_type)) {
-                semantic_error_at_node(arguments->children[0],
-                    "method '%s' expects str argument",
-                    method->value);
+                if (!semantic_is_assignable(TYPE_STR, arg_type)) {
+                    semantic_error_at_node(arguments->children[0],
+                        "method '%s' expects str argument",
+                        method->value);
+                }
             }
         }
 
@@ -1187,6 +1191,40 @@ static ValueType infer_method_call_type(
         if (strcmp(method->value, "find") == 0) {
             semantic_record_node_type(info, call, TYPE_INT);
             return TYPE_INT;
+        }
+
+        if (strcmp(method->value, "split") == 0) {
+            semantic_record_node_type(info, call, TYPE_LIST_STR);
+            return TYPE_LIST_STR;
+        }
+
+        if (strcmp(method->value, "replace") == 0) {
+            expect_argument_count(method->value, arguments, 2);
+            {
+                ValueType old_type = semantic_infer_expression_type_with_hint(
+                    info,
+                    arguments->children[0],
+                    scope,
+                    TYPE_STR);
+                ValueType new_type = semantic_infer_expression_type_with_hint(
+                    info,
+                    arguments->children[1],
+                    scope,
+                    TYPE_STR);
+
+                if (!semantic_is_assignable(TYPE_STR, old_type)) {
+                    semantic_error_at_node(arguments->children[0],
+                        "method '%s' expects str argument",
+                        method->value);
+                }
+                if (!semantic_is_assignable(TYPE_STR, new_type)) {
+                    semantic_error_at_node(arguments->children[1],
+                        "method '%s' expects str argument",
+                        method->value);
+                }
+            }
+            semantic_record_node_type(info, call, TYPE_STR);
+            return TYPE_STR;
         }
 
         semantic_error_at_node(method, "unknown str method '%s'", method->value);
