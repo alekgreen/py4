@@ -1,0 +1,3 @@
+enum TokenKind:
+    IDENT
+    IDENT

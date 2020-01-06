@@ -141,6 +141,7 @@ static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FOR_STATEMENT(TokenStream *ts);
 static ParseNode *parse_WITH_STATEMENT(TokenStream *ts);
 static ParseNode *parse_CLASS_DEF(TokenStream *ts);
+static ParseNode *parse_ENUM_DEF(TokenStream *ts);
 static ParseNode *parse_FIELD_DECL(TokenStream *ts);
 static ParseNode *parse_FUNCTION_DEF(TokenStream *ts);
 static ParseNode *parse_NATIVE_FUNCTION_DEF(TokenStream *ts);
@@ -234,6 +235,8 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_FOR_STATEMENT:        return "FOR_STATEMENT";
         case NODE_WITH_STATEMENT:       return "WITH_STATEMENT";
         case NODE_CLASS_DEF:            return "CLASS_DEF";
+        case NODE_ENUM_DEF:             return "ENUM_DEF";
+        case NODE_ENUM_MEMBER:          return "ENUM_MEMBER";
         case NODE_FIELD_DECL:           return "FIELD_DECL";
         case NODE_ELIF_CLAUSE:          return "ELIF_CLAUSE";
         case NODE_ELSE_CLAUSE:          return "ELSE_CLAUSE";
@@ -332,6 +335,8 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
         add_child(node, parse_WITH_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "class")) {
         add_child(node, parse_CLASS_DEF(ts));
+    } else if (parse_is_keyword_token(peek_ts(ts), "enum")) {
+        add_child(node, parse_ENUM_DEF(ts));
     } else {
         add_child(node, parse_SIMPLE_STATEMENT(ts));
     }
@@ -531,6 +536,39 @@ static ParseNode *parse_CLASS_DEF(TokenStream *ts)
     member_start_index = (node->child_count > 1 && node->children[1]->kind == NODE_TYPE) ? 3 : 2;
     if (node->child_count == member_start_index) {
         parse_error_at_node(node, "class body must declare at least one member");
+    }
+
+    expect(ts, TOKEN_DEDENT);
+    return node;
+}
+
+static ParseNode *parse_ENUM_DEF(TokenStream *ts)
+{
+    Token enum_tok = parse_expect_keyword(ts, "enum");
+    ParseNode *node = create_node_from_token(NODE_ENUM_DEF, enum_tok);
+    Token name;
+    Token colon_tok;
+
+    name = expect(ts, TOKEN_IDENTIFIER);
+    add_child(node, create_node_from_token(NODE_PRIMARY, name));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    parse_skip_newlines(ts);
+
+    while (peek_ts(ts).type != TOKEN_DEDENT && peek_ts(ts).type != TOKEN_EOF) {
+        Token member = expect(ts, TOKEN_IDENTIFIER);
+
+        add_child(node, create_node_from_token(NODE_ENUM_MEMBER, member));
+        if (peek_ts(ts).type == TOKEN_NEWLINE) {
+            get_from_ts(ts);
+        }
+        parse_skip_newlines(ts);
+    }
+
+    if (node->child_count == 2) {
+        parse_error_at_node(node, "enum body must declare at least one member");
     }
 
     expect(ts, TOKEN_DEDENT);

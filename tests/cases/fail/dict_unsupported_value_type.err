@@ -1,1 +1,1 @@
-dict values must currently be int, float, bool, char, str, optional values, list values, dict values, class values, tuple values, or native opaque values
+dict values must currently be int, float, bool, char, str, enum values, optional values, list values, dict values, class values, tuple values, or native opaque values

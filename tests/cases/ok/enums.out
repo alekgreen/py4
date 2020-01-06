@@ -1,0 +1,5 @@
+NUMBER
+[IDENT, EOF]
+Token(kind=IDENT, text=x)
+{IDENT: id, NUMBER: num}
+True

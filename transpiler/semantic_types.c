@@ -54,6 +54,14 @@ typedef struct {
     char name[192];
 } DictTypeInfo;
 
+typedef struct {
+    ValueType id;
+    const char *name;
+    const ParseNode *node;
+    size_t variant_count;
+    const char *variant_names[MAX_CLASS_FIELDS];
+} EnumTypeInfo;
+
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
 static size_t TUPLE_TYPE_COUNT = 0;
 static ClassTypeInfo CLASS_TYPES[MAX_CLASS_TYPES];
@@ -66,6 +74,8 @@ static OptionalTypeInfo OPTIONAL_TYPES[MAX_OPTIONAL_TYPES];
 static size_t OPTIONAL_TYPE_COUNT = 0;
 static DictTypeInfo DICT_TYPES[MAX_DICT_TYPES];
 static size_t DICT_TYPE_COUNT = 0;
+static EnumTypeInfo ENUM_TYPES[MAX_ENUM_TYPES];
+static size_t ENUM_TYPE_COUNT = 0;
 
 static const TupleTypeInfo *find_tuple_type(ValueType type)
 {
@@ -139,6 +149,18 @@ static DictTypeInfo *find_dict_type_info(ValueType type)
     return NULL;
 }
 
+static EnumTypeInfo *find_enum_type_info(ValueType type)
+{
+    for (size_t i = 0; i < ENUM_TYPE_COUNT; i++) {
+        if (ENUM_TYPES[i].id == type) {
+            return &ENUM_TYPES[i];
+        }
+    }
+
+    semantic_error("unknown enum type id %u", type);
+    return NULL;
+}
+
 static int tuple_elements_equal(const TupleTypeInfo *info, const ValueType *elements, size_t count)
 {
     if (info->element_count != count) {
@@ -176,6 +198,9 @@ static const char *type_member_name(ValueType type)
     }
     if (semantic_type_is_class(type)) {
         return find_class_type(type)->name;
+    }
+    if (semantic_type_is_enum(type)) {
+        return find_enum_type_info(type)->name;
     }
     if (semantic_type_is_native(type)) {
         return find_native_type_info(type)->qualified_name;
@@ -252,6 +277,16 @@ ValueType semantic_find_native_type(const char *module_name, const char *name)
             continue;
         }
         return NATIVE_TYPES[i].id;
+    }
+    return 0;
+}
+
+ValueType semantic_find_enum_type(const char *name)
+{
+    for (size_t i = 0; i < ENUM_TYPE_COUNT; i++) {
+        if (strcmp(ENUM_TYPES[i].name, name) == 0) {
+            return ENUM_TYPES[i].id;
+        }
     }
     return 0;
 }
@@ -336,7 +371,8 @@ static int dict_key_type_supported(ValueType type)
     return type == TYPE_INT ||
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
-        type == TYPE_STR;
+        type == TYPE_STR ||
+        semantic_type_is_enum(type);
 }
 
 static int dict_value_type_supported(ValueType type)
@@ -351,7 +387,8 @@ static int dict_value_type_supported(ValueType type)
         semantic_type_is_dict(type) ||
         semantic_type_is_class(type) ||
         semantic_type_is_tuple(type) ||
-        semantic_type_is_native(type);
+        semantic_type_is_native(type) ||
+        semantic_type_is_enum(type);
 }
 
 static const ParseNode *class_base_type_node(const ParseNode *class_def)
@@ -400,8 +437,8 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
             memcpy(element_name, node->value + 5, element_len);
             element_name[element_len] = '\0';
 
-            element_type = parse_named_type_atom(element_name);
-            if (element_type == 0) {
+                element_type = parse_named_type_atom(element_name);
+                if (element_type == 0) {
                 if (strchr(element_name, '.') != NULL) {
                     char module_local_name[128];
                     char class_name[128];
@@ -428,10 +465,16 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 
                     element_type = semantic_find_class_type(class_name);
                     if (element_type == 0) {
+                        element_type = semantic_find_enum_type(class_name);
+                    }
+                    if (element_type == 0) {
                         element_type = semantic_find_native_type(binding->module_name, class_name);
                     }
                 } else {
                     element_type = semantic_find_class_type(element_name);
+                    if (element_type == 0) {
+                        element_type = semantic_find_enum_type(element_name);
+                    }
                     if (element_type == 0 && current_module != NULL) {
                         element_type = semantic_find_native_type(current_module->name, element_name);
                     }
@@ -439,7 +482,8 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
                         for (size_t i = 0; i < current_module->root->child_count; i++) {
                             const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
 
-                            if ((payload->kind == NODE_CLASS_DEF || payload->kind == NODE_NATIVE_TYPE_DEF) &&
+                            if ((payload->kind == NODE_CLASS_DEF || payload->kind == NODE_ENUM_DEF ||
+                                    payload->kind == NODE_NATIVE_TYPE_DEF) &&
                                 strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, element_name) == 0) {
                                 return semantic_make_list_type(element_type);
                             }
@@ -468,6 +512,7 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
             if (element_type == TYPE_INT || element_type == TYPE_FLOAT ||
                 element_type == TYPE_BOOL || element_type == TYPE_CHAR ||
                 element_type == TYPE_STR ||
+                semantic_type_is_enum(element_type) ||
                 semantic_type_is_class(element_type) ||
                 semantic_type_is_dict(element_type) ||
                 semantic_type_is_native(element_type)) {
@@ -503,6 +548,9 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
 
             named_type = semantic_find_class_type(class_name);
             if (named_type == 0) {
+                named_type = semantic_find_enum_type(class_name);
+            }
+            if (named_type == 0) {
                 named_type = semantic_find_native_type(binding->module_name, class_name);
             }
             if (named_type != 0) {
@@ -510,6 +558,9 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
             }
         } else {
             named_type = semantic_find_class_type(node->value);
+            if (named_type == 0) {
+                named_type = semantic_find_enum_type(node->value);
+            }
             if (named_type == 0 && current_module != NULL) {
                 named_type = semantic_find_native_type(current_module->name, node->value);
             }
@@ -517,7 +568,8 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
                 for (size_t i = 0; i < current_module->root->child_count; i++) {
                     const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
 
-                    if ((payload->kind == NODE_CLASS_DEF || payload->kind == NODE_NATIVE_TYPE_DEF) &&
+                    if ((payload->kind == NODE_CLASS_DEF || payload->kind == NODE_ENUM_DEF ||
+                            payload->kind == NODE_NATIVE_TYPE_DEF) &&
                         strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, node->value) == 0) {
                         return named_type;
                     }
@@ -609,6 +661,7 @@ int semantic_type_contains(ValueType type, ValueType member)
         semantic_type_is_list(type) || semantic_type_is_list(member) ||
         semantic_type_is_dict(type) || semantic_type_is_dict(member) ||
         semantic_type_is_class(type) || semantic_type_is_class(member) ||
+        semantic_type_is_enum(type) || semantic_type_is_enum(member) ||
         semantic_type_is_native(type) || semantic_type_is_native(member)) {
         return type == member;
     }
@@ -619,7 +672,7 @@ int semantic_type_is_union(ValueType type)
 {
     if (semantic_type_is_tuple(type) || semantic_type_is_list(type) ||
         semantic_type_is_dict(type) ||
-        semantic_type_is_class(type) || semantic_type_is_native(type) ||
+        semantic_type_is_class(type) || semantic_type_is_enum(type) || semantic_type_is_native(type) ||
         semantic_type_is_optional(type) ||
         (type & ~TYPE_ATOMIC_MASK) != 0) {
         return 0;
@@ -635,6 +688,11 @@ int semantic_type_is_tuple(ValueType type)
 int semantic_type_is_class(ValueType type)
 {
     return type >= TYPE_CLASS_BASE && type < TYPE_CLASS_LIST_BASE;
+}
+
+int semantic_type_is_enum(ValueType type)
+{
+    return type >= TYPE_ENUM_BASE && type < TYPE_ENUM_BASE + MAX_ENUM_TYPES;
 }
 
 int semantic_type_is_native(ValueType type)
@@ -760,6 +818,7 @@ const char *semantic_type_name(ValueType type)
     };
 
     if (semantic_type_is_tuple(type) || semantic_type_is_class(type) ||
+        semantic_type_is_enum(type) ||
         semantic_type_is_dict(type) || semantic_type_is_native(type)) {
         return type_member_name(type);
     }
@@ -912,6 +971,7 @@ int semantic_is_assignable(ValueType target, ValueType value)
         semantic_type_is_list(target) || semantic_type_is_list(value) ||
         semantic_type_is_dict(target) || semantic_type_is_dict(value) ||
         semantic_type_is_class(target) || semantic_type_is_class(value) ||
+        semantic_type_is_enum(target) || semantic_type_is_enum(value) ||
         semantic_type_is_native(target) || semantic_type_is_native(value)) {
         return target == value;
     }
@@ -954,12 +1014,13 @@ ValueType semantic_make_list_type(ValueType element_type)
     }
 
     if (!semantic_type_is_class(element_type) &&
+        !semantic_type_is_enum(element_type) &&
         !semantic_type_is_optional(element_type) &&
         !semantic_type_is_native(element_type) &&
         !semantic_type_is_tuple(element_type) &&
         !semantic_type_is_list(element_type) &&
         !semantic_type_is_dict(element_type)) {
-        semantic_error("list elements must currently be int, float, bool, char, str, optional, tuple, list, dict, class, or native opaque values");
+        semantic_error("list elements must currently be int, float, bool, char, str, enum, optional, tuple, list, dict, class, or native opaque values");
     }
 
     for (size_t i = 0; i < CLASS_LIST_TYPE_COUNT; i++) {
@@ -985,10 +1046,10 @@ ValueType semantic_make_dict_type(ValueType key_type, ValueType value_type)
     DictTypeInfo *entry;
 
     if (!dict_key_type_supported(key_type)) {
-        semantic_error("dict keys must currently be int, bool, char, or str");
+        semantic_error("dict keys must currently be int, bool, char, str, or enum");
     }
     if (!dict_value_type_supported(value_type)) {
-        semantic_error("dict values must currently be int, float, bool, char, str, optional values, list values, dict values, class values, tuple values, or native opaque values");
+        semantic_error("dict values must currently be int, float, bool, char, str, enum values, optional values, list values, dict values, class values, tuple values, or native opaque values");
     }
 
     for (size_t i = 0; i < DICT_TYPE_COUNT; i++) {
@@ -1170,6 +1231,54 @@ ValueType semantic_dict_type_at(size_t index)
     return DICT_TYPES[index].id;
 }
 
+size_t semantic_enum_type_count(void)
+{
+    return ENUM_TYPE_COUNT;
+}
+
+ValueType semantic_enum_type_at(size_t index)
+{
+    if (index >= ENUM_TYPE_COUNT) {
+        semantic_error("enum type index out of bounds");
+    }
+    return ENUM_TYPES[index].id;
+}
+
+const char *semantic_enum_name(ValueType type)
+{
+    return find_enum_type_info(type)->name;
+}
+
+size_t semantic_enum_variant_count(ValueType type)
+{
+    return find_enum_type_info(type)->variant_count;
+}
+
+const char *semantic_enum_variant_name(ValueType type, size_t index)
+{
+    EnumTypeInfo *info = find_enum_type_info(type);
+
+    if (index >= info->variant_count) {
+        semantic_error("enum variant index out of bounds for %s", info->name);
+    }
+    return info->variant_names[index];
+}
+
+int semantic_enum_variant_index(ValueType type, const char *name, size_t *index_out)
+{
+    EnumTypeInfo *info = find_enum_type_info(type);
+
+    for (size_t i = 0; i < info->variant_count; i++) {
+        if (strcmp(info->variant_names[i], name) == 0) {
+            if (index_out != NULL) {
+                *index_out = i;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 ValueType semantic_find_class_type(const char *name)
 {
     for (size_t i = 0; i < CLASS_TYPE_COUNT; i++) {
@@ -1194,6 +1303,9 @@ void semantic_register_native_type(const char *module_name, const ParseNode *typ
     name = name_node->value;
     if (semantic_find_native_type(module_name, name) != 0) {
         semantic_error_at_node(name_node, "duplicate native type '%s' in module '%s'", name, module_name);
+    }
+    if (semantic_find_enum_type(name) != 0) {
+        semantic_error_at_node(name_node, "native type name '%s' conflicts with enum", name);
     }
     if (parse_named_type_atom(name) != 0) {
         semantic_error_at_node(name_node, "native type name '%s' conflicts with built-in type", name);
@@ -1220,6 +1332,62 @@ void semantic_register_native_type(const char *module_name, const ParseNode *typ
     NATIVE_TYPE_COUNT++;
 }
 
+ValueType semantic_register_enum(const ParseNode *enum_def)
+{
+    const ParseNode *name_node;
+    const char *name;
+    ValueType builtin_type;
+    EnumTypeInfo *entry;
+
+    if (enum_def == NULL || enum_def->kind != NODE_ENUM_DEF) {
+        semantic_error("malformed enum definition");
+    }
+
+    name_node = semantic_expect_child(enum_def, 0, NODE_PRIMARY);
+    name = name_node->value;
+    if (semantic_find_enum_type(name) != 0) {
+        semantic_error_at_node(name_node, "duplicate enum '%s'", name);
+    }
+    if (semantic_find_class_type(name) != 0) {
+        semantic_error_at_node(name_node, "enum name '%s' conflicts with class", name);
+    }
+
+    builtin_type = parse_named_type_atom(name);
+    if (builtin_type != 0) {
+        semantic_error_at_node(name_node, "enum name '%s' conflicts with built-in type", name);
+    }
+
+    if (ENUM_TYPE_COUNT >= MAX_ENUM_TYPES) {
+        semantic_error("too many enums in one program");
+    }
+
+    entry = &ENUM_TYPES[ENUM_TYPE_COUNT];
+    entry->id = TYPE_ENUM_BASE + (ValueType)ENUM_TYPE_COUNT;
+    entry->name = name;
+    entry->node = enum_def;
+    entry->variant_count = 0;
+
+    for (size_t i = 2; i < enum_def->child_count; i++) {
+        const ParseNode *member = enum_def->children[i];
+
+        if (member->kind != NODE_ENUM_MEMBER) {
+            semantic_error("malformed enum definition");
+        }
+        if (entry->variant_count >= MAX_CLASS_FIELDS) {
+            semantic_error_at_node(member, "enum '%s' supports at most %d members", name, MAX_CLASS_FIELDS);
+        }
+        for (size_t j = 0; j < entry->variant_count; j++) {
+            if (strcmp(entry->variant_names[j], member->value) == 0) {
+                semantic_error_at_node(member, "duplicate enum member '%s' in enum '%s'", member->value, name);
+            }
+        }
+        entry->variant_names[entry->variant_count++] = member->value;
+    }
+
+    ENUM_TYPE_COUNT++;
+    return entry->id;
+}
+
 int semantic_class_has_initializer(const SemanticInfo *info, ValueType type)
 {
     return semantic_find_method(info->methods, type, "__init__") != NULL;
@@ -1240,6 +1408,9 @@ ValueType semantic_register_class(const ParseNode *class_def)
     name = name_node->value;
     if (semantic_find_class_type(name) != 0) {
         semantic_error_at_node(name_node, "duplicate class '%s'", name);
+    }
+    if (semantic_find_enum_type(name) != 0) {
+        semantic_error_at_node(name_node, "class name '%s' conflicts with enum", name);
     }
 
     builtin_type = parse_named_type_atom(name);
@@ -1484,6 +1655,10 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
             (type != 0 || type_node->child_count > 1)) {
             semantic_error_at_node(type_node, "class types cannot be used inside a union yet");
         }
+        if ((semantic_type_is_enum(atom) || semantic_type_is_enum(type)) &&
+            (type != 0 || type_node->child_count > 1)) {
+            semantic_error_at_node(type_node, "enum types cannot be used inside a union yet");
+        }
         if ((semantic_type_is_list(atom) || semantic_type_is_list(type)) &&
             (type != 0 || type_node->child_count > 1)) {
             semantic_error_at_node(type_node, "list types cannot be used inside a union yet");
@@ -1512,6 +1687,9 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
             }
             if (semantic_type_is_class(member_type)) {
                 semantic_error_at_node(type_node, "class types cannot be used inside a union yet");
+            }
+            if (semantic_type_is_enum(member_type)) {
+                semantic_error_at_node(type_node, "enum types cannot be used inside a union yet");
             }
             if (semantic_type_is_native(member_type)) {
                 semantic_error_at_node(type_node, "native opaque types cannot be used inside a union yet");
@@ -1642,6 +1820,65 @@ ValueType semantic_resolved_constructor_target(const SemanticInfo *info, const P
         }
     }
     return 0;
+}
+
+void semantic_record_enum_variant_target(
+    SemanticInfo *info,
+    const ParseNode *node,
+    ValueType enum_type,
+    size_t variant_index)
+{
+    EnumVariantTargetInfo *target;
+
+    for (target = info->enum_variant_targets; target != NULL; target = target->next) {
+        if (target->node == node) {
+            target->enum_type = enum_type;
+            target->variant_index = variant_index;
+            return;
+        }
+    }
+
+    target = malloc(sizeof(EnumVariantTargetInfo));
+    if (target == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    target->node = node;
+    target->enum_type = enum_type;
+    target->variant_index = variant_index;
+    target->next = info->enum_variant_targets;
+    info->enum_variant_targets = target;
+}
+
+EnumVariantTargetInfo *semantic_find_enum_variant_target(const SemanticInfo *info, const ParseNode *node)
+{
+    for (EnumVariantTargetInfo *target = info->enum_variant_targets; target != NULL; target = target->next) {
+        if (target->node == node) {
+            return target;
+        }
+    }
+    return NULL;
+}
+
+int semantic_enum_variant_for_node(
+    const SemanticInfo *info,
+    const ParseNode *node,
+    ValueType *enum_type_out,
+    size_t *variant_index_out)
+{
+    EnumVariantTargetInfo *target = semantic_find_enum_variant_target(info, node);
+
+    if (target == NULL) {
+        return 0;
+    }
+    if (enum_type_out != NULL) {
+        *enum_type_out = target->enum_type;
+    }
+    if (variant_index_out != NULL) {
+        *variant_index_out = target->variant_index;
+    }
+    return 1;
 }
 
 ValueType semantic_call_constructor_type(const SemanticInfo *info, const ParseNode *call)

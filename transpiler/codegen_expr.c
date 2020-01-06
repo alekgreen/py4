@@ -1330,6 +1330,16 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
     }
 
     if (primary->kind == NODE_FIELD_ACCESS) {
+        ValueType enum_type;
+        size_t variant_index;
+
+        if (semantic_enum_variant_for_node(ctx->semantic, primary, &enum_type, &variant_index)) {
+            char value_name[MAX_NAME_LEN];
+
+            codegen_build_enum_value_name(value_name, sizeof(value_name), enum_type, variant_index);
+            return codegen_dup_printf("%s", value_name);
+        }
+
         char *base = codegen_primary_to_c_string(ctx, primary->children[0]);
         char *result = codegen_dup_printf("((%s).%s)", base, primary->children[1]->value);
 

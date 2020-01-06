@@ -77,6 +77,8 @@ void codegen_build_tuple_base_name(char *buffer, size_t size, ValueType type);
 void codegen_build_tuple_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_tuple_retain_name(char *buffer, size_t size, ValueType type);
 void codegen_build_tuple_release_name(char *buffer, size_t size, ValueType type);
+void codegen_build_enum_value_name(char *buffer, size_t size, ValueType type, size_t variant_index);
+void codegen_build_enum_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_print_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_retain_name(char *buffer, size_t size, ValueType type);
 void codegen_build_class_release_name(char *buffer, size_t size, ValueType type);

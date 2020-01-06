@@ -20,6 +20,8 @@ typedef unsigned int ValueType;
 #define MAX_OPTIONAL_TYPES 64
 #define TYPE_DICT_BASE (TYPE_OPTIONAL_BASE + MAX_OPTIONAL_TYPES)
 #define MAX_DICT_TYPES 64
+#define TYPE_ENUM_BASE (TYPE_DICT_BASE + MAX_DICT_TYPES)
+#define MAX_ENUM_TYPES 64
 #define MAX_CLASS_FIELDS 32
 
 enum {
@@ -48,6 +50,7 @@ int semantic_type_is_tuple(ValueType type);
 int semantic_type_is_class(ValueType type);
 int semantic_type_is_native(ValueType type);
 int semantic_type_is_optional(ValueType type);
+int semantic_type_is_enum(ValueType type);
 int semantic_type_is_ref(ValueType type);
 int semantic_type_needs_management(ValueType type);
 int semantic_type_is_list(ValueType type);
@@ -67,6 +70,13 @@ ValueType semantic_list_type_at(size_t index);
 ValueType semantic_make_list_type(ValueType element_type);
 size_t semantic_dict_type_count(void);
 ValueType semantic_dict_type_at(size_t index);
+size_t semantic_enum_type_count(void);
+ValueType semantic_enum_type_at(size_t index);
+const char *semantic_enum_name(ValueType type);
+size_t semantic_enum_variant_count(ValueType type);
+const char *semantic_enum_variant_name(ValueType type, size_t index);
+int semantic_enum_variant_index(ValueType type, const char *name, size_t *index_out);
+ValueType semantic_find_enum_type(const char *name);
 size_t semantic_class_type_count(void);
 ValueType semantic_class_type_at(size_t index);
 const char *semantic_class_name(ValueType type);
@@ -100,6 +110,11 @@ const char *semantic_global_c_name(const SemanticInfo *info, const char *module_
 const char *semantic_global_target_c_name(const SemanticInfo *info, const ParseNode *node);
 const char *semantic_method_c_name(const SemanticInfo *info, ValueType owner_type, const char *method_name);
 size_t semantic_method_arity(const SemanticInfo *info, ValueType owner_type, const char *method_name);
+int semantic_enum_variant_for_node(
+    const SemanticInfo *info,
+    const ParseNode *node,
+    ValueType *enum_type_out,
+    size_t *variant_index_out);
 ValueType semantic_method_parameter_type(
     const SemanticInfo *info,
     ValueType owner_type,

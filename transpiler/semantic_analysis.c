@@ -42,6 +42,7 @@ static int typecheck_statement(
     Scope *scope,
     FunctionContext *current_function,
     int allow_function_defs);
+static void collect_enums(const ParseNode *root);
 static void collect_classes(const ParseNode *root);
 static void validate_class_definitions(SemanticInfo *info, const ParseNode *root);
 static void collect_methods(SemanticInfo *info, const ParseNode *root);
@@ -281,6 +282,11 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
             if (semantic_type_is_class(type)) {
                 append_text(buffer, size, length, "class_");
                 append_text(buffer, size, length, semantic_class_name(type));
+                return;
+            }
+            if (semantic_type_is_enum(type)) {
+                append_text(buffer, size, length, "enum_");
+                append_text(buffer, size, length, semantic_enum_name(type));
                 return;
             }
             if (semantic_type_is_native(type)) {
@@ -1020,6 +1026,17 @@ static void collect_classes(const ParseNode *root)
     }
 }
 
+static void collect_enums(const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(root->children[i]);
+
+        if (payload->kind == NODE_ENUM_DEF) {
+            semantic_register_enum(payload);
+        }
+    }
+}
+
 static void validate_class_definitions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
@@ -1491,6 +1508,10 @@ static int typecheck_statement(
         return 0;
     }
 
+    if (payload->kind == NODE_ENUM_DEF) {
+        semantic_error_at_node(payload->children[0], "enum definitions are only supported at module scope");
+    }
+
     if (payload->kind == NODE_CLASS_DEF) {
         semantic_error_at_node(payload->children[0], "class definitions are only supported at module scope");
     }
@@ -1544,6 +1565,7 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
 
     collect_module_bindings(info, program);
     collect_native_types(info, root);
+    collect_enums(root);
     collect_classes(root);
     validate_class_definitions(info, root);
     collect_global_bindings(info, program);
@@ -1560,6 +1582,8 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             semantic_error_at_node(payload, "imports should be resolved before semantic analysis");
+        } else if (payload->kind == NODE_ENUM_DEF) {
+            continue;
         } else if (payload->kind == NODE_CLASS_DEF) {
             typecheck_class_methods(info, payload, &global_scope);
             continue;
@@ -1620,6 +1644,15 @@ void free_semantic_info(SemanticInfo *info)
             ConstructorTargetInfo *next = constructor_targets->next;
             free(constructor_targets);
             constructor_targets = next;
+        }
+    }
+
+    {
+        EnumVariantTargetInfo *enum_variant_targets = info->enum_variant_targets;
+        while (enum_variant_targets != NULL) {
+            EnumVariantTargetInfo *next = enum_variant_targets->next;
+            free(enum_variant_targets);
+            enum_variant_targets = next;
         }
     }
 

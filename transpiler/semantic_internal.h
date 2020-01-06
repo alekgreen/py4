@@ -41,6 +41,13 @@ typedef struct ConstructorTargetInfo {
     struct ConstructorTargetInfo *next;
 } ConstructorTargetInfo;
 
+typedef struct EnumVariantTargetInfo {
+    const ParseNode *node;
+    ValueType enum_type;
+    size_t variant_index;
+    struct EnumVariantTargetInfo *next;
+} EnumVariantTargetInfo;
+
 typedef struct MethodInfo {
     ValueType owner_type;
     ValueType source_owner_type;
@@ -106,6 +113,7 @@ struct SemanticInfo {
     NodeTypeInfo *node_types;
     CallTargetInfo *call_targets;
     ConstructorTargetInfo *constructor_targets;
+    EnumVariantTargetInfo *enum_variant_targets;
     ModuleInfo *modules;
     ModuleInfo *entry_module;
     GlobalBinding *globals;
@@ -125,8 +133,10 @@ int semantic_builtin_returns_owned_ref(const char *name);
 void semantic_record_node_type(SemanticInfo *info, const ParseNode *node, ValueType type);
 ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_node);
 ValueType semantic_find_class_type(const char *name);
+ValueType semantic_find_enum_type(const char *name);
 ValueType semantic_find_native_type(const char *module_name, const char *name);
 void semantic_register_native_type(const char *module_name, const ParseNode *type_def);
+ValueType semantic_register_enum(const ParseNode *enum_def);
 ValueType semantic_register_class(const ParseNode *class_def);
 void semantic_define_class_fields(SemanticInfo *info, const ParseNode *class_def);
 FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);
@@ -135,6 +145,12 @@ void semantic_record_call_target(SemanticInfo *info, const ParseNode *call, Func
 FunctionInfo *semantic_resolved_call_target(const SemanticInfo *info, const ParseNode *call);
 void semantic_record_constructor_target(SemanticInfo *info, const ParseNode *call, ValueType class_type);
 ValueType semantic_resolved_constructor_target(const SemanticInfo *info, const ParseNode *call);
+void semantic_record_enum_variant_target(
+    SemanticInfo *info,
+    const ParseNode *node,
+    ValueType enum_type,
+    size_t variant_index);
+EnumVariantTargetInfo *semantic_find_enum_variant_target(const SemanticInfo *info, const ParseNode *node);
 MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name);
 VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);

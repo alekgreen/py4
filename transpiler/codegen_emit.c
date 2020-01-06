@@ -1724,6 +1724,14 @@ static void emit_print_statement(CodegenContext *ctx, const ParseNode *expr)
         free(arg_text);
         return;
     }
+    if (semantic_type_is_enum(arg_type)) {
+        codegen_build_enum_print_name(helper_name, sizeof(helper_name), arg_type);
+        fprintf(ctx->out, "%s(%s);\n", helper_name, arg_text);
+        codegen_emit_indent(ctx);
+        fputs("printf(\"\\n\");\n", ctx->out);
+        free(arg_text);
+        return;
+    }
 
     switch (arg_type) {
         case TYPE_INT:
@@ -2841,6 +2849,10 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_ENUM_DEF) {
+        return;
+    }
+
     if (payload->kind == NODE_CLASS_DEF) {
         codegen_error("class definitions are only supported at module scope");
     }
@@ -2910,6 +2922,8 @@ static void emit_global_declarations(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_ENUM_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
             continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
@@ -2946,6 +2960,8 @@ static void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_ENUM_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
             continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
@@ -3007,6 +3023,8 @@ static void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_ENUM_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
             continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
@@ -3119,6 +3137,8 @@ static void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IMPORT_STATEMENT) {
             codegen_error("imports should be resolved before C code generation");
+        } else if (payload->kind == NODE_ENUM_DEF) {
+            continue;
         } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
             continue;
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {

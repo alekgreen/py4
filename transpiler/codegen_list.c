@@ -97,6 +97,9 @@ const char *codegen_list_element_c_type(ValueType type)
         case TYPE_STR:
             return "const char *";
         default:
+            if (semantic_type_is_enum(element_type)) {
+                return semantic_enum_name(element_type);
+            }
             if (semantic_type_is_optional(element_type)) {
                 return codegen_type_to_c_string(element_type);
             }

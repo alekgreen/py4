@@ -103,6 +103,13 @@ static void emit_runtime_value_print(CodegenContext *ctx, ValueType type, const 
             semantic_native_type_name(type));
         return;
     }
+    if (semantic_type_is_enum(type)) {
+        char helper_name[MAX_NAME_LEN];
+
+        codegen_build_enum_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(ctx->out, "            %s(%s);\n", helper_name, expr);
+        return;
+    }
 
     switch (type) {
         case TYPE_INT:

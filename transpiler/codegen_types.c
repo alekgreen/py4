@@ -113,6 +113,9 @@ static char *codegen_type_suffix_dup(ValueType type)
     if (semantic_type_is_class(type)) {
         return codegen_dup_printf("%s", semantic_class_name(type));
     }
+    if (semantic_type_is_enum(type)) {
+        return codegen_dup_printf("%s", semantic_enum_name(type));
+    }
     if (semantic_type_is_native(type)) {
         return codegen_dup_printf("%s_%s",
             semantic_native_type_module(type),
@@ -195,6 +198,18 @@ void codegen_build_tuple_release_name(char *buffer, size_t size, ValueType type)
     codegen_build_tuple_base_name(base_name, sizeof(base_name), type);
     trimmed = strncmp(base_name, "py4_", 4) == 0 ? base_name + 4 : base_name;
     snprintf(buffer, size, "py4_release_%s", trimmed);
+}
+
+void codegen_build_enum_value_name(char *buffer, size_t size, ValueType type, size_t variant_index)
+{
+    snprintf(buffer, size, "%s_%s",
+        semantic_enum_name(type),
+        semantic_enum_variant_name(type, variant_index));
+}
+
+void codegen_build_enum_print_name(char *buffer, size_t size, ValueType type)
+{
+    snprintf(buffer, size, "py4_print_%s", semantic_enum_name(type));
 }
 
 void codegen_build_class_print_name(char *buffer, size_t size, ValueType type)
@@ -573,6 +588,10 @@ void codegen_emit_scalar_c_type(FILE *out, ValueType type)
         fputs(semantic_class_name(type), out);
         return;
     }
+    if (semantic_type_is_enum(type)) {
+        fputs(semantic_enum_name(type), out);
+        return;
+    }
     if (semantic_type_is_native(type)) {
         fprintf(out, "%s *", semantic_native_c_type(type));
         return;
@@ -644,6 +663,9 @@ char *codegen_type_to_c_string(ValueType type)
         }
         if (semantic_type_is_class(type)) {
             return codegen_dup_printf("%s", semantic_class_name(type));
+        }
+        if (semantic_type_is_enum(type)) {
+            return codegen_dup_printf("%s", semantic_enum_name(type));
         }
         if (semantic_type_is_native(type)) {
             return codegen_dup_printf("%s *", semantic_native_c_type(type));
@@ -928,6 +950,15 @@ void codegen_collect_required_conversions(CodegenContext *ctx, const ParseNode *
 
 static void emit_scalar_print_case(FILE *out, ValueType type, const char *value_expr)
 {
+    if (semantic_type_is_enum(type)) {
+        char helper_name[MAX_NAME_LEN];
+
+        codegen_build_enum_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "            %s(%s);\n", helper_name, value_expr);
+        fprintf(out, "            printf(\"\\n\");\n");
+        return;
+    }
+
     switch (type) {
         case TYPE_INT:
             fprintf(out, "            printf(\"%%d\\n\", %s);\n", value_expr);
@@ -978,6 +1009,11 @@ static void emit_tuple_value_print(FILE *out, ValueType type, const char *value_
     }
     if (semantic_type_is_class(type)) {
         codegen_build_class_print_name(helper_name, sizeof(helper_name), type);
+        fprintf(out, "            %s(%s);\n", helper_name, value_expr);
+        return;
+    }
+    if (semantic_type_is_enum(type)) {
+        codegen_build_enum_print_name(helper_name, sizeof(helper_name), type);
         fprintf(out, "            %s(%s);\n", helper_name, value_expr);
         return;
     }
@@ -2008,6 +2044,39 @@ static void emit_struct_definition_recursive(
     }
 }
 
+static void emit_enum_declarations(CodegenContext *ctx)
+{
+    for (size_t i = 0; i < semantic_enum_type_count(); i++) {
+        ValueType enum_type = semantic_enum_type_at(i);
+        char print_name[MAX_NAME_LEN];
+
+        fprintf(ctx->out, "typedef enum {\n");
+        for (size_t j = 0; j < semantic_enum_variant_count(enum_type); j++) {
+            char value_name[MAX_NAME_LEN];
+
+            codegen_build_enum_value_name(value_name, sizeof(value_name), enum_type, j);
+            fprintf(ctx->out, "    %s%s\n",
+                value_name,
+                j + 1 < semantic_enum_variant_count(enum_type) ? "," : "");
+        }
+        fprintf(ctx->out, "} %s;\n\n", semantic_enum_name(enum_type));
+
+        codegen_build_enum_print_name(print_name, sizeof(print_name), enum_type);
+        fprintf(ctx->out, "static void %s(%s value)\n{\n", print_name, semantic_enum_name(enum_type));
+        fprintf(ctx->out, "    switch (value) {\n");
+        for (size_t j = 0; j < semantic_enum_variant_count(enum_type); j++) {
+            char value_name[MAX_NAME_LEN];
+
+            codegen_build_enum_value_name(value_name, sizeof(value_name), enum_type, j);
+            fprintf(ctx->out, "        case %s:\n", value_name);
+            fprintf(ctx->out, "            printf(\"%s\");\n", semantic_enum_variant_name(enum_type, j));
+            fprintf(ctx->out, "            return;\n");
+        }
+        fprintf(ctx->out, "    }\n");
+        fprintf(ctx->out, "}\n\n");
+    }
+}
+
 void codegen_emit_struct_declarations(CodegenContext *ctx)
 {
     unsigned char emitted_tuples[MAX_TUPLE_TYPES] = {0};
@@ -2023,6 +2092,8 @@ void codegen_emit_struct_declarations(CodegenContext *ctx)
     if (emit_json_decode_helpers || emit_json_encode_helpers) {
         fputs("typedef struct cJSON cJSON;\n\n", ctx->out);
     }
+
+    emit_enum_declarations(ctx);
 
     for (size_t i = 0; i < semantic_list_type_count(); i++) {
         ValueType list_type = semantic_list_type_at(i);

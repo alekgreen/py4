@@ -125,6 +125,7 @@ static int tuple_element_type_supported(ValueType type)
         type == TYPE_BOOL ||
         type == TYPE_CHAR ||
         type == TYPE_STR ||
+        semantic_type_is_enum(type) ||
         semantic_type_is_optional(type) ||
         semantic_type_is_list(type) ||
         semantic_type_is_dict(type) ||
@@ -740,6 +741,42 @@ static ValueType resolve_visible_class_type(SemanticInfo *info, Scope *scope, co
     return 0;
 }
 
+static ValueType resolve_visible_enum_type(SemanticInfo *info, Scope *scope, const char *name)
+{
+    const ModuleInfo *current_module = scope_module(scope);
+    ImportBinding *import_binding;
+    ValueType enum_type;
+
+    (void) info;
+
+    enum_type = semantic_find_enum_type(name);
+    if (enum_type == 0 || current_module == NULL) {
+        return enum_type;
+    }
+
+    for (size_t i = 0; i < current_module->root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(current_module->root->children[i]);
+
+        if (payload->kind == NODE_ENUM_DEF &&
+            strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, name) == 0) {
+            return enum_type;
+        }
+    }
+
+    import_binding = find_import_binding(current_module, name, 0);
+    if (import_binding != NULL && import_binding->symbol_name != NULL &&
+        strcmp(import_binding->symbol_name, name) == 0) {
+        if (is_module_private_name(import_binding->symbol_name)) {
+            semantic_error_at_node(scope->module->root, "name '%s' is private to module '%s'",
+                import_binding->symbol_name,
+                import_binding->module_name);
+        }
+        return enum_type;
+    }
+
+    return 0;
+}
+
 static ValueType resolve_module_class_type(
     SemanticInfo *info,
     const ModuleInfo *current_module,
@@ -779,6 +816,71 @@ static ValueType resolve_module_class_type(
         }
     }
 
+    return 0;
+}
+
+static ValueType resolve_module_enum_type(
+    SemanticInfo *info,
+    const ModuleInfo *current_module,
+    const char *module_local_name,
+    const char *enum_name)
+{
+    ImportBinding *module_binding;
+    ModuleInfo *target_module;
+    ValueType enum_type;
+
+    if (current_module == NULL) {
+        return 0;
+    }
+
+    module_binding = find_import_binding(current_module, module_local_name, 1);
+    if (module_binding == NULL) {
+        return 0;
+    }
+
+    target_module = semantic_find_module_info(info->modules, module_binding->module_name);
+    if (target_module == NULL) {
+        return 0;
+    }
+    if (is_module_private_name(enum_name)) {
+        semantic_error_at_node(current_module->root, "name '%s' is private to module '%s'",
+            enum_name,
+            target_module->name);
+    }
+
+    for (size_t i = 0; i < target_module->root->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(target_module->root->children[i]);
+
+        if (payload->kind == NODE_ENUM_DEF &&
+            strcmp(semantic_expect_child(payload, 0, NODE_PRIMARY)->value, enum_name) == 0) {
+            enum_type = semantic_find_enum_type(enum_name);
+            return enum_type;
+        }
+    }
+
+    return 0;
+}
+
+static ValueType resolve_field_access_enum_type(SemanticInfo *info, Scope *scope, const ParseNode *base)
+{
+    const ModuleInfo *current_module = scope_module(scope);
+
+    if (base == NULL) {
+        return 0;
+    }
+    if (base->kind == NODE_PRIMARY && base->value != NULL) {
+        return resolve_visible_enum_type(info, scope, base->value);
+    }
+    if (base->kind == NODE_FIELD_ACCESS && base->child_count == 2 && current_module != NULL) {
+        const ParseNode *module_receiver = base->children[0];
+        const ParseNode *enum_name = semantic_expect_child(base, 1, NODE_PRIMARY);
+        ImportBinding *module_binding = find_module_binding_for_receiver(current_module, module_receiver);
+
+        if (module_binding == NULL) {
+            return 0;
+        }
+        return resolve_module_enum_type(info, current_module, module_binding->local_name, enum_name->value);
+    }
     return 0;
 }
 
@@ -1608,7 +1710,7 @@ ValueType semantic_infer_primary_type(
                 continue;
             }
             semantic_error_at_node(node->children[i],
-                "list literals currently support only homogeneous int, float, bool, char, str, or class elements");
+                "list literals currently support only homogeneous int, float, bool, char, str, enum, or class elements");
         }
 
         if (element_type == 0) {
@@ -1670,8 +1772,8 @@ ValueType semantic_infer_primary_type(
             ValueType item_type = semantic_infer_expression_type(info, node->children[i], scope);
 
             if (!tuple_element_type_supported(item_type)) {
-            semantic_error_at_node(node->children[i],
-                "tuple elements currently support only int, float, bool, char, str, optionals, lists, dicts, classes, and tuples");
+                semantic_error_at_node(node->children[i],
+                    "tuple elements currently support only int, float, bool, char, str, enums, optionals, lists, dicts, classes, and tuples");
             }
             element_types[i] = item_type;
         }
@@ -1692,6 +1794,20 @@ ValueType semantic_infer_primary_type(
         const ParseNode *field = semantic_expect_child(node, 1, NODE_PRIMARY);
         const ModuleInfo *current_module = scope_module(scope);
         ImportBinding *module_binding = NULL;
+        ValueType enum_type = resolve_field_access_enum_type(info, scope, base);
+        size_t variant_index;
+
+        if (enum_type != 0) {
+            if (!semantic_enum_variant_index(enum_type, field->value, &variant_index)) {
+                semantic_error_at_node(field, "enum '%s' has no member '%s'",
+                    semantic_enum_name(enum_type),
+                    field->value);
+            }
+            semantic_record_enum_variant_target(info, node, enum_type, variant_index);
+            semantic_record_node_type(info, field, enum_type);
+            semantic_record_node_type(info, node, enum_type);
+            return enum_type;
+        }
 
         if (current_module != NULL) {
             module_binding = find_module_binding_for_receiver(current_module, base);

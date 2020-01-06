@@ -21,6 +21,7 @@ static const char *KEYWORDS[] = {
     "native",
     "type",
     "class",
+    "enum",
     "if",
     "while",
     "for",
