@@ -500,6 +500,8 @@ static int is_print_call(const ParseNode *call)
 static int is_builtin_name(const char *name)
 {
     return strcmp(name, "len") == 0 ||
+        strcmp(name, "ord") == 0 ||
+        strcmp(name, "chr") == 0 ||
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
@@ -1593,6 +1595,24 @@ static ValueType infer_builtin_call_type(
         }
         semantic_record_node_type(info, call, TYPE_INT);
         return TYPE_INT;
+    }
+
+    if (strcmp(name, "ord") == 0) {
+        expect_argument_count(name, arguments, 1);
+        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_CHAR) {
+            semantic_error_at_node(arguments->children[0], "function 'ord' argument 1 expects char");
+        }
+        semantic_record_node_type(info, call, TYPE_INT);
+        return TYPE_INT;
+    }
+
+    if (strcmp(name, "chr") == 0) {
+        expect_argument_count(name, arguments, 1);
+        if (semantic_infer_expression_type(info, arguments->children[0], scope) != TYPE_INT) {
+            semantic_error_at_node(arguments->children[0], "function 'chr' argument 1 expects int");
+        }
+        semantic_record_node_type(info, call, TYPE_CHAR);
+        return TYPE_CHAR;
     }
 
     if (strcmp(name, "list_set") == 0) {

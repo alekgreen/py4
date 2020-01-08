@@ -44,6 +44,8 @@ static int is_chained_comparison_expr(const ParseNode *expr)
 static int is_list_builtin_name(const char *name)
 {
     return strcmp(name, "len") == 0 ||
+        strcmp(name, "ord") == 0 ||
+        strcmp(name, "chr") == 0 ||
         strcmp(name, "list_int") == 0 ||
         strcmp(name, "list_float") == 0 ||
         strcmp(name, "list_bool") == 0 ||
@@ -454,6 +456,8 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                  strcmp(callee->value, "list_get") == 0 ||
                  strcmp(callee->value, "list_len") == 0 ||
                  strcmp(callee->value, "len") == 0 ||
+                 strcmp(callee->value, "ord") == 0 ||
+                 strcmp(callee->value, "chr") == 0 ||
                  strcmp(callee->value, "list_set") == 0) && i == 0) {
                 target_type = arg_type;
             } else if ((strcmp(callee->value, "list_append") == 0 && i == 1) ||
@@ -521,6 +525,10 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "append", args);
     } else if (strcmp(callee->value, "list_get") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "get", args);
+    } else if (strcmp(callee->value, "ord") == 0) {
+        result = codegen_dup_printf("py4_ord(%s)", args);
+    } else if (strcmp(callee->value, "chr") == 0) {
+        result = codegen_dup_printf("py4_chr(%s)", args);
     } else if (strcmp(callee->value, "list_len") == 0 || strcmp(callee->value, "len") == 0) {
         ValueType container_type = semantic_type_of(ctx->semantic, arguments->children[0]);
 

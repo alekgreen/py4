@@ -541,6 +541,63 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
     }
 
     if (module_name != NULL &&
+        strcmp(module_name, "chars") == 0 &&
+        strcmp(name->value, "is_digit") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_CHAR) {
+        const char *value = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_char_is_digit(%s);\n", value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "chars") == 0 &&
+        strcmp(name->value, "is_alpha") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_CHAR) {
+        const char *value = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_char_is_alpha(%s);\n", value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "chars") == 0 &&
+        strcmp(name->value, "is_space") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_CHAR) {
+        const char *value = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_char_is_space(%s);\n", value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
         strcmp(module_name, "io") == 0 &&
         strcmp(name->value, "read_text") == 0 &&
         parameters->child_count == 1 &&
@@ -3223,6 +3280,25 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     }
 
     fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
+    fputs("static int py4_ord(char value)\n{\n", out);
+    fputs("    return (int)(unsigned char)value;\n", out);
+    fputs("}\n\n", out);
+    fputs("static char py4_chr(int value)\n{\n", out);
+    fputs("    if (value < 0 || value > 255) {\n", out);
+    fputs("        fprintf(stderr, \"Runtime error: chr code out of bounds\\n\");\n", out);
+    fputs("        exit(1);\n", out);
+    fputs("    }\n", out);
+    fputs("    return (char)(unsigned char)value;\n", out);
+    fputs("}\n\n", out);
+    fputs("static bool py4_char_is_digit(char value)\n{\n", out);
+    fputs("    return value >= '0' && value <= '9';\n", out);
+    fputs("}\n\n", out);
+    fputs("static bool py4_char_is_alpha(char value)\n{\n", out);
+    fputs("    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');\n", out);
+    fputs("}\n\n", out);
+    fputs("static bool py4_char_is_space(char value)\n{\n", out);
+    fputs("    return value == ' ' || value == '\\t' || value == '\\n' || value == '\\r' || value == '\\f' || value == '\\v';\n", out);
+    fputs("}\n\n", out);
     fputs("static char *py4_str_dup(const char *value)\n{\n", out);
     fputs("    size_t len;\n", out);
     fputs("    char *result;\n", out);
