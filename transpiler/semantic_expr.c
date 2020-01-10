@@ -1932,17 +1932,25 @@ ValueType semantic_infer_primary_type(
 
     if (node->kind == NODE_SLICE) {
         ValueType container_type = semantic_infer_primary_type(info, node->children[0], scope);
-        ValueType start_type = semantic_infer_expression_type(info, node->children[1], scope);
-        ValueType end_type = semantic_infer_expression_type(info, node->children[2], scope);
+        int has_start = !semantic_is_epsilon_node(node->children[1]);
+        int has_end = !semantic_is_epsilon_node(node->children[2]);
+        ValueType start_type = TYPE_INT;
+        ValueType end_type = TYPE_INT;
 
         if (container_type != TYPE_STR) {
             semantic_error_at_node(node->children[0], "slicing currently requires str but got %s",
                 semantic_type_name(container_type));
         }
-        if (start_type != TYPE_INT) {
+        if (has_start) {
+            start_type = semantic_infer_expression_type(info, node->children[1], scope);
+        }
+        if (has_end) {
+            end_type = semantic_infer_expression_type(info, node->children[2], scope);
+        }
+        if (has_start && start_type != TYPE_INT) {
             semantic_error_at_node(node->children[1], "str slice start must be int");
         }
-        if (end_type != TYPE_INT) {
+        if (has_end && end_type != TYPE_INT) {
             semantic_error_at_node(node->children[2], "str slice end must be int");
         }
 

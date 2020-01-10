@@ -1549,8 +1549,12 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
 
     if (primary->kind == NODE_SLICE) {
         char *base = codegen_primary_to_c_string(ctx, primary->children[0]);
-        char *start = codegen_expression_to_c_string(ctx, primary->children[1]);
-        char *end = codegen_expression_to_c_string(ctx, primary->children[2]);
+        char *start = codegen_is_epsilon_node(primary->children[1])
+            ? codegen_dup_printf("0")
+            : codegen_expression_to_c_string(ctx, primary->children[1]);
+        char *end = codegen_is_epsilon_node(primary->children[2])
+            ? codegen_dup_printf("((int)strlen(%s))", base)
+            : codegen_expression_to_c_string(ctx, primary->children[2]);
         char *result = codegen_dup_printf("py4_str_slice(%s, %s, %s)", base, start, end);
 
         free(base);

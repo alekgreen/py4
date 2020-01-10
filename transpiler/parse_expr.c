@@ -21,6 +21,7 @@ static ParseNode *parse_TERM(TokenStream *ts);
 static ParseNode *parse_FACTOR(TokenStream *ts);
 static ParseNode *parse_UNARY(TokenStream *ts);
 static ParseNode *parse_PRIMARY(TokenStream *ts);
+static ParseNode *parse_SLICE_BOUND(TokenStream *ts);
 
 static int is_json_from_string_target(const ParseNode *node)
 {
@@ -57,6 +58,14 @@ static ParseNode *wrap_expression(ParseNode *node)
     expr = create_node(NODE_EXPRESSION, TOKEN_NULL, NULL);
     add_child(expr, node);
     return expr;
+}
+
+static ParseNode *parse_SLICE_BOUND(TokenStream *ts)
+{
+    if (peek_ts(ts).type == TOKEN_COLON || peek_ts(ts).type == TOKEN_RBRACKET) {
+        return create_node(NODE_EPSILON, TOKEN_NULL, "epsilon");
+    }
+    return parse_EXPRESSION(ts);
 }
 
 static ParseNode *make_unary_expression(Token op, ParseNode *operand)
@@ -339,7 +348,7 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
             ParseNode *index_expr;
 
             expect(ts, TOKEN_LBRACKET);
-            index_expr = parse_EXPRESSION(ts);
+            index_expr = parse_SLICE_BOUND(ts);
             index_node = create_node(
                 peek_ts(ts).type == TOKEN_COLON ? NODE_SLICE : NODE_INDEX,
                 TOKEN_NULL,
@@ -348,7 +357,7 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
             add_child(index_node, index_expr);
             if (peek_ts(ts).type == TOKEN_COLON) {
                 expect(ts, TOKEN_COLON);
-                add_child(index_node, parse_EXPRESSION(ts));
+                add_child(index_node, parse_SLICE_BOUND(ts));
             }
             expect(ts, TOKEN_RBRACKET);
             node = index_node;
@@ -604,7 +613,7 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
             ParseNode *index_expr;
 
             expect(ts, TOKEN_LBRACKET);
-            index_expr = parse_EXPRESSION(ts);
+            index_expr = parse_SLICE_BOUND(ts);
             index_node = create_node(
                 peek_ts(ts).type == TOKEN_COLON ? NODE_SLICE : NODE_INDEX,
                 TOKEN_NULL,
@@ -613,7 +622,7 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
             add_child(index_node, index_expr);
             if (peek_ts(ts).type == TOKEN_COLON) {
                 expect(ts, TOKEN_COLON);
-                add_child(index_node, parse_EXPRESSION(ts));
+                add_child(index_node, parse_SLICE_BOUND(ts));
             }
             expect(ts, TOKEN_RBRACKET);
             base = index_node;
