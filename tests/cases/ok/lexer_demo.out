@@ -1,0 +1,8 @@
+Token(kind=DEF, text=def)
+Token(kind=IDENT, text=sum)
+Token(kind=LPAREN, text=()
+Token(kind=IDENT, text=x1)
+Token(kind=PLUS, text=+)
+Token(kind=NUMBER, text=42)
+Token(kind=RPAREN, text=))
+Token(kind=EOF, text=)
