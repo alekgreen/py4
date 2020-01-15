@@ -266,12 +266,12 @@ static void append_type_mangle(char *buffer, size_t size, size_t *length, ValueT
         case TYPE_CHAR: append_text(buffer, size, length, "char"); return;
         case TYPE_STR: append_text(buffer, size, length, "str"); return;
         case TYPE_NONE: append_text(buffer, size, length, "none"); return;
-        case TYPE_LIST_INT: append_text(buffer, size, length, "list_int"); return;
-        case TYPE_LIST_FLOAT: append_text(buffer, size, length, "list_float"); return;
-        case TYPE_LIST_BOOL: append_text(buffer, size, length, "list_bool"); return;
-        case TYPE_LIST_CHAR: append_text(buffer, size, length, "list_char"); return;
-        case TYPE_LIST_STR: append_text(buffer, size, length, "list_str"); return;
         default:
+            if (semantic_type_is_list(type)) {
+                append_text(buffer, size, length, "list_");
+                append_type_mangle(buffer, size, length, semantic_list_element_type(type));
+                return;
+            }
             if (semantic_type_is_dict(type)) {
                 append_text(buffer, size, length, "dict_");
                 append_type_mangle(buffer, size, length, semantic_dict_key_type(type));
