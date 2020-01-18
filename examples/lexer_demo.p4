@@ -3,16 +3,28 @@ import chars
 enum TokenKind:
     IDENT
     NUMBER
+    STRING
+    CHAR
     DEF
     CLASS
     RETURN
     IF
     COLON
     COMMA
+    DOT
     EQ
+    EQEQ
     PLUS
+    MINUS
+    STAR
+    SLASH
+    ARROW
     LPAREN
     RPAREN
+    LBRACKET
+    RBRACKET
+    LBRACE
+    RBRACE
     NEWLINE
     INDENT
     DEDENT
@@ -36,18 +48,20 @@ def is_ident_start(ch: char) -> bool:
 def is_ident_continue(ch: char) -> bool:
     return chars.is_alpha(ch) or chars.is_digit(ch) or ch == '_'
 
-def is_blank_line(line: str) -> bool:
+def is_blank_or_comment_line(line: str) -> bool:
     i = 0
-    while i < len(line):
-        if line[i] != ' ' and line[i] != '\t' and line[i] != '\r':
-            return False
+
+    while i < len(line) and (line[i] == ' ' or line[i] == '\t' or line[i] == '\r'):
         i = i + 1
-    return True
+
+    return i == len(line) or line[i] == '#'
 
 def count_indent(line: str) -> int:
     i = 0
+
     while i < len(line) and line[i] == ' ':
         i = i + 1
+
     return i
 
 def keyword_kind(text: str) -> TokenKind:
@@ -57,6 +71,7 @@ def keyword_kind(text: str) -> TokenKind:
         "return": TokenKind.RETURN,
         "if": TokenKind.IF
     }
+
     return keywords.get_or(text, TokenKind.IDENT)
 
 def emit_indent_tokens(tokens: list[Token], indent_stack: list[int], indent: int, line_no: int) -> None:
@@ -71,48 +86,119 @@ def emit_indent_tokens(tokens: list[Token], indent_stack: list[int], indent: int
         indent_stack.pop()
         tokens.append(Token(TokenKind.DEDENT, "", line_no, 1))
 
+def lex_identifier(tokens: list[Token], line: str, line_no: int, start: int) -> int:
+    i = start + 1
+
+    while i < len(line) and is_ident_continue(line[i]):
+        i = i + 1
+
+    text = line[start:i]
+    tokens.append(Token(keyword_kind(text), text, line_no, start + 1))
+    return i
+
+def lex_number(tokens: list[Token], line: str, line_no: int, start: int) -> int:
+    i = start + 1
+
+    while i < len(line) and chars.is_digit(line[i]):
+        i = i + 1
+
+    tokens.append(Token(TokenKind.NUMBER, line[start:i], line_no, start + 1))
+    return i
+
+def lex_quoted(tokens: list[Token], kind: TokenKind, quote: char, line: str, line_no: int, start: int) -> int:
+    i = start + 1
+
+    while i < len(line):
+        ch = line[i]
+        if ch == '\\':
+            i = i + 2
+        elif ch == quote:
+            i = i + 1
+            tokens.append(Token(kind, line[start:i], line_no, start + 1))
+            return i
+        else:
+            i = i + 1
+
+    tokens.append(Token(kind, line[start:len(line)], line_no, start + 1))
+    return len(line)
+
+def lex_symbol(tokens: list[Token], line: str, line_no: int, index: int) -> int:
+    column = index + 1
+
+    if index + 1 < len(line):
+        if line[index] == '-' and line[index + 1] == '>':
+            tokens.append(Token(TokenKind.ARROW, line[index:index + 2], line_no, column))
+            return index + 2
+        if line[index] == '=' and line[index + 1] == '=':
+            tokens.append(Token(TokenKind.EQEQ, line[index:index + 2], line_no, column))
+            return index + 2
+    ch = line[index]
+
+    if ch == ':':
+        tokens.append(Token(TokenKind.COLON, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == ',':
+        tokens.append(Token(TokenKind.COMMA, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '.':
+        tokens.append(Token(TokenKind.DOT, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '=':
+        tokens.append(Token(TokenKind.EQ, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '+':
+        tokens.append(Token(TokenKind.PLUS, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '-':
+        tokens.append(Token(TokenKind.MINUS, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '*':
+        tokens.append(Token(TokenKind.STAR, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '/':
+        tokens.append(Token(TokenKind.SLASH, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '(':
+        tokens.append(Token(TokenKind.LPAREN, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == ')':
+        tokens.append(Token(TokenKind.RPAREN, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '[':
+        tokens.append(Token(TokenKind.LBRACKET, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == ']':
+        tokens.append(Token(TokenKind.RBRACKET, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '{':
+        tokens.append(Token(TokenKind.LBRACE, line[index:index + 1], line_no, column))
+        return index + 1
+    if ch == '}':
+        tokens.append(Token(TokenKind.RBRACE, line[index:index + 1], line_no, column))
+        return index + 1
+
+    return index + 1
+
 def lex_line_tokens(tokens: list[Token], line: str, line_no: int, start_index: int) -> None:
     i = start_index
 
     while i < len(line):
         ch = line[i]
-        column = i + 1
 
-        if ch == ' ' or ch == '\t' or ch == '\r':
+        if ch == '#':
+            i = len(line)
+        elif ch == ' ' or ch == '\t' or ch == '\r':
             i = i + 1
         elif is_ident_start(ch):
-            start = i
-            i = i + 1
-            while i < len(line) and is_ident_continue(line[i]):
-                i = i + 1
-            text = line[start:i]
-            tokens.append(Token(keyword_kind(text), text, line_no, start + 1))
+            i = lex_identifier(tokens, line, line_no, i)
         elif chars.is_digit(ch):
-            start = i
-            i = i + 1
-            while i < len(line) and chars.is_digit(line[i]):
-                i = i + 1
-            tokens.append(Token(TokenKind.NUMBER, line[start:i], line_no, start + 1))
-        elif ch == ':':
-            tokens.append(Token(TokenKind.COLON, line[i:i + 1], line_no, column))
-            i = i + 1
-        elif ch == ',':
-            tokens.append(Token(TokenKind.COMMA, line[i:i + 1], line_no, column))
-            i = i + 1
-        elif ch == '=':
-            tokens.append(Token(TokenKind.EQ, line[i:i + 1], line_no, column))
-            i = i + 1
-        elif ch == '+':
-            tokens.append(Token(TokenKind.PLUS, line[i:i + 1], line_no, column))
-            i = i + 1
-        elif ch == '(':
-            tokens.append(Token(TokenKind.LPAREN, line[i:i + 1], line_no, column))
-            i = i + 1
-        elif ch == ')':
-            tokens.append(Token(TokenKind.RPAREN, line[i:i + 1], line_no, column))
-            i = i + 1
+            i = lex_number(tokens, line, line_no, i)
+        elif ch == '"':
+            i = lex_quoted(tokens, TokenKind.STRING, '"', line, line_no, i)
+        elif ch == '\'':
+            i = lex_quoted(tokens, TokenKind.CHAR, '\'', line, line_no, i)
         else:
-            i = i + 1
+            i = lex_symbol(tokens, line, line_no, i)
 
     tokens.append(Token(TokenKind.NEWLINE, "", line_no, len(line) + 1))
 
@@ -123,7 +209,7 @@ def tokenize(source: str) -> list[Token]:
     line_no = 1
 
     for line in lines:
-        if is_blank_line(line):
+        if is_blank_or_comment_line(line):
             line_no = line_no + 1
         else:
             indent = count_indent(line)
@@ -139,7 +225,15 @@ def tokenize(source: str) -> list[Token]:
     return tokens
 
 def main() -> None:
-    source = "class User:\n" + "    def load(name, count):\n" + "        if count:\n" + "            return name + count\n"
+    source = "class User:\n"
+    source = source + "    def load(name, count) -> Item:\n"
+    source = source + "        label = \"hi\" # greet\n"
+    source = source + "        mark = 'x'\n"
+    source = source + "        if count == 0:\n"
+    source = source + "            return [name, label]\n"
+    source = source + "        count = count - 1 * 2 / 3\n"
+    source = source + "        return {name: name.find(\"a\")}\n"
+    source = source + "    # end class\n"
 
     for token in tokenize(source):
         print(token)
