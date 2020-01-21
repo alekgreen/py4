@@ -42,6 +42,9 @@ class Token:
         self.line = line
         self.column = column
 
+def lexer_fail(message: str) -> None:
+    assert False, message
+
 def is_ident_start(ch: char) -> bool:
     return chars.is_alpha(ch) or ch == '_'
 
@@ -119,7 +122,7 @@ def lex_quoted(tokens: list[Token], kind: TokenKind, quote: char, line: str, lin
         else:
             i = i + 1
 
-    tokens.append(Token(kind, line[start:len(line)], line_no, start + 1))
+    lexer_fail("unterminated quoted literal")
     return len(line)
 
 def lex_symbol(tokens: list[Token], line: str, line_no: int, index: int) -> int:
@@ -177,6 +180,7 @@ def lex_symbol(tokens: list[Token], line: str, line_no: int, index: int) -> int:
         tokens.append(Token(TokenKind.RBRACE, line[index:index + 1], line_no, column))
         return index + 1
 
+    lexer_fail("unsupported character")
     return index + 1
 
 def lex_line_tokens(tokens: list[Token], line: str, line_no: int, start_index: int) -> None:
