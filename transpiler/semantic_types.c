@@ -59,7 +59,7 @@ typedef struct {
     const char *name;
     const ParseNode *node;
     size_t variant_count;
-    const char *variant_names[MAX_CLASS_FIELDS];
+    const char *variant_names[MAX_ENUM_VARIANTS];
 } EnumTypeInfo;
 
 static TupleTypeInfo TUPLE_TYPES[MAX_TUPLE_TYPES];
@@ -1373,8 +1373,8 @@ ValueType semantic_register_enum(const ParseNode *enum_def)
         if (member->kind != NODE_ENUM_MEMBER) {
             semantic_error("malformed enum definition");
         }
-        if (entry->variant_count >= MAX_CLASS_FIELDS) {
-            semantic_error_at_node(member, "enum '%s' supports at most %d members", name, MAX_CLASS_FIELDS);
+        if (entry->variant_count >= MAX_ENUM_VARIANTS) {
+            semantic_error_at_node(member, "enum '%s' supports at most %d members", name, MAX_ENUM_VARIANTS);
         }
         for (size_t j = 0; j < entry->variant_count; j++) {
             if (strcmp(entry->variant_names[j], member->value) == 0) {

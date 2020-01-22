@@ -501,6 +501,25 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
 
     if (module_name != NULL &&
         strcmp(module_name, "strings") == 0 &&
+        strcmp(name->value, "from_int") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_INT) {
+        const char *value = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_str_from_int(%s);\n", value);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "strings") == 0 &&
         strcmp(name->value, "split") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR) {
@@ -3373,6 +3392,18 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     fputs("        return -1;\n", out);
     fputs("    }\n", out);
     fputs("    return (int)(match - value);\n", out);
+    fputs("}\n\n", out);
+    fputs("static char *py4_str_from_int(int value)\n{\n", out);
+    fputs("    int len;\n", out);
+    fputs("    char *result;\n", out);
+    fputs("    len = snprintf(NULL, 0, \"%d\", value);\n", out);
+    fputs("    result = malloc((size_t)len + 1);\n", out);
+    fputs("    if (result == NULL) {\n", out);
+    fputs("        perror(\"malloc\");\n", out);
+    fputs("        exit(1);\n", out);
+    fputs("    }\n", out);
+    fputs("    snprintf(result, (size_t)len + 1, \"%d\", value);\n", out);
+    fputs("    return result;\n", out);
     fputs("}\n\n", out);
     fputs("static char py4_str_get(const char *value, int index)\n{\n", out);
     fputs("    size_t len;\n", out);

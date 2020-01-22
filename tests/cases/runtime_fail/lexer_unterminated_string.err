@@ -1,1 +1,1 @@
-unterminated quoted literal
+lexer error at 1:1: unterminated quoted literal

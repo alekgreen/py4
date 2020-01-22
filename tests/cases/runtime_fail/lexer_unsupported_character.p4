@@ -2,7 +2,7 @@ import chars
 import strings
 
 enum TokenKind:
-    STRING
+    IDENT
     EOF
 
 class Token:
@@ -25,28 +25,25 @@ def lexer_fail(line_no: int, column: int, message: str) -> None:
     formatted = formatted + message
     assert False, formatted
 
-def lex_quoted(tokens: list[Token], kind: TokenKind, quote: char, line: str, line_no: int, start: int) -> int:
-    i = start + 1
+def is_ident_start(ch: char) -> bool:
+    return chars.is_alpha(ch) or ch == '_'
 
-    while i < len(line):
-        ch = line[i]
-        if ch == '\\':
-            i = i + 2
-        elif ch == quote:
-            i = i + 1
-            tokens.append(Token(kind, line[start:i], line_no, start + 1))
-            return i
-        else:
-            i = i + 1
-
-    lexer_fail(line_no, start + 1, "unterminated quoted literal")
-    return len(line)
+def lex_symbol(tokens: list[Token], line: str, line_no: int, index: int) -> int:
+    lexer_fail(line_no, index + 1, "unsupported character")
+    return index + 1
 
 def tokenize(source: str) -> list[Token]:
     tokens: list[Token] = []
-    lex_quoted(tokens, TokenKind.STRING, '"', source, 1, 0)
+    i = 0
+
+    while i < len(source):
+        if is_ident_start(source[i]):
+            i = i + 1
+        else:
+            i = lex_symbol(tokens, source, 1, i)
+
     tokens.append(Token(TokenKind.EOF, "", 1, len(source) + 1))
     return tokens
 
 def main() -> None:
-    tokenize("\"oops")
+    tokenize("@")

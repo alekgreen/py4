@@ -23,6 +23,7 @@ typedef unsigned int ValueType;
 #define TYPE_ENUM_BASE (TYPE_DICT_BASE + MAX_DICT_TYPES)
 #define MAX_ENUM_TYPES 64
 #define MAX_CLASS_FIELDS 32
+#define MAX_ENUM_VARIANTS 64
 
 enum {
     TYPE_INT = 1u << 0,
