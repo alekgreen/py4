@@ -4,3 +4,4 @@ py4
 out
 out.c
 .venv/
+*.tmp
