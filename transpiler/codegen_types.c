@@ -322,12 +322,75 @@ void codegen_build_dict_print_name(char *buffer, size_t size, ValueType type)
 void codegen_error(const char *message, ...)
 {
     va_list args;
+    va_list copy;
+    int needed;
+    char *buffer;
 
-    fprintf(stderr, "Codegen error: ");
     va_start(args, message);
-    vfprintf(stderr, message, args);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, message, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        print_basic_diagnostic(stderr, NULL, "Codegen error", "failed to format code generation error");
+        exit(1);
+    }
+
+    buffer = malloc((size_t)needed + 1);
+    if (buffer == NULL) {
+        va_end(args);
+        perror("malloc");
+        exit(1);
+    }
+
+    vsnprintf(buffer, (size_t)needed + 1, message, args);
     va_end(args);
-    fprintf(stderr, "\n");
+
+    print_basic_diagnostic(stderr, NULL, "Codegen error", buffer);
+    free(buffer);
+    exit(1);
+}
+
+void codegen_error_at_node(const ParseNode *node, const char *message, ...)
+{
+    va_list args;
+    va_list copy;
+    int needed;
+    char *buffer;
+
+    va_start(args, message);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, message, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        print_basic_diagnostic(
+            stderr,
+            node != NULL ? node->source_path : NULL,
+            "Codegen error",
+            "failed to format code generation error");
+        exit(1);
+    }
+
+    buffer = malloc((size_t)needed + 1);
+    if (buffer == NULL) {
+        va_end(args);
+        perror("malloc");
+        exit(1);
+    }
+
+    vsnprintf(buffer, (size_t)needed + 1, message, args);
+    va_end(args);
+
+    print_source_diagnostic(
+        stderr,
+        node != NULL ? node->source_path : NULL,
+        node != NULL ? node->line : 0,
+        node != NULL ? node->column : 0,
+        "Codegen error",
+        buffer,
+        node != NULL ? node->source_line : NULL);
+    free(buffer);
     exit(1);
 }
 
@@ -341,10 +404,10 @@ void codegen_emit_indent(CodegenContext *ctx)
 const ParseNode *codegen_expect_child(const ParseNode *node, size_t index, NodeKind kind)
 {
     if (node == NULL || index >= node->child_count) {
-        codegen_error("malformed AST");
+        codegen_error_at_node(node, "malformed AST");
     }
     if (node->children[index]->kind != kind) {
-        codegen_error("unexpected AST node kind");
+        codegen_error_at_node(node->children[index], "unexpected AST node kind");
     }
     return node->children[index];
 }
@@ -383,7 +446,7 @@ int codegen_is_print_call_expr(const ParseNode *expr)
 const ParseNode *codegen_statement_payload(const ParseNode *statement)
 {
     if (statement->kind != NODE_STATEMENT || statement->child_count != 1) {
-        codegen_error("malformed statement node");
+        codegen_error_at_node(statement, "malformed statement node");
     }
     return statement->children[0];
 }
@@ -391,7 +454,7 @@ const ParseNode *codegen_statement_payload(const ParseNode *statement)
 const ParseNode *codegen_simple_statement_target(const ParseNode *simple_stmt)
 {
     if (simple_stmt == NULL || simple_stmt->child_count == 0) {
-        codegen_error("malformed simple statement");
+        codegen_error_at_node(simple_stmt, "malformed simple statement");
     }
     return simple_stmt->children[0];
 }

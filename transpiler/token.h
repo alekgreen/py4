@@ -77,6 +77,7 @@ void print_source_diagnostic(
     const char *kind,
     const char *message,
     const char *line_text);
+void print_basic_diagnostic(FILE *stream, const char *path, const char *kind, const char *message);
 void print_token_diagnostic(FILE *stream, Token tok, const char *kind, const char *message);
 
 #endif

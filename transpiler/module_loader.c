@@ -13,6 +13,9 @@ typedef struct {
     LoadedProgram *program;
 } LoadContext;
 
+static void import_error(const char *path, const char *message, ...);
+static void import_error_at_node(const ParseNode *node, const char *message, ...);
+
 static char *dup_string(const char *value)
 {
     size_t len = strlen(value) + 1;
@@ -40,8 +43,7 @@ static char *dup_printf(const char *fmt, ...)
     va_end(copy);
     if (needed < 0) {
         va_end(args);
-        fprintf(stderr, "Import error: failed to build module path\n");
-        exit(1);
+        import_error(NULL, "failed to build module path");
     }
 
     buffer = malloc((size_t)needed + 1);
@@ -66,6 +68,79 @@ static char *dots_to_slashes(const char *name)
         }
     }
     return copy;
+}
+
+static void import_error(const char *path, const char *message, ...)
+{
+    va_list args;
+    va_list copy;
+    int needed;
+    char *buffer;
+
+    va_start(args, message);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, message, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        print_basic_diagnostic(stderr, path, "Import error", "failed to format import error");
+        exit(1);
+    }
+
+    buffer = malloc((size_t)needed + 1);
+    if (buffer == NULL) {
+        va_end(args);
+        perror("malloc");
+        exit(1);
+    }
+
+    vsnprintf(buffer, (size_t)needed + 1, message, args);
+    va_end(args);
+    print_basic_diagnostic(stderr, path, "Import error", buffer);
+    free(buffer);
+    exit(1);
+}
+
+static void import_error_at_node(const ParseNode *node, const char *message, ...)
+{
+    va_list args;
+    va_list copy;
+    int needed;
+    char *buffer;
+
+    va_start(args, message);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, message, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        print_basic_diagnostic(
+            stderr,
+            node != NULL ? node->source_path : NULL,
+            "Import error",
+            "failed to format import error");
+        exit(1);
+    }
+
+    buffer = malloc((size_t)needed + 1);
+    if (buffer == NULL) {
+        va_end(args);
+        perror("malloc");
+        exit(1);
+    }
+
+    vsnprintf(buffer, (size_t)needed + 1, message, args);
+    va_end(args);
+    print_source_diagnostic(
+        stderr,
+        node != NULL ? node->source_path : NULL,
+        node != NULL ? node->line : 0,
+        node != NULL ? node->column : 0,
+        "Import error",
+        buffer,
+        node != NULL ? node->source_line : NULL);
+    free(buffer);
+    exit(1);
 }
 
 static int file_exists(const char *path)
@@ -305,8 +380,7 @@ static ParseNode *parse_file(const char *path, int show_tokens)
     ParseNode *root;
 
     if (fp == NULL) {
-        fprintf(stderr, "Import error: could not open '%s'\n", path);
-        exit(1);
+        import_error(path, "could not open '%s'", path);
     }
 
     ts = lexer(fp, path);
@@ -459,7 +533,8 @@ static void import_module_symbol(
     const char *path,
     const char *module_name,
     const char *symbol_name,
-    const char *alias_name)
+    const char *alias_name,
+    const ParseNode *import_node)
 {
     ParseNode *root;
     int found = 0;
@@ -468,8 +543,7 @@ static void import_module_symbol(
         mark_visited(ctx, path);
         root = parse_file(path, 0);
         if (root->kind != NODE_S) {
-            fprintf(stderr, "Import error: malformed module root for '%s'\n", path);
-            exit(1);
+            import_error(path, "malformed module root for '%s'", path);
         }
         add_loaded_module(ctx, path, module_name, root);
 
@@ -487,15 +561,13 @@ static void import_module_symbol(
         LoadedModule *loaded = find_loaded_module(ctx, path);
 
         if (loaded == NULL) {
-            fprintf(stderr, "Import error: module tracking failed for '%s'\n", path);
-            exit(1);
+            import_error(path, "module tracking failed for '%s'", path);
         }
         root = loaded->root;
     }
 
     if (root->kind != NODE_S) {
-        fprintf(stderr, "Import error: malformed module root for '%s'\n", path);
-        exit(1);
+        import_error(path, "malformed module root for '%s'", path);
     }
 
     for (size_t i = 0; i < root->child_count; i++) {
@@ -517,8 +589,7 @@ static void import_module_symbol(
                 ParseNode *wrapper = make_alias_wrapper(selected, symbol_name, alias_name);
 
                 if (wrapper == NULL) {
-                    fprintf(stderr, "Import error: unsupported alias target '%s'\n", symbol_name);
-                    exit(1);
+                    import_error_at_node(import_node, "unsupported alias target '%s'", symbol_name);
                 }
                 add_child(ctx->program->emission_root, wrapper);
             }
@@ -526,8 +597,7 @@ static void import_module_symbol(
     }
 
     if (!found) {
-        fprintf(stderr, "Import error: module '%s' has no export '%s'\n", path, symbol_name);
-        exit(1);
+        import_error_at_node(import_node, "module '%s' has no export '%s'", path, symbol_name);
     }
 }
 
@@ -546,7 +616,8 @@ static void load_import_from_node(LoadContext *ctx, const char *current_path, co
             import_path,
             module_name->value,
             imported_name->value,
-            alias_name != NULL ? alias_name->value : NULL);
+            alias_name != NULL ? alias_name->value : NULL,
+            import_stmt);
         free(import_path);
         return;
     }
@@ -566,8 +637,7 @@ static void load_file(LoadContext *ctx, const char *path, const char *module_nam
     mark_visited(ctx, path);
     root = parse_file(path, show_tokens);
     if (root->kind != NODE_S) {
-        fprintf(stderr, "Import error: malformed module root for '%s'\n", path);
-        exit(1);
+        import_error(path, "malformed module root for '%s'", path);
     }
 
     add_loaded_module(ctx, path, module_name, root);
@@ -605,8 +675,7 @@ LoadedProgram *load_program_from_entry(const char *input_path, int show_tokens)
     load_file(&ctx, input_path, NULL, show_tokens);
 
     if (program->module_count == 0) {
-        fprintf(stderr, "Import error: no modules were loaded\n");
-        exit(1);
+        import_error(input_path, "no modules were loaded");
     }
 
     for (size_t i = 0; i < program->module_count; i++) {

@@ -856,12 +856,32 @@ const char *semantic_type_name(ValueType type)
 void semantic_error(const char *message, ...)
 {
     va_list args;
+    va_list copy;
+    int needed;
+    char *buffer;
 
-    fprintf(stderr, "Type error: ");
     va_start(args, message);
-    vfprintf(stderr, message, args);
+    va_copy(copy, args);
+    needed = vsnprintf(NULL, 0, message, copy);
+    va_end(copy);
+    if (needed < 0) {
+        va_end(args);
+        print_basic_diagnostic(stderr, NULL, "Type error", "failed to format type error");
+        exit(1);
+    }
+
+    buffer = malloc((size_t)needed + 1);
+    if (buffer == NULL) {
+        va_end(args);
+        perror("malloc");
+        exit(1);
+    }
+
+    vsnprintf(buffer, (size_t)needed + 1, message, args);
     va_end(args);
-    fprintf(stderr, "\n");
+
+    print_basic_diagnostic(stderr, NULL, "Type error", buffer);
+    free(buffer);
     exit(1);
 }
 
@@ -874,10 +894,26 @@ void semantic_error_at_node(const ParseNode *node, const char *message, ...)
 
     if (node == NULL || node->source_path == NULL || node->line <= 0 || node->column <= 0) {
         va_start(args, message);
-        fprintf(stderr, "Type error: ");
-        vfprintf(stderr, message, args);
-        fprintf(stderr, "\n");
+        va_copy(copy, args);
+        needed = vsnprintf(NULL, 0, message, copy);
+        va_end(copy);
+        if (needed < 0) {
+            va_end(args);
+            print_basic_diagnostic(stderr, node != NULL ? node->source_path : NULL, "Type error", "failed to format type error");
+            exit(1);
+        }
+
+        buffer = malloc((size_t)needed + 1);
+        if (buffer == NULL) {
+            va_end(args);
+            perror("malloc");
+            exit(1);
+        }
+
+        vsnprintf(buffer, (size_t)needed + 1, message, args);
         va_end(args);
+        print_basic_diagnostic(stderr, node != NULL ? node->source_path : NULL, "Type error", buffer);
+        free(buffer);
         exit(1);
     }
 

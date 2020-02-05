@@ -53,6 +53,7 @@ extern const ValueType CODEGEN_ORDERED_TYPES[];
 extern const size_t CODEGEN_ORDERED_TYPE_COUNT;
 
 void codegen_error(const char *message, ...);
+void codegen_error_at_node(const ParseNode *node, const char *message, ...);
 void codegen_emit_indent(CodegenContext *ctx);
 char *codegen_dup_printf(const char *fmt, ...);
 const ParseNode *codegen_expect_child(const ParseNode *node, size_t index, NodeKind kind);

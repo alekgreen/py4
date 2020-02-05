@@ -222,12 +222,12 @@ void print_source_diagnostic(
 {
     int caret_column;
 
-    if (path != NULL && line > 0 && column > 0) {
-        fprintf(stream, "%s:%d:%d: %s: %s\n", path, line, column, kind, message);
-    } else {
-        fprintf(stream, "%s: %s\n", kind, message);
+    if (path == NULL || line <= 0 || column <= 0) {
+        print_basic_diagnostic(stream, path, kind, message);
         return;
     }
+
+    fprintf(stream, "%s:%d:%d: %s: %s\n", path, line, column, kind, message);
 
     if (line_text == NULL || line_text[0] == '\0') {
         return;
@@ -243,6 +243,16 @@ void print_source_diagnostic(
         fputc(line_text[i - 1] == '\t' ? '\t' : ' ', stream);
     }
     fprintf(stream, "^\n");
+}
+
+void print_basic_diagnostic(FILE *stream, const char *path, const char *kind, const char *message)
+{
+    if (path != NULL && path[0] != '\0') {
+        fprintf(stream, "%s: %s: %s\n", path, kind, message);
+        return;
+    }
+
+    fprintf(stream, "%s: %s\n", kind, message);
 }
 
 void print_token_diagnostic(FILE *stream, Token tok, const char *kind, const char *message)
