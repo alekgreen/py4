@@ -114,9 +114,14 @@ void parse_error_at_node(const ParseNode *node, const char *message)
 Token parse_expect_keyword(TokenStream *ts, const char *value)
 {
     Token tok = expect(ts, TOKEN_KEYWORD);
+    char message[128];
 
     if (strcmp(tok.value, value) != 0) {
-        parse_error(tok, "unexpected keyword");
+        snprintf(message, sizeof(message),
+            "expected keyword '%s', got keyword '%s'",
+            value,
+            tok.value);
+        parse_error(tok, message);
     }
 
     return tok;
@@ -368,7 +373,7 @@ ParseNode *parse_STATEMENT_TAIL(TokenStream *ts)
         return node;
     }
 
-    parse_error(look, "unexpected token in statement tail");
+    parse_error(look, "expected '=' or ': Type = expression' after assignment target");
     return NULL;
 }
 
@@ -428,7 +433,7 @@ static ParseNode *parse_IMPORT_STATEMENT(TokenStream *ts)
     }
 
     free_tree(module_node);
-    parse_error(first_tok, "unexpected keyword");
+    parse_error(first_tok, "import statement must start with 'import' or 'from'");
     return NULL;
 }
 

@@ -1977,7 +1977,7 @@ ValueType semantic_infer_primary_type(
     }
 
     if (node->kind != NODE_PRIMARY || node->value == NULL) {
-        semantic_error("unsupported primary expression");
+        semantic_error_at_node(node, "unsupported primary expression form '%s'", node_kind_to_str(node->kind));
     }
 
     switch (node->token_type) {
@@ -1999,7 +1999,7 @@ ValueType semantic_infer_primary_type(
                 type = TYPE_NONE;
                 break;
             }
-            semantic_error_at_node(node, "unexpected keyword '%s' in expression", node->value);
+            semantic_error_at_node(node, "keyword '%s' cannot be used as an expression here", node->value);
             break;
         case TOKEN_IDENTIFIER: {
             VariableBinding *var = semantic_find_variable(scope, node->value);
@@ -2020,7 +2020,9 @@ ValueType semantic_infer_primary_type(
             break;
         }
         default:
-            semantic_error_at_node(node, "unsupported primary token");
+            semantic_error_at_node(node, "unsupported primary token %s ('%s')",
+                token_type_to_str(node->token_type),
+                node->value != NULL ? node->value : "");
     }
 
     semantic_record_node_type(info, node, type);
@@ -2105,7 +2107,7 @@ ValueType semantic_infer_expression_type(
     ValueType rhs_type;
 
     if (expr->kind != NODE_EXPRESSION || expr->child_count == 0) {
-        semantic_error("malformed expression");
+        semantic_error_at_node(expr, "expression is missing operands or operators");
     }
 
     if (expr->child_count == 1) {
@@ -2165,7 +2167,7 @@ ValueType semantic_infer_expression_type(
     }
 
     if (expr->child_count != 3) {
-        semantic_error("malformed expression");
+        semantic_error_at_node(expr, "expression must be unary, binary, or a chained comparison");
     }
 
     lhs_type = semantic_infer_primary_type(info, expr->children[0], scope);

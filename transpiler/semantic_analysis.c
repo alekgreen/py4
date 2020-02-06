@@ -7,7 +7,7 @@
 const ParseNode *semantic_simple_statement_target(const ParseNode *simple_stmt)
 {
     if (simple_stmt == NULL || simple_stmt->child_count == 0) {
-        semantic_error("malformed simple statement");
+        semantic_error_at_node(simple_stmt, "simple statement is missing an assignment target");
     }
     return simple_stmt->children[0];
 }
@@ -602,7 +602,7 @@ static int typecheck_simple_statement(
     }
 
     if (simple_stmt->child_count != 2) {
-        semantic_error("malformed simple statement");
+        semantic_error_at_node(simple_stmt, "simple statement must be an assignment or typed assignment");
     }
 
     const ParseNode *target = semantic_simple_statement_target(simple_stmt);
@@ -1537,7 +1537,8 @@ static int typecheck_statement(
     }
 
     if (payload->kind != NODE_SIMPLE_STATEMENT) {
-        semantic_error("unsupported statement node");
+        semantic_error_at_node(payload, "unsupported statement form '%s' in semantic analysis",
+            node_kind_to_str(payload->kind));
     }
 
     return typecheck_simple_statement(info, payload, scope, current_function);

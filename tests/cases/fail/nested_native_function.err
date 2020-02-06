@@ -1,0 +1,1 @@
+native function declarations are only supported at module scope

@@ -412,7 +412,7 @@ static ValueType parse_type_atom_node(SemanticInfo *info, const ParseNode *node)
     ValueType named_type;
 
     if (node == NULL || node->kind != NODE_PRIMARY || node->value == NULL) {
-        semantic_error("malformed type atom");
+        semantic_error_at_node(node, "expected a type name, qualified type, or container type");
     }
 
     if (node->child_count == 0) {
@@ -951,7 +951,9 @@ void semantic_error_at_node(const ParseNode *node, const char *message, ...)
 const ParseNode *semantic_expect_child(const ParseNode *node, size_t index, NodeKind kind)
 {
     if (node == NULL || index >= node->child_count || node->children[index]->kind != kind) {
-        semantic_error("malformed AST");
+        semantic_error_at_node(node, "internal AST shape error while reading %s child %zu",
+            node != NULL ? node_kind_to_str(node->kind) : "UNKNOWN",
+            index);
     }
     return node->children[index];
 }
@@ -959,7 +961,7 @@ const ParseNode *semantic_expect_child(const ParseNode *node, size_t index, Node
 const ParseNode *semantic_statement_payload(const ParseNode *statement)
 {
     if (statement == NULL || statement->kind != NODE_STATEMENT || statement->child_count != 1) {
-        semantic_error("malformed statement node");
+        semantic_error_at_node(statement, "statement wrapper must contain exactly one payload node");
     }
     return statement->children[0];
 }
@@ -1649,7 +1651,7 @@ ValueType semantic_parse_type_node(SemanticInfo *info, const ParseNode *type_nod
     ValueType type = 0;
 
     if (type_node == NULL || type_node->kind != NODE_TYPE || type_node->child_count == 0) {
-        semantic_error("malformed type annotation");
+        semantic_error_at_node(type_node, "expected a non-empty type annotation");
     }
 
     if (type_node->child_count == 2) {

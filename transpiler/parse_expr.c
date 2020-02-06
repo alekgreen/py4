@@ -138,13 +138,13 @@ static char *build_type_node_name(const ParseNode *node)
     size_t used = 0;
 
     if (node == NULL) {
-        parse_error_at_node(node, "missing type node");
+        parse_error_at_node(node, "missing type annotation node");
     }
     if (node->kind == NODE_PRIMARY) {
         return parse_dup_string(node->value);
     }
     if (node->kind != NODE_TYPE) {
-        parse_error_at_node(node, "malformed type node");
+        parse_error_at_node(node, "expected a type annotation while building a type name");
     }
 
     for (size_t i = 0; i < node->child_count; i++) {
