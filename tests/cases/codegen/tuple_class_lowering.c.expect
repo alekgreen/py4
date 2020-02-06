@@ -1,0 +1,3 @@
+} Point;
+} py4_tuple_Point_str;
+static void py4_print_Point(Point value);

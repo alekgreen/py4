@@ -1,0 +1,3 @@
+static Py4Dict_str_int *py4_dict_str_int_new(void)
+static Py4List_str *py4_dict_str_int_keys(Py4Dict_str_int *dict)
+static Py4List_str *py4_list_str_new(void)
