@@ -164,6 +164,33 @@ static void codegen_emit_base_self_writeback(
 
 static int node_is_owned_ref_value(CodegenContext *ctx, const ParseNode *node);
 
+void codegen_assert_cleanup_scope(CodegenContext *ctx, const char *action)
+{
+    if (ctx->cleanup_scope_count == 0) {
+        codegen_error("cannot %s without an active cleanup scope", action);
+    }
+}
+
+void codegen_assert_cleanup_state(CodegenContext *ctx, const char *action)
+{
+    size_t start;
+
+    if (ctx->cleanup_scope_count > MAX_SCOPE_DEPTH) {
+        codegen_error("cleanup scope stack overflow while %s", action);
+    }
+    if (ctx->managed_local_count > MAX_REF_LOCALS) {
+        codegen_error("managed local registry overflow while %s", action);
+    }
+    if (ctx->cleanup_scope_count == 0) {
+        return;
+    }
+
+    start = ctx->cleanup_scope_starts[ctx->cleanup_scope_count - 1];
+    if (start > ctx->managed_local_count) {
+        codegen_error("cleanup scope start exceeds managed local count while %s", action);
+    }
+}
+
 char *codegen_next_temp_name(CodegenContext *ctx)
 {
     return codegen_dup_printf("py4_tmp_%d", ctx->temp_counter++);
@@ -171,10 +198,12 @@ char *codegen_next_temp_name(CodegenContext *ctx)
 
 void codegen_push_cleanup_scope(CodegenContext *ctx)
 {
+    codegen_assert_cleanup_state(ctx, "pushing a cleanup scope");
     if (ctx->cleanup_scope_count >= MAX_SCOPE_DEPTH) {
         codegen_error("cleanup scope nesting too deep");
     }
     ctx->cleanup_scope_starts[ctx->cleanup_scope_count++] = ctx->managed_local_count;
+    codegen_assert_cleanup_state(ctx, "pushing a cleanup scope");
 }
 
 void codegen_emit_value_retain(CodegenContext *ctx, ValueType type, const char *name)
@@ -274,18 +303,31 @@ void codegen_register_ref_local(CodegenContext *ctx, const char *name, ValueType
     if (!semantic_type_needs_management(type)) {
         return;
     }
+    if (name == NULL || name[0] == '\0') {
+        codegen_error("cannot register managed local without a name");
+    }
+    codegen_assert_cleanup_scope(ctx, "register a managed local");
+    codegen_assert_cleanup_state(ctx, "registering a managed local");
 
     if (ctx->managed_local_count >= MAX_REF_LOCALS) {
         codegen_error("too many live managed locals");
     }
 
+    for (size_t i = ctx->cleanup_scope_starts[ctx->cleanup_scope_count - 1]; i < ctx->managed_local_count; i++) {
+        if (strcmp(ctx->managed_locals[i].name, name) == 0) {
+            codegen_error("managed local '%s' registered twice in the same cleanup scope", name);
+        }
+    }
+
     ctx->managed_locals[ctx->managed_local_count].name = name;
     ctx->managed_locals[ctx->managed_local_count].type = type;
     ctx->managed_local_count++;
+    codegen_assert_cleanup_state(ctx, "registering a managed local");
 }
 
 void codegen_emit_live_ref_cleanup(CodegenContext *ctx)
 {
+    codegen_assert_cleanup_state(ctx, "emitting live managed cleanup");
     for (size_t i = ctx->managed_local_count; i > 0; i--) {
         codegen_emit_value_release(ctx, ctx->managed_locals[i - 1].type, ctx->managed_locals[i - 1].name);
     }
@@ -295,15 +337,20 @@ void codegen_pop_cleanup_scope(CodegenContext *ctx)
 {
     size_t start;
 
+    codegen_assert_cleanup_state(ctx, "popping a cleanup scope");
     if (ctx->cleanup_scope_count == 0) {
         codegen_error("cleanup scope stack underflow");
     }
 
     start = ctx->cleanup_scope_starts[--ctx->cleanup_scope_count];
+    if (start > ctx->managed_local_count) {
+        codegen_error("cleanup scope start exceeds managed local count while popping a cleanup scope");
+    }
     for (size_t i = ctx->managed_local_count; i > start; i--) {
         codegen_emit_value_release(ctx, ctx->managed_locals[i - 1].type, ctx->managed_locals[i - 1].name);
     }
     ctx->managed_local_count = start;
+    codegen_assert_cleanup_state(ctx, "popping a cleanup scope");
 }
 
 int codegen_expression_is_owned_ref(CodegenContext *ctx, const ParseNode *expr)

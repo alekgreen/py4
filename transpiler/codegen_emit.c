@@ -1956,6 +1956,7 @@ static void emit_return_statement(CodegenContext *ctx, const ParseNode *return_s
 
 static void codegen_push_loop(CodegenContext *ctx, int loop_id)
 {
+    codegen_assert_cleanup_scope(ctx, "enter a loop cleanup region");
     if (ctx->loop_count >= MAX_LOOP_DEPTH) {
         codegen_error("loop nesting too deep");
     }
@@ -1977,6 +1978,7 @@ static void emit_loop_jump(CodegenContext *ctx, const char *keyword, int action)
     if (ctx->loop_count == 0) {
         codegen_error("%s is not valid outside a loop", keyword);
     }
+    codegen_assert_cleanup_scope(ctx, "emit a loop jump");
 
     loop_id = ctx->loop_ids[ctx->loop_count - 1];
     codegen_emit_indent(ctx);

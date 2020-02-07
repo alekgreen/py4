@@ -150,6 +150,8 @@ void codegen_emit_ref_incref(CodegenContext *ctx, ValueType type, const char *na
 void codegen_emit_ref_decref(CodegenContext *ctx, ValueType type, const char *name);
 void codegen_emit_value_retain(CodegenContext *ctx, ValueType type, const char *name);
 void codegen_emit_value_release(CodegenContext *ctx, ValueType type, const char *name);
+void codegen_assert_cleanup_scope(CodegenContext *ctx, const char *action);
+void codegen_assert_cleanup_state(CodegenContext *ctx, const char *action);
 void codegen_register_ref_local(CodegenContext *ctx, const char *name, ValueType type);
 void codegen_emit_live_ref_cleanup(CodegenContext *ctx);
 void codegen_pop_cleanup_scope(CodegenContext *ctx);
