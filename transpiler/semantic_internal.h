@@ -172,7 +172,31 @@ const ParseNode *semantic_simple_statement_tail(const ParseNode *simple_stmt);
 const ParseNode *semantic_statement_tail_expression(const ParseNode *statement_tail);
 const ParseNode *semantic_statement_tail_type_node(const ParseNode *statement_tail);
 int semantic_tuple_literal_index(const ParseNode *expr, size_t *index_out);
+int json_from_string_type_supported(ValueType type);
+int json_to_string_type_supported(ValueType type);
 ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name);
+int is_module_private_name(const char *name);
+char *module_ref_string(const ParseNode *node);
+const ModuleInfo *scope_module(Scope *scope);
+ValueType scope_class_type(Scope *scope);
+ImportBinding *find_module_binding_for_receiver(const ModuleInfo *module, const ParseNode *receiver);
+GlobalBinding *resolve_visible_global(SemanticInfo *info, Scope *scope, const char *name);
+ValueType resolve_visible_class_type(SemanticInfo *info, Scope *scope, const char *name);
+ValueType resolve_visible_enum_type(SemanticInfo *info, Scope *scope, const char *name);
+ValueType resolve_module_class_type(
+    SemanticInfo *info,
+    const ModuleInfo *current_module,
+    const char *module_local_name,
+    const char *class_name);
+ValueType resolve_field_access_enum_type(SemanticInfo *info, Scope *scope, const ParseNode *base);
+ValueType resolve_function_call_type(
+    SemanticInfo *info,
+    const ParseNode *call,
+    const char *display_name,
+    const char *function_name,
+    const char *module_name,
+    const ParseNode *arguments,
+    Scope *scope);
 GlobalBinding *semantic_find_global(GlobalBinding *globals, const char *module_name, const char *name);
 void semantic_record_global_target(
     SemanticInfo *info,

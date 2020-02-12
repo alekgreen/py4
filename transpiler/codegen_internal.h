@@ -161,6 +161,10 @@ char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr)
 char *codegen_wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr, ValueType target_type);
 void codegen_emit_expression(CodegenContext *ctx, const ParseNode *expr);
 void codegen_emit_wrapped_expression(CodegenContext *ctx, const ParseNode *expr, ValueType target_type);
+void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters, int is_c_main);
+void emit_function_definition(CodegenContext *ctx, const ParseNode *function_def);
+void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root);
+void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root);
 void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int allow_function_defs);
 void codegen_emit_suite(CodegenContext *ctx, const ParseNode *suite);
 
