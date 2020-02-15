@@ -167,6 +167,8 @@ void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root);
 void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root);
 void emit_native_type_runtime(CodegenContext *ctx);
 void emit_native_function_runtime(CodegenContext *ctx, const ParseNode *root);
+void emit_global_declarations(CodegenContext *ctx, const ParseNode *root);
+void emit_module_init(CodegenContext *ctx, const ParseNode *root);
 void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int allow_function_defs);
 void codegen_emit_suite(CodegenContext *ctx, const ParseNode *suite);
 
