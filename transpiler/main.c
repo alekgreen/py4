@@ -236,7 +236,7 @@ static int run_py4_tests(const char *exe_path, const char *path)
 
 int main(int argc, char **argv)
 {
-    const char *input_path = "example0.p4";
+    const char *input_path = "examples/transpiler_example0.p4";
     int show_tokens = 0;
     int show_tree = 0;
     SemanticInfo *semantic;

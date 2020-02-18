@@ -1,7 +1,41 @@
 CC := gcc
-CFLAGS := -Wall -Wextra -Wpedantic -std=c11
+CFLAGS := -Wall -Wextra -Wpedantic -std=c11 \
+	-Itranspiler \
+	-Itranspiler/frontend \
+	-Itranspiler/semantic \
+	-Itranspiler/codegen \
+	-Itranspiler/codegen/native
 TARGET := py4
-PY4_SRC := transpiler/main.c transpiler/lexer.c transpiler/parse.c transpiler/parse_expr.c transpiler/token.c transpiler/module_loader.c transpiler/codegen_list.c transpiler/codegen_types.c transpiler/codegen_expr.c transpiler/codegen_runtime.c transpiler/codegen_emit.c transpiler/codegen_functions.c transpiler/codegen_native.c transpiler/codegen_native_math.c transpiler/codegen_native_strings.c transpiler/codegen_native_chars.c transpiler/codegen_native_io.c transpiler/codegen_native_json.c transpiler/codegen_statements.c transpiler/semantic_types.c transpiler/semantic_symbols.c transpiler/semantic_resolve.c transpiler/semantic_expr.c transpiler/semantic_analysis.c
+FRONTEND_SRC := \
+	transpiler/frontend/token.c \
+	transpiler/frontend/lexer.c \
+	transpiler/frontend/parse.c \
+	transpiler/frontend/parse_expr.c \
+	transpiler/frontend/module_loader.c
+
+SEMANTIC_SRC := \
+	transpiler/semantic/semantic_types.c \
+	transpiler/semantic/semantic_symbols.c \
+	transpiler/semantic/semantic_resolve.c \
+	transpiler/semantic/semantic_expr.c \
+	transpiler/semantic/semantic_analysis.c
+
+CODEGEN_SRC := \
+	transpiler/codegen/codegen_list.c \
+	transpiler/codegen/codegen_types.c \
+	transpiler/codegen/codegen_expr.c \
+	transpiler/codegen/codegen_runtime.c \
+	transpiler/codegen/codegen_emit.c \
+	transpiler/codegen/codegen_functions.c \
+	transpiler/codegen/codegen_statements.c \
+	transpiler/codegen/native/codegen_native.c \
+	transpiler/codegen/native/codegen_native_math.c \
+	transpiler/codegen/native/codegen_native_strings.c \
+	transpiler/codegen/native/codegen_native_chars.c \
+	transpiler/codegen/native/codegen_native_io.c \
+	transpiler/codegen/native/codegen_native_json.c
+
+PY4_SRC := transpiler/main.c $(FRONTEND_SRC) $(SEMANTIC_SRC) $(CODEGEN_SRC)
 
 INPUT ?= examples/functions.p4
 OUTPUT ?= out.c
