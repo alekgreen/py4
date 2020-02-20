@@ -1,41 +1,22 @@
 CC := gcc
-CFLAGS := -Wall -Wextra -Wpedantic -std=c11 \
+CPPFLAGS := \
 	-Itranspiler \
 	-Itranspiler/frontend \
 	-Itranspiler/semantic \
 	-Itranspiler/codegen \
 	-Itranspiler/codegen/native
+CFLAGS := -Wall -Wextra -Wpedantic -std=c11
 TARGET := py4
-FRONTEND_SRC := \
-	transpiler/frontend/token.c \
-	transpiler/frontend/lexer.c \
-	transpiler/frontend/parse.c \
-	transpiler/frontend/parse_expr.c \
-	transpiler/frontend/module_loader.c
-
-SEMANTIC_SRC := \
-	transpiler/semantic/semantic_types.c \
-	transpiler/semantic/semantic_symbols.c \
-	transpiler/semantic/semantic_resolve.c \
-	transpiler/semantic/semantic_expr.c \
-	transpiler/semantic/semantic_analysis.c
-
-CODEGEN_SRC := \
-	transpiler/codegen/codegen_list.c \
-	transpiler/codegen/codegen_types.c \
-	transpiler/codegen/codegen_expr.c \
-	transpiler/codegen/codegen_runtime.c \
-	transpiler/codegen/codegen_emit.c \
-	transpiler/codegen/codegen_functions.c \
-	transpiler/codegen/codegen_statements.c \
-	transpiler/codegen/native/codegen_native.c \
-	transpiler/codegen/native/codegen_native_math.c \
-	transpiler/codegen/native/codegen_native_strings.c \
-	transpiler/codegen/native/codegen_native_chars.c \
-	transpiler/codegen/native/codegen_native_io.c \
-	transpiler/codegen/native/codegen_native_json.c
-
-PY4_SRC := transpiler/main.c $(FRONTEND_SRC) $(SEMANTIC_SRC) $(CODEGEN_SRC)
+MAIN_SRC := transpiler/main.c
+FRONTEND_SRC := $(sort $(wildcard transpiler/frontend/*.c))
+SEMANTIC_SRC := $(sort $(wildcard transpiler/semantic/*.c))
+CODEGEN_SRC := $(sort $(wildcard transpiler/codegen/*.c))
+CODEGEN_NATIVE_SRC := $(sort $(wildcard transpiler/codegen/native/*.c))
+PY4_SRC := $(MAIN_SRC) $(FRONTEND_SRC) $(SEMANTIC_SRC) $(CODEGEN_SRC) $(CODEGEN_NATIVE_SRC)
+BUILD_DIR := build
+OBJ_DIR := $(BUILD_DIR)/obj
+PY4_OBJ := $(patsubst %.c,$(OBJ_DIR)/%.o,$(PY4_SRC))
+PY4_DEP := $(PY4_OBJ:.o=.d)
 
 INPUT ?= examples/functions.p4
 OUTPUT ?= out.c
@@ -46,8 +27,12 @@ GENERATED_RUNTIME_SRC := runtime/vendor/cjson/cJSON.c
 
 all: $(TARGET)
 
-$(TARGET): $(PY4_SRC)
-	$(CC) $(CFLAGS) $(PY4_SRC) -o $(TARGET)
+$(TARGET): $(PY4_OBJ)
+	$(CC) $(PY4_OBJ) -o $(TARGET)
+
+$(OBJ_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 transpile: $(TARGET)
 	./$(TARGET) $(INPUT) > $(OUTPUT)
@@ -60,4 +45,6 @@ test: $(TARGET)
 	bash tests/run_tests.sh
 
 clean:
-	rm -f $(TARGET) $(OUTPUT) $(RUN_TARGET)
+	rm -rf $(TARGET) $(BUILD_DIR) $(OUTPUT) $(RUN_TARGET)
+
+-include $(PY4_DEP)
