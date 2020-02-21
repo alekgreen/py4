@@ -2,8 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "codegen_internal.h"
-#include "semantic_internal.h"
+#include "codegen_native_internal.h"
 
 int emit_native_chars_function_definition(
     CodegenContext *ctx,

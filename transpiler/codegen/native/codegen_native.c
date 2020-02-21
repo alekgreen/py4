@@ -2,8 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "codegen_internal.h"
-#include "semantic_internal.h"
+#include "codegen_native_internal.h"
 
 static int native_type_runtime_emitted(ValueType type)
 {

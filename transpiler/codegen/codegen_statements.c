@@ -3,7 +3,6 @@
 #include <string.h>
 
 #include "codegen_internal.h"
-#include "semantic_internal.h"
 
 static void codegen_module_name_from_path(const char *path, char *buffer, size_t size)
 {

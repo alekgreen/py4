@@ -1,7 +1,7 @@
 #include <string.h>
 
 #include "codegen_internal.h"
-#include "semantic_internal.h"
+#include "semantic_codegen_internal.h"
 
 static size_t class_member_start_index(const ParseNode *class_def)
 {
@@ -220,7 +220,10 @@ static void emit_synthetic_method_signature(CodegenContext *ctx, const MethodInf
 
 static void emit_synthetic_method_definition(CodegenContext *ctx, const MethodInfo *method)
 {
-    MethodInfo *source_method = semantic_find_method(ctx->semantic->methods, method->source_owner_type, method->name);
+    MethodInfo *source_method = semantic_find_method(
+        semantic_methods(ctx->semantic),
+        method->source_owner_type,
+        method->name);
     size_t field_count = semantic_class_field_count(method->source_owner_type);
 
     if (source_method == NULL) {
@@ -320,7 +323,7 @@ void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
                     wrote_any = 1;
                 }
             }
-            for (MethodInfo *method = ctx->semantic->methods; method != NULL; method = method->next) {
+            for (MethodInfo *method = semantic_methods(ctx->semantic); method != NULL; method = method->next) {
                 if (method->owner_type == class_type && method->node == NULL) {
                     emit_synthetic_method_signature(ctx, method, 1);
                     wrote_any = 1;
@@ -374,7 +377,7 @@ void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
                     fputc('\n', ctx->out);
                 }
             }
-            for (MethodInfo *method = ctx->semantic->methods; method != NULL; method = method->next) {
+            for (MethodInfo *method = semantic_methods(ctx->semantic); method != NULL; method = method->next) {
                 if (method->owner_type == class_type && method->node == NULL) {
                     emit_synthetic_method_definition(ctx, method);
                     fputc('\n', ctx->out);

@@ -1,6 +1,7 @@
 #ifndef SEMANTIC_INTERNAL_H
 #define SEMANTIC_INTERNAL_H
 
+#include "semantic_codegen_internal.h"
 #include "semantic.h"
 
 typedef struct VariableBinding {
@@ -47,18 +48,6 @@ typedef struct EnumVariantTargetInfo {
     size_t variant_index;
     struct EnumVariantTargetInfo *next;
 } EnumVariantTargetInfo;
-
-typedef struct MethodInfo {
-    ValueType owner_type;
-    ValueType source_owner_type;
-    const char *name;
-    char *c_name;
-    ValueType return_type;
-    size_t param_count;
-    ValueType *param_types;
-    const ParseNode *node;
-    struct MethodInfo *next;
-} MethodInfo;
 
 typedef struct {
     const char *name;
@@ -151,7 +140,6 @@ void semantic_record_enum_variant_target(
     ValueType enum_type,
     size_t variant_index);
 EnumVariantTargetInfo *semantic_find_enum_variant_target(const SemanticInfo *info, const ParseNode *node);
-MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, const char *name);
 VariableBinding *semantic_find_variable(Scope *scope, const char *name);
 void semantic_bind_variable(Scope *scope, const char *name, ValueType type);
 void semantic_free_scope_bindings(VariableBinding *vars);

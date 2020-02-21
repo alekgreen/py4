@@ -165,50 +165,6 @@ void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters, int i
 void emit_function_definition(CodegenContext *ctx, const ParseNode *function_def);
 void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root);
 void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root);
-void emit_native_type_runtime(CodegenContext *ctx);
-void emit_native_io_type_runtime(CodegenContext *ctx);
-void emit_native_json_type_runtime(CodegenContext *ctx);
-void emit_native_function_runtime(CodegenContext *ctx, const ParseNode *root);
-int emit_native_math_function_definition(
-    CodegenContext *ctx,
-    const char *module_name,
-    const ParseNode *name,
-    const ParseNode *parameters,
-    const char *c_name,
-    ValueType return_type,
-    ValueType first_param_type);
-int emit_native_strings_function_definition(
-    CodegenContext *ctx,
-    const char *module_name,
-    const ParseNode *name,
-    const ParseNode *parameters,
-    const char *c_name,
-    ValueType return_type,
-    ValueType first_param_type);
-int emit_native_chars_function_definition(
-    CodegenContext *ctx,
-    const char *module_name,
-    const ParseNode *name,
-    const ParseNode *parameters,
-    const char *c_name,
-    ValueType return_type,
-    ValueType first_param_type);
-int emit_native_io_function_definition(
-    CodegenContext *ctx,
-    const char *module_name,
-    const ParseNode *name,
-    const ParseNode *parameters,
-    const char *c_name,
-    ValueType return_type,
-    ValueType first_param_type);
-int emit_native_json_function_definition(
-    CodegenContext *ctx,
-    const char *module_name,
-    const ParseNode *name,
-    const ParseNode *parameters,
-    const char *c_name,
-    ValueType return_type,
-    ValueType first_param_type);
 void emit_global_declarations(CodegenContext *ctx, const ParseNode *root);
 void emit_module_init(CodegenContext *ctx, const ParseNode *root);
 void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int allow_function_defs);

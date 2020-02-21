@@ -431,6 +431,11 @@ MethodInfo *semantic_find_method(MethodInfo *methods, ValueType owner_type, cons
     return NULL;
 }
 
+MethodInfo *semantic_methods(const SemanticInfo *info)
+{
+    return info == NULL ? NULL : info->methods;
+}
+
 const char *semantic_method_c_name(const SemanticInfo *info, ValueType owner_type, const char *method_name)
 {
     MethodInfo *method = semantic_find_method(info->methods, owner_type, method_name);
