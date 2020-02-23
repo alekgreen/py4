@@ -1,4 +1,7 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,6 +128,124 @@ static int run_command(const char *command)
     return 1;
 }
 
+static int run_process(char *const argv[])
+{
+    pid_t pid = fork();
+    int status;
+
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        fprintf(stderr, "failed to execute '%s': %s\n", argv[0], strerror(errno));
+        _exit(127);
+    }
+
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        return 1;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    return 1;
+}
+
+static FILE *open_output_file(const char *path)
+{
+    FILE *out = fopen(path, "w");
+
+    if (out == NULL) {
+        perror(path);
+        exit(1);
+    }
+    return out;
+}
+
+static char *default_binary_output_path(const char *input_path)
+{
+    const char *base_name = strrchr(input_path, '/');
+    size_t len;
+    char *path;
+
+    base_name = base_name == NULL ? input_path : base_name + 1;
+    len = strlen(base_name);
+    if (len >= 3 && strcmp(base_name + len - 3, ".p4") == 0) {
+        len -= 3;
+    }
+
+    path = malloc(len + 1);
+    if (path == NULL) {
+        fprintf(stderr, "out of memory\n");
+        exit(1);
+    }
+
+    memcpy(path, base_name, len);
+    path[len] = '\0';
+    return path;
+}
+
+static int compile_generated_c_file(const char *backend, const char *c_path, const char *output_path)
+{
+    char *const compile_argv[] = {
+        (char *)backend,
+        "-std=c11",
+        "-x",
+        "c",
+        (char *)c_path,
+        "runtime/vendor/cjson/cJSON.c",
+        "-o",
+        (char *)output_path,
+        NULL
+    };
+
+    return run_process(compile_argv);
+}
+
+static int emit_binary_program(
+    const char *backend,
+    const char *output_path,
+    const LoadedProgram *program,
+    const SemanticInfo *semantic)
+{
+    char temp_template[] = "/tmp/py4-build-XXXXXX";
+    FILE *generated_c;
+    int fd = mkstemp(temp_template);
+    int status;
+
+    if (fd < 0) {
+        perror("mkstemp");
+        return 1;
+    }
+
+    generated_c = fdopen(fd, "w");
+    if (generated_c == NULL) {
+        perror("fdopen");
+        close(fd);
+        unlink(temp_template);
+        return 1;
+    }
+
+    emit_c_program(generated_c, program, semantic);
+    if (fclose(generated_c) != 0) {
+        perror("fclose");
+        unlink(temp_template);
+        return 1;
+    }
+
+    status = compile_generated_c_file(backend, temp_template, output_path);
+    if (status != 0) {
+        fprintf(stderr, "backend compilation failed; kept generated C at %s\n", temp_template);
+        return status;
+    }
+
+    unlink(temp_template);
+    return 0;
+}
+
 static int run_py4_test_file(const char *exe_path, const char *test_path, const char *tmp_dir)
 {
     char generated_c[1024];
@@ -144,7 +265,7 @@ static int run_py4_test_file(const char *exe_path, const char *test_path, const 
 
     snprintf(command,
         sizeof(command),
-        "\"%s\" \"%s\" > \"%s\"",
+        "\"%s\" --emit-c \"%s\" > \"%s\"",
         exe_path,
         test_path,
         generated_c);
@@ -237,10 +358,15 @@ static int run_py4_tests(const char *exe_path, const char *path)
 int main(int argc, char **argv)
 {
     const char *input_path = "examples/transpiler_example0.p4";
+    const char *output_path = NULL;
+    const char *backend = "gcc";
+    int emit_c_output = 0;
     int show_tokens = 0;
     int show_tree = 0;
     SemanticInfo *semantic;
     LoadedProgram *program;
+    char *owned_output_path = NULL;
+    int exit_code = 0;
 
     if (argc >= 2 && strcmp(argv[1], "test") == 0) {
         const char *test_path = argc >= 3 ? argv[2] : "tests/py4";
@@ -252,9 +378,30 @@ int main(int argc, char **argv)
             show_tokens = 1;
         } else if (strcmp(argv[i], "--tree") == 0) {
             show_tree = 1;
+        } else if (strcmp(argv[i], "--emit-c") == 0) {
+            emit_c_output = 1;
+        } else if (strcmp(argv[i], "--compile") == 0) {
+            /* Compile is now the default mode; keep this as an explicit alias. */
+        } else if (strcmp(argv[i], "--backend") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "--backend requires a compiler name\n");
+                return 1;
+            }
+            backend = argv[++i];
+        } else if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "%s requires a path\n", argv[i]);
+                return 1;
+            }
+            output_path = argv[++i];
         } else {
             input_path = argv[i];
         }
+    }
+
+    if (backend[0] == '\0') {
+        fprintf(stderr, "backend name cannot be empty\n");
+        return 1;
     }
 
     program = load_program_from_entry(input_path, show_tokens);
@@ -263,9 +410,27 @@ int main(int argc, char **argv)
     }
 
     semantic = analyze_program(program);
-    emit_c_program(stdout, program, semantic);
+    if (emit_c_output) {
+        if (output_path != NULL) {
+            FILE *out = open_output_file(output_path);
+            emit_c_program(out, program, semantic);
+            if (fclose(out) != 0) {
+                perror("fclose");
+                exit_code = 1;
+            }
+        } else {
+            emit_c_program(stdout, program, semantic);
+        }
+    } else {
+        if (output_path == NULL) {
+            owned_output_path = default_binary_output_path(input_path);
+            output_path = owned_output_path;
+        }
+        exit_code = emit_binary_program(backend, output_path, program, semantic);
+    }
 
     free_semantic_info(semantic);
     free_loaded_program(program);
-    return 0;
+    free(owned_output_path);
+    return exit_code;
 }

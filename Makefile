@@ -35,10 +35,10 @@ $(OBJ_DIR)/%.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
 transpile: $(TARGET)
-	./$(TARGET) $(INPUT) > $(OUTPUT)
+	./$(TARGET) --emit-c $(INPUT) > $(OUTPUT)
 
-run: transpile
-	$(CC) -std=c11 $(OUTPUT) $(GENERATED_RUNTIME_SRC) -o $(RUN_TARGET)
+run: $(TARGET)
+	./$(TARGET) -o $(RUN_TARGET) $(INPUT)
 	$(if $(filter /%,$(RUN_TARGET)),$(RUN_TARGET),./$(RUN_TARGET))
 
 test: $(TARGET)

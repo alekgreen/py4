@@ -19,6 +19,72 @@ trap cleanup EXIT
 pass_count=0
 fail_count=0
 
+run_cli_compile_checks() {
+    local case_file expected default_bin clang_bin
+
+    case_file="$ROOT_DIR/tests/cases/ok/functions_and_calls.p4"
+    expected="$(cat "${case_file%.p4}.out")"
+    default_bin="$TMP_DIR/cli-default-bin"
+
+    if ! "$ROOT_DIR/py4" -o "$default_bin" "$case_file" >"$TMP_DIR/cli-default.stdout" 2>"$TMP_DIR/cli-default.stderr"; then
+        printf 'FAIL cli/compile_default: py4 default compile failed\n'
+        sed 's/^/    /' "$TMP_DIR/cli-default.stderr"
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    if [[ "$("$default_bin")" != "$expected" ]]; then
+        printf 'FAIL cli/compile_default: compiled binary output mismatch\n'
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    printf 'PASS cli/compile_default\n'
+    pass_count=$((pass_count + 1))
+
+    if ! "$ROOT_DIR/py4" --emit-c "$case_file" >"$TMP_DIR/cli-emit.c" 2>"$TMP_DIR/cli-emit.stderr"; then
+        printf 'FAIL cli/emit_c: py4 --emit-c failed\n'
+        sed 's/^/    /' "$TMP_DIR/cli-emit.stderr"
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    if ! gcc -std=c11 "$TMP_DIR/cli-emit.c" "$GENERATED_RUNTIME_SRC" -o "$TMP_DIR/cli-emit-bin" >"$TMP_DIR/cli-emit.gcc.log" 2>&1; then
+        printf 'FAIL cli/emit_c: emitted C did not compile\n'
+        cat "$TMP_DIR/cli-emit.gcc.log"
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    if [[ "$("$TMP_DIR/cli-emit-bin")" != "$expected" ]]; then
+        printf 'FAIL cli/emit_c: emitted C binary output mismatch\n'
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    printf 'PASS cli/emit_c\n'
+    pass_count=$((pass_count + 1))
+
+    if command -v clang >/dev/null 2>&1; then
+        clang_bin="$TMP_DIR/cli-clang-bin"
+        if ! "$ROOT_DIR/py4" --backend clang -o "$clang_bin" "$case_file" >"$TMP_DIR/cli-clang.stdout" 2>"$TMP_DIR/cli-clang.stderr"; then
+            printf 'FAIL cli/compile_clang: py4 default compile with clang failed\n'
+            sed 's/^/    /' "$TMP_DIR/cli-clang.stderr"
+            fail_count=$((fail_count + 1))
+            return
+        fi
+
+        if [[ "$("$clang_bin")" != "$expected" ]]; then
+            printf 'FAIL cli/compile_clang: compiled binary output mismatch\n'
+            fail_count=$((fail_count + 1))
+            return
+        fi
+
+        printf 'PASS cli/compile_clang\n'
+        pass_count=$((pass_count + 1))
+    fi
+}
+
 run_ok_case() {
     local case_file="$1"
     local base_name generated_c generated_bin expected actual
@@ -28,7 +94,7 @@ run_ok_case() {
     generated_bin="$TMP_DIR/${base_name}"
     expected="$(cat "${case_file%.p4}.out")"
 
-    if ! "$ROOT_DIR/py4" "$case_file" > "$generated_c"; then
+    if ! "$ROOT_DIR/py4" --emit-c "$case_file" > "$generated_c"; then
         printf 'FAIL ok/%s: transpiler exited with failure\n' "$base_name"
         fail_count=$((fail_count + 1))
         return
@@ -62,7 +128,7 @@ run_fail_case() {
     stderr_file="$TMP_DIR/${base_name}.stderr"
     expected="$(cat "${case_file%.p4}.err")"
 
-    if "$ROOT_DIR/py4" "$case_file" >"$TMP_DIR/${base_name}.stdout" 2>"$stderr_file"; then
+    if "$ROOT_DIR/py4" --emit-c "$case_file" >"$TMP_DIR/${base_name}.stdout" 2>"$stderr_file"; then
         printf 'FAIL fail/%s: transpiler succeeded unexpectedly\n' "$base_name"
         fail_count=$((fail_count + 1))
         return
@@ -91,7 +157,7 @@ run_runtime_fail_case() {
     stderr_file="$TMP_DIR/${base_name}.runtime.stderr"
     expected="$(cat "${case_file%.p4}.err")"
 
-    if ! "$ROOT_DIR/py4" "$case_file" > "$generated_c"; then
+    if ! "$ROOT_DIR/py4" --emit-c "$case_file" > "$generated_c"; then
         printf 'FAIL runtime_fail/%s: transpiler exited with failure\n' "$base_name"
         fail_count=$((fail_count + 1))
         return
@@ -133,7 +199,7 @@ run_codegen_case() {
     expect_file="${case_file%.p4}.c.expect"
     gcc_log="$TMP_DIR/${base_name}.codegen.gcc.log"
 
-    if ! "$ROOT_DIR/py4" "$case_file" > "$generated_c"; then
+    if ! "$ROOT_DIR/py4" --emit-c "$case_file" > "$generated_c"; then
         printf 'FAIL codegen/%s: transpiler exited with failure\n' "$base_name"
         fail_count=$((fail_count + 1))
         return
@@ -188,6 +254,8 @@ for case_file in "$CODEGEN_DIR"/*.p4; do
     [[ -f "${case_file%.p4}.c.expect" ]] || continue
     run_codegen_case "$case_file"
 done
+
+run_cli_compile_checks
 
 printf '\n%d passed, %d failed\n' "$pass_count" "$fail_count"
 
