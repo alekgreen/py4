@@ -20,7 +20,7 @@ pass_count=0
 fail_count=0
 
 run_cli_compile_checks() {
-    local case_file expected default_bin clang_bin
+    local case_file expected default_bin release_bin opt3_bin clang_bin
 
     case_file="$ROOT_DIR/tests/cases/ok/functions_and_calls.p4"
     expected="$(cat "${case_file%.p4}.out")"
@@ -40,6 +40,40 @@ run_cli_compile_checks() {
     fi
 
     printf 'PASS cli/compile_default\n'
+    pass_count=$((pass_count + 1))
+
+    release_bin="$TMP_DIR/cli-release-bin"
+    if ! "$ROOT_DIR/py4" --release -o "$release_bin" "$case_file" >"$TMP_DIR/cli-release.stdout" 2>"$TMP_DIR/cli-release.stderr"; then
+        printf 'FAIL cli/compile_release: py4 --release failed\n'
+        sed 's/^/    /' "$TMP_DIR/cli-release.stderr"
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    if [[ "$("$release_bin")" != "$expected" ]]; then
+        printf 'FAIL cli/compile_release: compiled binary output mismatch\n'
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    printf 'PASS cli/compile_release\n'
+    pass_count=$((pass_count + 1))
+
+    opt3_bin="$TMP_DIR/cli-opt3-bin"
+    if ! "$ROOT_DIR/py4" --opt-level 3 -o "$opt3_bin" "$case_file" >"$TMP_DIR/cli-opt3.stdout" 2>"$TMP_DIR/cli-opt3.stderr"; then
+        printf 'FAIL cli/compile_opt3: py4 --opt-level 3 failed\n'
+        sed 's/^/    /' "$TMP_DIR/cli-opt3.stderr"
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    if [[ "$("$opt3_bin")" != "$expected" ]]; then
+        printf 'FAIL cli/compile_opt3: compiled binary output mismatch\n'
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    printf 'PASS cli/compile_opt3\n'
     pass_count=$((pass_count + 1))
 
     if ! "$ROOT_DIR/py4" --emit-c "$case_file" >"$TMP_DIR/cli-emit.c" 2>"$TMP_DIR/cli-emit.stderr"; then

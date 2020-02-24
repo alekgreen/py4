@@ -188,25 +188,57 @@ static char *default_binary_output_path(const char *input_path)
     return path;
 }
 
-static int compile_generated_c_file(const char *backend, const char *c_path, const char *output_path)
+static const char *backend_optimization_flag(const char *level)
 {
-    char *const compile_argv[] = {
-        (char *)backend,
-        "-std=c11",
-        "-x",
-        "c",
-        (char *)c_path,
-        "runtime/vendor/cjson/cJSON.c",
-        "-o",
-        (char *)output_path,
-        NULL
-    };
+    if (strcmp(level, "0") == 0) {
+        return "-O0";
+    }
+    if (strcmp(level, "1") == 0) {
+        return "-O1";
+    }
+    if (strcmp(level, "2") == 0) {
+        return "-O2";
+    }
+    if (strcmp(level, "3") == 0) {
+        return "-O3";
+    }
+    if (strcmp(level, "s") == 0) {
+        return "-Os";
+    }
+    if (strcmp(level, "z") == 0) {
+        return "-Oz";
+    }
+    return NULL;
+}
+
+static int compile_generated_c_file(
+    const char *backend,
+    const char *backend_optimization,
+    const char *c_path,
+    const char *output_path)
+{
+    char *compile_argv[10];
+    size_t argc = 0;
+
+    compile_argv[argc++] = (char *)backend;
+    if (backend_optimization != NULL) {
+        compile_argv[argc++] = (char *)backend_optimization;
+    }
+    compile_argv[argc++] = "-std=c11";
+    compile_argv[argc++] = "-x";
+    compile_argv[argc++] = "c";
+    compile_argv[argc++] = (char *)c_path;
+    compile_argv[argc++] = "runtime/vendor/cjson/cJSON.c";
+    compile_argv[argc++] = "-o";
+    compile_argv[argc++] = (char *)output_path;
+    compile_argv[argc] = NULL;
 
     return run_process(compile_argv);
 }
 
 static int emit_binary_program(
     const char *backend,
+    const char *backend_optimization,
     const char *output_path,
     const LoadedProgram *program,
     const SemanticInfo *semantic)
@@ -236,7 +268,7 @@ static int emit_binary_program(
         return 1;
     }
 
-    status = compile_generated_c_file(backend, temp_template, output_path);
+    status = compile_generated_c_file(backend, backend_optimization, temp_template, output_path);
     if (status != 0) {
         fprintf(stderr, "backend compilation failed; kept generated C at %s\n", temp_template);
         return status;
@@ -360,7 +392,10 @@ int main(int argc, char **argv)
     const char *input_path = "examples/transpiler_example0.p4";
     const char *output_path = NULL;
     const char *backend = "gcc";
+    const char *backend_optimization = NULL;
+    const char *requested_opt_level = NULL;
     int emit_c_output = 0;
+    int release_mode = 0;
     int show_tokens = 0;
     int show_tree = 0;
     SemanticInfo *semantic;
@@ -380,6 +415,14 @@ int main(int argc, char **argv)
             show_tree = 1;
         } else if (strcmp(argv[i], "--emit-c") == 0) {
             emit_c_output = 1;
+        } else if (strcmp(argv[i], "--release") == 0) {
+            release_mode = 1;
+        } else if (strcmp(argv[i], "--opt-level") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "--opt-level requires one of: 0, 1, 2, 3, s, z\n");
+                return 1;
+            }
+            requested_opt_level = argv[++i];
         } else if (strcmp(argv[i], "--compile") == 0) {
             /* Compile is now the default mode; keep this as an explicit alias. */
         } else if (strcmp(argv[i], "--backend") == 0) {
@@ -402,6 +445,16 @@ int main(int argc, char **argv)
     if (backend[0] == '\0') {
         fprintf(stderr, "backend name cannot be empty\n");
         return 1;
+    }
+    if (requested_opt_level != NULL) {
+        backend_optimization = backend_optimization_flag(requested_opt_level);
+        if (backend_optimization == NULL) {
+            fprintf(stderr, "unsupported --opt-level '%s'; expected one of: 0, 1, 2, 3, s, z\n",
+                requested_opt_level);
+            return 1;
+        }
+    } else if (release_mode) {
+        backend_optimization = "-O2";
     }
 
     program = load_program_from_entry(input_path, show_tokens);
@@ -426,7 +479,7 @@ int main(int argc, char **argv)
             owned_output_path = default_binary_output_path(input_path);
             output_path = owned_output_path;
         }
-        exit_code = emit_binary_program(backend, output_path, program, semantic);
+        exit_code = emit_binary_program(backend, backend_optimization, output_path, program, semantic);
     }
 
     free_semantic_info(semantic);
