@@ -1,5 +1,5 @@
 LIST_SIZE = 2000
-ROUNDS = 1000
+ROUNDS = 1500
 
 
 def wrap_97(value: int) -> int:

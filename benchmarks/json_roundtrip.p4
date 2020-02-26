@@ -1,6 +1,8 @@
 import io
 import json
 
+ROUNDS: int = 3000
+
 
 class Owner:
     name: str
@@ -30,7 +32,7 @@ def main() -> None:
     total = 0
     i = 0
 
-    while i < 2000:
+    while i < ROUNDS:
         report = json.from_string[Report](text)
         total = total + report.id
         total = total + report.revision

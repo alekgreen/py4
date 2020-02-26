@@ -33,4 +33,4 @@ def work(size: int, rounds: int) -> int:
     return total
 
 def main() -> None:
-    print(work(2000, 1000))
+    print(work(2000, 1500))

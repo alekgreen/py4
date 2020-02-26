@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+const rounds = 3000
+
 type Owner struct {
 	Name  string  `json:"name"`
 	Team  string  `json:"team"`
@@ -40,7 +42,7 @@ func main() {
 	must(err)
 
 	total := 0
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < rounds; i++ {
 		var report Report
 		must(json.Unmarshal(text, &report))
 		total += report.ID

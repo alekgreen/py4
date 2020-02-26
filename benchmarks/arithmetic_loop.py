@@ -1,4 +1,4 @@
-ITERATIONS = 5000000
+ITERATIONS = 10000000
 
 
 def work(limit: int) -> int:

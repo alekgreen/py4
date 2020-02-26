@@ -24,4 +24,4 @@ def work(limit: int) -> int:
     return total
 
 def main() -> None:
-    print(work(5000000))
+    print(work(10000000))

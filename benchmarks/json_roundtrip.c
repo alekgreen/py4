@@ -5,6 +5,8 @@
 
 #include "runtime/vendor/cjson/cJSON.h"
 
+#define ROUNDS 3000
+
 static void fail(const char *message)
 {
     fprintf(stderr, "%s\n", message);
@@ -62,7 +64,7 @@ int main(void)
     char *text = read_file("benchmarks/json_roundtrip_input.json");
     int total = 0;
 
-    for (int i = 0; i < 2000; i++) {
+    for (int i = 0; i < ROUNDS; i++) {
         cJSON *root = cJSON_Parse(text);
         cJSON *owner;
         cJSON *metrics;

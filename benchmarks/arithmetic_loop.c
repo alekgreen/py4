@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#define ITERATIONS 5000000
+#define ITERATIONS 10000000
 
 static int work(int limit)
 {

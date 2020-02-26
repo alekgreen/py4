@@ -11,7 +11,7 @@ run_three_times() {
     local label="$1"
     shift
 
-    printf '\n%s timings (s):\n' "$label"
+    printf '\n%s timings (elapsed / peak RSS):\n' "$label"
     for _ in 1 2 3; do
         python3 benchmarks/time_command.py "$@"
     done

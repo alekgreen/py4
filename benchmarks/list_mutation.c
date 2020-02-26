@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #define LIST_SIZE 2000
-#define ROUNDS 1000
+#define ROUNDS 1500
 
 static int wrap_97(int value)
 {

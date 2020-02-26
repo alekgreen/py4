@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+ROUNDS = 3000
+
 
 @dataclass
 class Owner:
@@ -94,7 +96,7 @@ def main() -> None:
         text = handle.read()
 
     total = 0
-    for _ in range(2000):
+    for _ in range(ROUNDS):
         report = decode_report(text)
         total += report.id
         total += report.revision

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+ROUNDS = 3000
+
 
 class Owner(BaseModel):
     name: str
@@ -33,7 +35,7 @@ def main() -> None:
         text = handle.read()
 
     total = 0
-    for _ in range(2000):
+    for _ in range(ROUNDS):
         report = Report.model_validate_json(text)
         total += report.id
         total += report.revision

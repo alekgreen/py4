@@ -3,7 +3,7 @@ package main
 import "fmt"
 
 const listSize = 2000
-const rounds = 1000
+const rounds = 1500
 
 func wrap97(value int) int {
 	for value >= 97 {

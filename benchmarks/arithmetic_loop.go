@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-const iterations = 5000000
+const iterations = 10000000
 
 func work(limit int) int {
 	i := 0
