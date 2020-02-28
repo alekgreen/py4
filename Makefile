@@ -23,7 +23,7 @@ OUTPUT ?= out.c
 RUN_TARGET ?= out
 GENERATED_RUNTIME_SRC := runtime/vendor/cjson/cJSON.c
 
-.PHONY: all transpile run test clean
+.PHONY: all transpile run test clean ensure-libcurl print-libcurl-cflags print-libcurl-libs
 
 all: $(TARGET)
 
@@ -43,6 +43,15 @@ run: $(TARGET)
 
 test: $(TARGET)
 	bash tests/run_tests.sh
+
+ensure-libcurl:
+	bash scripts/ensure_libcurl.sh
+
+print-libcurl-cflags:
+	bash scripts/ensure_libcurl.sh --print-cflags
+
+print-libcurl-libs:
+	bash scripts/ensure_libcurl.sh --print-libs
 
 clean:
 	rm -rf $(TARGET) $(BUILD_DIR) $(OUTPUT) $(RUN_TARGET)

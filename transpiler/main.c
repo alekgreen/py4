@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <ctype.h>
 
 #include "codegen.h"
 #include "module_loader.h"
@@ -154,6 +155,128 @@ static int run_process(char *const argv[])
     return 1;
 }
 
+static int file_contains_line(const char *path, const char *needle)
+{
+    FILE *file = fopen(path, "r");
+    char line[1024];
+
+    if (file == NULL) {
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        if (strstr(line, needle) != NULL) {
+            fclose(file);
+            return 1;
+        }
+    }
+
+    fclose(file);
+    return 0;
+}
+
+static char *read_command_output_trimmed_lines(char *const argv[], char ***items_out, size_t *count_out)
+{
+    FILE *pipe;
+    char command[4096];
+    char line[2048];
+    char **items = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+
+    snprintf(command, sizeof(command), "\"%s\" \"%s\" \"%s\"",
+        argv[0], argv[1], argv[2]);
+    pipe = popen(command, "r");
+    if (pipe == NULL) {
+        perror("popen");
+        return dup_string("failed to launch libcurl helper");
+    }
+
+    while (fgets(line, sizeof(line), pipe) != NULL) {
+        size_t len = strlen(line);
+
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        if (len == 0) {
+            continue;
+        }
+        if (count == capacity) {
+            size_t next_capacity = capacity == 0 ? 8 : capacity * 2;
+            char **next_items = realloc(items, sizeof(char *) * next_capacity);
+
+            if (next_items == NULL) {
+                perror("realloc");
+                pclose(pipe);
+                return dup_string("out of memory while collecting libcurl flags");
+            }
+            items = next_items;
+            capacity = next_capacity;
+        }
+        items[count++] = dup_string(line);
+    }
+
+    if (pclose(pipe) != 0) {
+        size_t message_len = 64;
+        char *message;
+
+        for (size_t i = 0; i < count; i++) {
+            message_len += strlen(items[i]) + 1;
+        }
+        message = malloc(message_len);
+        if (message == NULL) {
+            perror("malloc");
+            return dup_string("failed to resolve libcurl build flags");
+        }
+        snprintf(message, message_len, "failed to resolve libcurl build flags");
+        for (size_t i = 0; i < count; i++) {
+            free(items[i]);
+        }
+        free(items);
+        return message;
+    }
+
+    *items_out = items;
+    *count_out = count;
+    return NULL;
+}
+
+static char *resolve_libcurl_flags(char ***cflags_out, size_t *cflag_count_out, char ***libs_out, size_t *lib_count_out)
+{
+    char *cflag_argv[] = {"bash", "scripts/ensure_libcurl.sh", "--print-cflags", NULL};
+    char *lib_argv[] = {"bash", "scripts/ensure_libcurl.sh", "--print-libs", NULL};
+    char *error;
+
+    error = read_command_output_trimmed_lines(cflag_argv, cflags_out, cflag_count_out);
+    if (error != NULL) {
+        return error;
+    }
+
+    error = read_command_output_trimmed_lines(lib_argv, libs_out, lib_count_out);
+    if (error != NULL) {
+        for (size_t i = 0; i < *cflag_count_out; i++) {
+            free((*cflags_out)[i]);
+        }
+        free(*cflags_out);
+        *cflags_out = NULL;
+        *cflag_count_out = 0;
+        return error;
+    }
+
+    return NULL;
+}
+
+static void free_flag_items(char **items, size_t count)
+{
+    if (items == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        free(items[i]);
+    }
+    free(items);
+}
+
 static FILE *open_output_file(const char *path)
 {
     FILE *out = fopen(path, "w");
@@ -217,23 +340,54 @@ static int compile_generated_c_file(
     const char *c_path,
     const char *output_path)
 {
-    char *compile_argv[10];
+    char *compile_argv[64];
+    char **http_cflags = NULL;
+    char **http_libs = NULL;
+    size_t http_cflag_count = 0;
+    size_t http_lib_count = 0;
     size_t argc = 0;
+    char *flag_error = NULL;
+
+    if (file_contains_line(c_path, "#include <curl/curl.h>")) {
+        flag_error = resolve_libcurl_flags(
+            &http_cflags,
+            &http_cflag_count,
+            &http_libs,
+            &http_lib_count);
+        if (flag_error != NULL) {
+            fprintf(stderr, "%s\n", flag_error);
+            free(flag_error);
+            return 1;
+        }
+    }
 
     compile_argv[argc++] = (char *)backend;
     if (backend_optimization != NULL) {
         compile_argv[argc++] = (char *)backend_optimization;
     }
     compile_argv[argc++] = "-std=c11";
+    for (size_t i = 0; i < http_cflag_count; i++) {
+        compile_argv[argc++] = http_cflags[i];
+    }
     compile_argv[argc++] = "-x";
     compile_argv[argc++] = "c";
     compile_argv[argc++] = (char *)c_path;
+    compile_argv[argc++] = "-x";
+    compile_argv[argc++] = "none";
     compile_argv[argc++] = "runtime/vendor/cjson/cJSON.c";
     compile_argv[argc++] = "-o";
     compile_argv[argc++] = (char *)output_path;
+    for (size_t i = 0; i < http_lib_count; i++) {
+        compile_argv[argc++] = http_libs[i];
+    }
     compile_argv[argc] = NULL;
 
-    return run_process(compile_argv);
+    {
+        int status = run_process(compile_argv);
+        free_flag_items(http_cflags, http_cflag_count);
+        free_flag_items(http_libs, http_lib_count);
+        return status;
+    }
 }
 
 static int emit_binary_program(

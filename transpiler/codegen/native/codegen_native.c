@@ -52,6 +52,28 @@ void emit_native_type_runtime(CodegenContext *ctx)
     }
 }
 
+void emit_native_function_support(CodegenContext *ctx, const ParseNode *root)
+{
+    int emitted_http = 0;
+
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = codegen_statement_payload(root->children[i]);
+        const char *module_name;
+
+        if (payload->kind != NODE_NATIVE_FUNCTION_DEF) {
+            continue;
+        }
+
+        module_name = semantic_module_name_for_path(ctx->semantic, payload->source_path);
+        if (module_name != NULL && strcmp(module_name, "http") == 0) {
+            if (!emitted_http) {
+                emit_native_http_runtime(ctx);
+                emitted_http = 1;
+            }
+        }
+    }
+}
+
 static void emit_native_function_definition(CodegenContext *ctx, const ParseNode *function_def)
 {
     const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
@@ -96,6 +118,14 @@ static void emit_native_function_definition(CodegenContext *ctx, const ParseNode
             return_type,
             first_param_type) ||
         emit_native_json_function_definition(
+            ctx,
+            module_name,
+            name,
+            parameters,
+            c_name,
+            return_type,
+            first_param_type) ||
+        emit_native_http_function_definition(
             ctx,
             module_name,
             name,

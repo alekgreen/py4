@@ -5,6 +5,25 @@
 #include "codegen_internal.h"
 #include "codegen_native_internal.h"
 
+static int program_uses_http(const CodegenContext *ctx, const ParseNode *root)
+{
+    for (size_t i = 0; i < root->child_count; i++) {
+        const ParseNode *payload = codegen_statement_payload(root->children[i]);
+        const char *module_name;
+
+        if (payload->kind != NODE_NATIVE_FUNCTION_DEF) {
+            continue;
+        }
+
+        module_name = semantic_module_name_for_path(ctx->semantic, payload->source_path);
+        if (module_name != NULL && strcmp(module_name, "http") == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void emit_auto_main(CodegenContext *ctx)
 {
     if (ctx->has_user_main) {
@@ -53,7 +72,11 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
         (void)semantic_make_list_type(semantic_make_tuple_type(dict_item_types, 2));
     }
 
-    fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n", out);
+    fputs("#include <stdbool.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n", out);
+    if (program_uses_http(&ctx, root)) {
+        fputs("#include <curl/curl.h>\n", out);
+    }
+    fputs("\n", out);
     fputs("static int py4_ord(char value)\n{\n", out);
     fputs("    return (int)(unsigned char)value;\n", out);
     fputs("}\n\n", out);
@@ -277,6 +300,7 @@ void emit_c_program(FILE *out, const LoadedProgram *program, const SemanticInfo 
     fputs("    strcpy(write_ptr, read_ptr);\n", out);
     fputs("    return result;\n", out);
     fputs("}\n\n", out);
+    emit_native_function_support(&ctx, root);
     emit_native_function_runtime(&ctx, root);
     codegen_emit_struct_types(&ctx);
     codegen_emit_union_runtime(&ctx);

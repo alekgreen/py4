@@ -5,3 +5,4 @@ out
 out.c
 .venv/
 *.tmp
+runtime/vendor/libcurl/

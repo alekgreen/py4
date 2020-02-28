@@ -9,8 +9,17 @@ RUNTIME_FAIL_DIR="$ROOT_DIR/tests/cases/runtime_fail"
 CODEGEN_DIR="$ROOT_DIR/tests/cases/codegen"
 TMP_DIR="$(mktemp -d)"
 GENERATED_RUNTIME_SRC="$ROOT_DIR/runtime/vendor/cjson/cJSON.c"
+HTTP_SERVER_PORT=18765
+HTTP_SERVER_PID=""
+HTTP_FLAGS_READY=0
+HTTP_CFLAGS=()
+HTTP_LIBS=()
 
 cleanup() {
+    if [[ -n "$HTTP_SERVER_PID" ]]; then
+        kill "$HTTP_SERVER_PID" >/dev/null 2>&1 || true
+        wait "$HTTP_SERVER_PID" >/dev/null 2>&1 || true
+    fi
     rm -rf "$TMP_DIR"
 }
 
@@ -19,8 +28,59 @@ trap cleanup EXIT
 pass_count=0
 fail_count=0
 
+start_http_test_server() {
+    local log_file="$TMP_DIR/http-server.log"
+
+    python3 "$ROOT_DIR/tests/http_test_server.py" "$HTTP_SERVER_PORT" >"$log_file" 2>&1 &
+    HTTP_SERVER_PID=$!
+
+    for _ in $(seq 1 50); do
+        if grep -Fq "READY" "$log_file"; then
+            return 0
+        fi
+        if ! kill -0 "$HTTP_SERVER_PID" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    printf 'FAIL harness/http_server: failed to start local HTTP test server\n'
+    sed 's/^/    /' "$log_file"
+    exit 1
+}
+
+ensure_http_build_flags() {
+    if [[ "$HTTP_FLAGS_READY" -eq 1 ]]; then
+        return 0
+    fi
+
+    mapfile -t HTTP_CFLAGS < <(bash "$ROOT_DIR/scripts/ensure_libcurl.sh" --print-cflags)
+    mapfile -t HTTP_LIBS < <(bash "$ROOT_DIR/scripts/ensure_libcurl.sh" --print-libs)
+    HTTP_FLAGS_READY=1
+}
+
+compile_generated_program() {
+    local generated_c="$1"
+    local generated_bin="$2"
+    local gcc_log="$3"
+    local extra_cflags=()
+    local extra_libs=()
+
+    if grep -Fq '#include <curl/curl.h>' "$generated_c"; then
+        if ! ensure_http_build_flags; then
+            printf 'failed to resolve libcurl build flags\n' >"$gcc_log"
+            return 1
+        fi
+        extra_cflags=("${HTTP_CFLAGS[@]}")
+        extra_libs=("${HTTP_LIBS[@]}")
+    fi
+
+    gcc -std=c11 "${extra_cflags[@]}" "$generated_c" "$GENERATED_RUNTIME_SRC" -o "$generated_bin" "${extra_libs[@]}" >"$gcc_log" 2>&1
+}
+
 run_cli_compile_checks() {
     local case_file expected default_bin release_bin opt3_bin clang_bin
+    local http_case http_expected http_bin
 
     case_file="$ROOT_DIR/tests/cases/ok/functions_and_calls.p4"
     expected="$(cat "${case_file%.p4}.out")"
@@ -83,7 +143,7 @@ run_cli_compile_checks() {
         return
     fi
 
-    if ! gcc -std=c11 "$TMP_DIR/cli-emit.c" "$GENERATED_RUNTIME_SRC" -o "$TMP_DIR/cli-emit-bin" >"$TMP_DIR/cli-emit.gcc.log" 2>&1; then
+    if ! compile_generated_program "$TMP_DIR/cli-emit.c" "$TMP_DIR/cli-emit-bin" "$TMP_DIR/cli-emit.gcc.log"; then
         printf 'FAIL cli/emit_c: emitted C did not compile\n'
         cat "$TMP_DIR/cli-emit.gcc.log"
         fail_count=$((fail_count + 1))
@@ -117,6 +177,26 @@ run_cli_compile_checks() {
         printf 'PASS cli/compile_clang\n'
         pass_count=$((pass_count + 1))
     fi
+
+    http_case="$ROOT_DIR/tests/cases/ok/http_get_ok.p4"
+    http_expected="$(cat "${http_case%.p4}.out")"
+    http_bin="$TMP_DIR/cli-http-bin"
+
+    if ! "$ROOT_DIR/py4" -o "$http_bin" "$http_case" >"$TMP_DIR/cli-http.stdout" 2>"$TMP_DIR/cli-http.stderr"; then
+        printf 'FAIL cli/compile_http_default: py4 default compile failed\n'
+        sed 's/^/    /' "$TMP_DIR/cli-http.stderr"
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    if [[ "$("$http_bin")" != "$http_expected" ]]; then
+        printf 'FAIL cli/compile_http_default: compiled binary output mismatch\n'
+        fail_count=$((fail_count + 1))
+        return
+    fi
+
+    printf 'PASS cli/compile_http_default\n'
+    pass_count=$((pass_count + 1))
 }
 
 run_ok_case() {
@@ -134,7 +214,7 @@ run_ok_case() {
         return
     fi
 
-    if ! gcc -std=c11 "$generated_c" "$GENERATED_RUNTIME_SRC" -o "$generated_bin" >"$TMP_DIR/${base_name}.gcc.log" 2>&1; then
+    if ! compile_generated_program "$generated_c" "$generated_bin" "$TMP_DIR/${base_name}.gcc.log"; then
         printf 'FAIL ok/%s: generated C did not compile\n' "$base_name"
         cat "$TMP_DIR/${base_name}.gcc.log"
         fail_count=$((fail_count + 1))
@@ -197,7 +277,7 @@ run_runtime_fail_case() {
         return
     fi
 
-    if ! gcc -std=c11 "$generated_c" "$GENERATED_RUNTIME_SRC" -o "$generated_bin" >"$TMP_DIR/${base_name}.gcc.log" 2>&1; then
+    if ! compile_generated_program "$generated_c" "$generated_bin" "$TMP_DIR/${base_name}.gcc.log"; then
         printf 'FAIL runtime_fail/%s: generated C did not compile\n' "$base_name"
         cat "$TMP_DIR/${base_name}.gcc.log"
         fail_count=$((fail_count + 1))
@@ -239,7 +319,7 @@ run_codegen_case() {
         return
     fi
 
-    if ! gcc -std=c11 "$generated_c" "$GENERATED_RUNTIME_SRC" -o "$generated_bin" >"$gcc_log" 2>&1; then
+    if ! compile_generated_program "$generated_c" "$generated_bin" "$gcc_log"; then
         printf 'FAIL codegen/%s: generated C did not compile\n' "$base_name"
         cat "$gcc_log"
         fail_count=$((fail_count + 1))
@@ -268,6 +348,8 @@ run_codegen_case() {
     printf 'PASS codegen/%s\n' "$base_name"
     pass_count=$((pass_count + 1))
 }
+
+start_http_test_server
 
 for case_file in "$OK_DIR"/*.p4; do
     [[ -f "${case_file%.p4}.out" ]] || continue
