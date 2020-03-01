@@ -52,6 +52,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
+    def do_POST(self) -> None:  # noqa: N802
+        length_header = self.headers.get("Content-Length", "0")
+        body = self.rfile.read(int(length_header))
+
+        if self.path == "/echo":
+            response = b"echo: " + body
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            return
+
+        if self.path == "/post-missing":
+            response = b"missing post route: " + body
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            return
+
+        response = b"unknown post route"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
 
 class ReusableTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
