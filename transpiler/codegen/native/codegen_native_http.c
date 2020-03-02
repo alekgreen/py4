@@ -12,12 +12,22 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    char *data;\n", ctx->out);
     fputs("    size_t length;\n", ctx->out);
     fputs("    size_t capacity;\n", ctx->out);
+    fputs("    const char *url;\n", ctx->out);
     fputs("} Py4HttpBuffer;\n\n", ctx->out);
 
     fputs("static int py4_http_initialized = 0;\n\n", ctx->out);
 
     fputs("static void py4_http_fail(const char *message)\n{\n", ctx->out);
     fputs("    fprintf(stderr, \"Runtime error: %s\\n\", message);\n", ctx->out);
+    fputs("    exit(1);\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
+    fputs("static void py4_http_fail_with_url(const char *message, const char *url)\n{\n", ctx->out);
+    fputs("    if (url != NULL) {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: %s for %s\\n\", message, url);\n", ctx->out);
+    fputs("    } else {\n", ctx->out);
+    fputs("        fprintf(stderr, \"Runtime error: %s\\n\", message);\n", ctx->out);
+    fputs("    }\n", ctx->out);
     fputs("    exit(1);\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
@@ -41,7 +51,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    atexit(py4_http_global_cleanup);\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
-    fputs("static void py4_http_buffer_init(Py4HttpBuffer *buffer)\n{\n", ctx->out);
+    fputs("static void py4_http_buffer_init(Py4HttpBuffer *buffer, const char *url)\n{\n", ctx->out);
     fputs("    buffer->data = malloc(1);\n", ctx->out);
     fputs("    if (buffer->data == NULL) {\n", ctx->out);
     fputs("        perror(\"malloc\");\n", ctx->out);
@@ -50,6 +60,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    buffer->data[0] = '\\0';\n", ctx->out);
     fputs("    buffer->length = 0;\n", ctx->out);
     fputs("    buffer->capacity = 1;\n", ctx->out);
+    fputs("    buffer->url = url;\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
     fputs("static size_t py4_http_write_body(char *ptr, size_t size, size_t nmemb, void *userdata)\n{\n", ctx->out);
@@ -61,7 +72,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("        return 0;\n", ctx->out);
     fputs("    }\n", ctx->out);
     fputs("    if (memchr(ptr, '\\0', total) != NULL) {\n", ctx->out);
-    fputs("        py4_http_fail(\"http response body contains NUL byte\");\n", ctx->out);
+    fputs("        py4_http_fail_with_url(\"http response body contains NUL byte\", buffer->url);\n", ctx->out);
     fputs("    }\n", ctx->out);
     fputs("    needed = buffer->length + total + 1;\n", ctx->out);
     fputs("    if (needed > buffer->capacity) {\n", ctx->out);
@@ -83,14 +94,14 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    return total;\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
-    fputs("static void py4_http_fail_curl_request(const char *method, CURLcode result)\n{\n", ctx->out);
+    fputs("static void py4_http_fail_curl_request(const char *method, const char *url, CURLcode result)\n{\n", ctx->out);
     fputs("    if (result == CURLE_URL_MALFORMAT || result == CURLE_UNSUPPORTED_PROTOCOL) {\n", ctx->out);
-    fputs("        py4_http_fail(\"malformed http URL\");\n", ctx->out);
+    fputs("        py4_http_fail_with_url(\"malformed http URL\", url);\n", ctx->out);
     fputs("    }\n", ctx->out);
     fputs("    if (result == CURLE_COULDNT_CONNECT || result == CURLE_COULDNT_RESOLVE_HOST || result == CURLE_COULDNT_RESOLVE_PROXY) {\n", ctx->out);
-    fputs("        py4_http_fail(\"http connection failed\");\n", ctx->out);
+    fputs("        py4_http_fail_with_url(\"http connection failed\", url);\n", ctx->out);
     fputs("    }\n", ctx->out);
-    fputs("    fprintf(stderr, \"Runtime error: http %s failed: %s\\n\", method, curl_easy_strerror(result));\n", ctx->out);
+    fputs("    fprintf(stderr, \"Runtime error: http %s failed for %s: %s\\n\", method, url, curl_easy_strerror(result));\n", ctx->out);
     fputs("    exit(1);\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
@@ -113,7 +124,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    if (handle == NULL) {\n", ctx->out);
     fputs("        py4_http_fail(\"failed to create http request handle\");\n", ctx->out);
     fputs("    }\n", ctx->out);
-    fputs("    py4_http_buffer_init(&buffer);\n", ctx->out);
+    fputs("    py4_http_buffer_init(&buffer, url);\n", ctx->out);
     fputs("    is_post = strcmp(method, \"POST\") == 0;\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_URL, url);\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);\n", ctx->out);
@@ -136,7 +147,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    if (result != CURLE_OK) {\n", ctx->out);
     fputs("        curl_easy_cleanup(handle);\n", ctx->out);
     fputs("        free(buffer.data);\n", ctx->out);
-    fputs("        py4_http_fail_curl_request(method, result);\n", ctx->out);
+    fputs("        py4_http_fail_curl_request(method, url, result);\n", ctx->out);
     fputs("    }\n", ctx->out);
     fputs("    result = curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status_code);\n", ctx->out);
     fputs("    curl_easy_cleanup(handle);\n", ctx->out);
