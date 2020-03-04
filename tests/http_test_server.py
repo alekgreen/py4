@@ -5,9 +5,16 @@ from __future__ import annotations
 import http.server
 import socketserver
 import sys
+import time
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    def write_body(self, body: bytes) -> None:
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/ok":
             body = b"ok from server"
@@ -15,7 +22,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self.write_body(body)
             return
 
         if self.path == "/missing":
@@ -24,7 +31,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self.write_body(body)
             return
 
         if self.path == "/redirect":
@@ -39,7 +46,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self.write_body(body)
+            return
+
+        if self.path == "/slow":
+            body = b"slow route"
+            time.sleep(0.2)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.write_body(body)
             return
 
         body = b"unknown route"
@@ -47,7 +64,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        self.write_body(body)
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -62,7 +79,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(response)))
             self.end_headers()
-            self.wfile.write(response)
+            self.write_body(response)
             return
 
         if self.path == "/post-missing":
@@ -71,7 +88,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(response)))
             self.end_headers()
-            self.wfile.write(response)
+            self.write_body(response)
+            return
+
+        if self.path == "/slow-echo":
+            response = b"slow echo: " + body
+            time.sleep(0.2)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.write_body(response)
             return
 
         response = b"unknown post route"
@@ -79,7 +106,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(response)))
         self.end_headers()
-        self.wfile.write(response)
+        self.write_body(response)
 
 
 class ReusableTCPServer(socketserver.TCPServer):
