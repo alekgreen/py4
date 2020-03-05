@@ -218,7 +218,7 @@ int emit_native_http_function_definition(
 
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "get_with_timeout") == 0 &&
+        strcmp(name->value, "get") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_INT) {
@@ -239,7 +239,7 @@ int emit_native_http_function_definition(
 
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "post_with_timeout") == 0 &&
+        strcmp(name->value, "post") == 0 &&
         parameters->child_count == 3 &&
         first_param_type == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
