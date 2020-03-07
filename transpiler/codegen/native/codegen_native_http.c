@@ -7,6 +7,10 @@
 void emit_native_http_runtime(CodegenContext *ctx)
 {
     ValueType response_type = semantic_make_tuple_type((ValueType[]){TYPE_INT, TYPE_STR}, 2);
+    ValueType headers_type = semantic_make_dict_type(TYPE_STR, TYPE_STR);
+    char headers_struct_name[MAX_NAME_LEN];
+
+    snprintf(headers_struct_name, sizeof(headers_struct_name), "%s", codegen_dict_struct_name(headers_type));
 
     fputs("typedef struct Py4HttpBuffer {\n", ctx->out);
     fputs("    char *data;\n", ctx->out);
@@ -108,13 +112,40 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    exit(1);\n", ctx->out);
     fputs("}\n\n", ctx->out);
 
+    fprintf(ctx->out, "static struct curl_slist *py4_http_header_list_from_dict(%s *headers, const char *url)\n{\n", headers_struct_name);
+    fputs("    struct curl_slist *result = NULL;\n", ctx->out);
+    fputs("    if (headers == NULL) {\n", ctx->out);
+    fputs("        py4_http_fail_with_url(\"http request headers cannot be null\", url);\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    for (size_t i = 0; i < headers->len; i++) {\n", ctx->out);
+    fputs("        size_t header_len = strlen(headers->keys[i]) + strlen(headers->values[i]) + 3;\n", ctx->out);
+    fputs("        char *header_line = malloc(header_len);\n", ctx->out);
+    fputs("        struct curl_slist *next;\n", ctx->out);
+    fputs("        if (header_line == NULL) {\n", ctx->out);
+    fputs("            curl_slist_free_all(result);\n", ctx->out);
+    fputs("            perror(\"malloc\");\n", ctx->out);
+    fputs("            exit(1);\n", ctx->out);
+    fputs("        }\n", ctx->out);
+    fputs("        snprintf(header_line, header_len, \"%s: %s\", headers->keys[i], headers->values[i]);\n", ctx->out);
+    fputs("        next = curl_slist_append(result, header_line);\n", ctx->out);
+    fputs("        free(header_line);\n", ctx->out);
+    fputs("        if (next == NULL) {\n", ctx->out);
+    fputs("            curl_slist_free_all(result);\n", ctx->out);
+    fputs("            py4_http_fail_with_url(\"failed to build http request headers\", url);\n", ctx->out);
+    fputs("        }\n", ctx->out);
+    fputs("        result = next;\n", ctx->out);
+    fputs("    }\n", ctx->out);
+    fputs("    return result;\n", ctx->out);
+    fputs("}\n\n", ctx->out);
+
     fputs("static ", ctx->out);
     codegen_emit_type_name(ctx, response_type);
-    fputs(" py4_http_request_text(const char *method, const char *url, const char *request_body, int timeout_ms)\n{\n", ctx->out);
+    fprintf(ctx->out, " py4_http_request_text(const char *method, const char *url, const char *request_body, %s *request_headers, int timeout_ms)\n{\n", headers_struct_name);
     fputs("    CURL *handle;\n", ctx->out);
     fputs("    CURLcode result;\n", ctx->out);
     fputs("    long status_code = 0;\n", ctx->out);
     fputs("    Py4HttpBuffer buffer;\n", ctx->out);
+    fputs("    struct curl_slist *header_list = NULL;\n", ctx->out);
     fputs("    bool is_post;\n", ctx->out);
     fputs("    if (url == NULL) {\n", ctx->out);
     fputs("        py4_http_fail(\"http request url cannot be null\");\n", ctx->out);
@@ -139,8 +170,15 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, (long)timeout_ms);\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, py4_http_write_body);\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &buffer);\n", ctx->out);
+    fputs("    if (request_headers != NULL) {\n", ctx->out);
+    fputs("        header_list = py4_http_header_list_from_dict(request_headers, url);\n", ctx->out);
+    fputs("        if (header_list != NULL) {\n", ctx->out);
+    fputs("            curl_easy_setopt(handle, CURLOPT_HTTPHEADER, header_list);\n", ctx->out);
+    fputs("        }\n", ctx->out);
+    fputs("    }\n", ctx->out);
     fputs("    if (is_post) {\n", ctx->out);
     fputs("        if (request_body == NULL) {\n", ctx->out);
+    fputs("            curl_slist_free_all(header_list);\n", ctx->out);
     fputs("            curl_easy_cleanup(handle);\n", ctx->out);
     fputs("            free(buffer.data);\n", ctx->out);
     fputs("            py4_http_fail(\"http POST body cannot be null\");\n", ctx->out);
@@ -151,11 +189,13 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    }\n", ctx->out);
     fputs("    result = curl_easy_perform(handle);\n", ctx->out);
     fputs("    if (result != CURLE_OK) {\n", ctx->out);
+    fputs("        curl_slist_free_all(header_list);\n", ctx->out);
     fputs("        curl_easy_cleanup(handle);\n", ctx->out);
     fputs("        free(buffer.data);\n", ctx->out);
     fputs("        py4_http_fail_curl_request(method, url, result);\n", ctx->out);
     fputs("    }\n", ctx->out);
     fputs("    result = curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status_code);\n", ctx->out);
+    fputs("    curl_slist_free_all(header_list);\n", ctx->out);
     fputs("    curl_easy_cleanup(handle);\n", ctx->out);
     fputs("    if (result != CURLE_OK) {\n", ctx->out);
     fputs("        free(buffer.data);\n", ctx->out);
@@ -189,7 +229,7 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, 30000);\n", url_name);
+        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, NULL, 30000);\n", url_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
@@ -210,7 +250,7 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, 30000);\n", url_name, body_name);
+        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, NULL, 30000);\n", url_name, body_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
@@ -231,7 +271,7 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, %s);\n", url_name, timeout_name);
+        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, NULL, %s);\n", url_name, timeout_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
@@ -254,7 +294,51 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, %s);\n", url_name, body_name, timeout_name);
+        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, NULL, %s);\n", url_name, body_name, timeout_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "get") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == semantic_make_dict_type(TYPE_STR, TYPE_STR)) {
+        const char *url_name = parameters->children[0]->value;
+        const char *headers_name = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, %s, 30000);\n", url_name, headers_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "post") == 0 &&
+        parameters->child_count == 3 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == semantic_make_dict_type(TYPE_STR, TYPE_STR)) {
+        const char *url_name = parameters->children[0]->value;
+        const char *body_name = parameters->children[1]->value;
+        const char *headers_name = parameters->children[2]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, %s, 30000);\n", url_name, body_name, headers_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
