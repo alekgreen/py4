@@ -9,13 +9,49 @@ import time
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "py4-test"
+    sys_version = ""
+
     def write_body(self, body: bytes) -> None:
         try:
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             return
 
+    def date_time_string(self, timestamp: float | None = None) -> str:
+        return "Mon, 01 Jan 2001 00:00:00 GMT"
+
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/response-headers":
+            body = b"headers route"
+            self.send_response(200)
+            self.send_header("X-Multi", "one")
+            self.send_header("X-Multi", "two")
+            self.send_header("X-Final", "yes")
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.write_body(body)
+            return
+
+        if self.path == "/redirect-headers":
+            self.send_response(302)
+            self.send_header("Location", "/final-headers")
+            self.send_header("X-Redirect", "discard-me")
+            self.end_headers()
+            return
+
+        if self.path == "/final-headers":
+            body = b"redirect final"
+            self.send_response(200)
+            self.send_header("X-Final", "final-one")
+            self.send_header("X-Final", "final-two")
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.write_body(body)
+            return
+
         if self.path == "/needs-header":
             token = self.headers.get("X-Test", "")
             mode = self.headers.get("X-Mode", "")
@@ -88,6 +124,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         length_header = self.headers.get("Content-Length", "0")
         body = self.rfile.read(int(length_header))
+
+        if self.path == "/post-response-headers":
+            response = b"post headers: " + body
+            self.send_response(200)
+            self.send_header("X-Reply", "alpha")
+            self.send_header("X-Reply", "beta")
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.write_body(response)
+            return
 
         if self.path == "/post-needs-header":
             mode = self.headers.get("X-Post-Mode", "")
