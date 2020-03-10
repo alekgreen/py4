@@ -423,6 +423,31 @@ int emit_native_http_function_definition(
 
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "get") == 0 &&
+        parameters->child_count == 3 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) ==
+            semantic_make_dict_type(TYPE_STR, TYPE_STR) &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_INT) {
+        const char *url_name = parameters->children[0]->value;
+        const char *headers_name = parameters->children[1]->value;
+        const char *timeout_name = parameters->children[2]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, %s, %s);\n",
+            url_name, headers_name, timeout_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
         strcmp(name->value, "post_response_headers") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR &&
@@ -504,6 +529,33 @@ int emit_native_http_function_definition(
         ctx->indent_level++;
         codegen_emit_indent(ctx);
         fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, %s, 30000);\n", url_name, body_name, headers_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "post") == 0 &&
+        parameters->child_count == 4 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) ==
+            semantic_make_dict_type(TYPE_STR, TYPE_STR) &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[3], 0, NODE_TYPE)) == TYPE_INT) {
+        const char *url_name = parameters->children[0]->value;
+        const char *body_name = parameters->children[1]->value;
+        const char *headers_name = parameters->children[2]->value;
+        const char *timeout_name = parameters->children[3]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, %s, %s);\n",
+            url_name, body_name, headers_name, timeout_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;

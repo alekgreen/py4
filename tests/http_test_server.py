@@ -22,6 +22,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return "Mon, 01 Jan 2001 00:00:00 GMT"
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/slow-needs-header":
+            token = self.headers.get("X-Test", "")
+            mode = self.headers.get("X-Mode", "")
+            time.sleep(0.2)
+
+            if token == "open-sesame" and mode == "inspect":
+                body = b"slow header ok: open-sesame inspect"
+                self.send_response(200)
+            else:
+                body = b"missing required headers"
+                self.send_response(403)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.write_body(body)
+            return
+
         if self.path == "/response-headers":
             body = b"headers route"
             self.send_response(200)
@@ -124,6 +141,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         length_header = self.headers.get("Content-Length", "0")
         body = self.rfile.read(int(length_header))
+
+        if self.path == "/slow-post-needs-header":
+            mode = self.headers.get("X-Post-Mode", "")
+            time.sleep(0.2)
+
+            if mode == "mirror":
+                response = b"slow post header ok: " + body
+                self.send_response(200)
+            else:
+                response = b"missing post header"
+                self.send_response(403)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.write_body(response)
+            return
 
         if self.path == "/post-response-headers":
             response = b"post headers: " + body
