@@ -243,7 +243,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    struct curl_slist *header_list = NULL;\n", ctx->out);
     fputs("    Py4HttpResult request_result = {0, NULL, NULL};\n", ctx->out);
     fputs("    Py4HttpHeaderCapture response_capture = {0};\n", ctx->out);
-    fputs("    bool is_post;\n", ctx->out);
+    fputs("    bool uses_request_body;\n", ctx->out);
     fputs("    if (url == NULL) {\n", ctx->out);
     fputs("        py4_http_fail(\"http request url cannot be null\");\n", ctx->out);
     fputs("    }\n", ctx->out);
@@ -260,7 +260,7 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("    }\n", ctx->out);
     fputs("    py4_http_buffer_init(&buffer, url);\n", ctx->out);
     fputs("    request_result.body = buffer.data;\n", ctx->out);
-    fputs("    is_post = strcmp(method, \"POST\") == 0;\n", ctx->out);
+    fputs("    uses_request_body = strcmp(method, \"POST\") == 0 || strcmp(method, \"PUT\") == 0 || strcmp(method, \"PATCH\") == 0;\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_URL, url);\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);\n", ctx->out);
     fputs("    curl_easy_setopt(handle, CURLOPT_MAXREDIRS, 10L);\n", ctx->out);
@@ -280,17 +280,24 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("        curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, py4_http_write_headers);\n", ctx->out);
     fputs("        curl_easy_setopt(handle, CURLOPT_HEADERDATA, &response_capture);\n", ctx->out);
     fputs("    }\n", ctx->out);
-    fputs("    if (is_post) {\n", ctx->out);
+    fputs("    if (uses_request_body) {\n", ctx->out);
         fputs("        if (request_body == NULL) {\n", ctx->out);
     fputs("            py4_http_dispose_response_headers(response_capture.headers);\n", ctx->out);
             fputs("            curl_slist_free_all(header_list);\n", ctx->out);
             fputs("            curl_easy_cleanup(handle);\n", ctx->out);
             fputs("            free(buffer.data);\n", ctx->out);
-    fputs("            py4_http_fail(\"http POST body cannot be null\");\n", ctx->out);
+    fputs("            fprintf(stderr, \"Runtime error: http %s body cannot be null\\n\", method);\n", ctx->out);
+    fputs("            exit(1);\n", ctx->out);
     fputs("        }\n", ctx->out);
-    fputs("        curl_easy_setopt(handle, CURLOPT_POST, 1L);\n", ctx->out);
+    fputs("        if (strcmp(method, \"POST\") == 0) {\n", ctx->out);
+    fputs("            curl_easy_setopt(handle, CURLOPT_POST, 1L);\n", ctx->out);
+    fputs("        } else {\n", ctx->out);
+    fputs("            curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, method);\n", ctx->out);
+    fputs("        }\n", ctx->out);
     fputs("        curl_easy_setopt(handle, CURLOPT_POSTFIELDS, request_body);\n", ctx->out);
     fputs("        curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, (long)strlen(request_body));\n", ctx->out);
+    fputs("    } else if (strcmp(method, \"GET\") != 0) {\n", ctx->out);
+    fputs("        curl_easy_setopt(handle, CURLOPT_CUSTOMREQUEST, method);\n", ctx->out);
     fputs("    }\n", ctx->out);
     fputs("    result = curl_easy_perform(handle);\n", ctx->out);
     fputs("    if (result != CURLE_OK) {\n", ctx->out);
@@ -376,6 +383,67 @@ int emit_native_http_function_definition(
         ctx->indent_level++;
         codegen_emit_indent(ctx);
         fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, NULL, 30000);\n", url_name, body_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "put") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR) {
+        const char *url_name = parameters->children[0]->value;
+        const char *body_name = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"PUT\", %s, %s, NULL, 30000);\n", url_name, body_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "delete") == 0 &&
+        parameters->child_count == 1 &&
+        first_param_type == TYPE_STR) {
+        const char *url_name = parameters->children[0]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"DELETE\", %s, NULL, NULL, 30000);\n", url_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "patch") == 0 &&
+        parameters->child_count == 2 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR) {
+        const char *url_name = parameters->children[0]->value;
+        const char *body_name = parameters->children[1]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text(\"PATCH\", %s, %s, NULL, 30000);\n", url_name, body_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;

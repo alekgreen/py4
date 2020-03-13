@@ -219,6 +219,63 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.write_body(response)
 
+    def do_PUT(self) -> None:  # noqa: N802
+        length_header = self.headers.get("Content-Length", "0")
+        body = self.rfile.read(int(length_header))
+
+        if self.path == "/put-echo":
+            response = b"put: " + body
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.write_body(response)
+            return
+
+        response = b"unknown put route"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.write_body(response)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if self.path == "/delete-ok":
+            response = b"delete ok"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.write_body(response)
+            return
+
+        response = b"unknown delete route"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.write_body(response)
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        length_header = self.headers.get("Content-Length", "0")
+        body = self.rfile.read(int(length_header))
+
+        if self.path == "/patch-echo":
+            response = b"patch: " + body
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.write_body(response)
+            return
+
+        response = b"unknown patch route"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.write_body(response)
+
 
 class ReusableTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
