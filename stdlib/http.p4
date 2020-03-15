@@ -1,3 +1,8 @@
+class Response:
+    status: int
+    body: str
+    headers: list[(str, str)]
+
 native def get(url: str) -> (int, str)
 native def get(url: str, timeout_ms: int) -> (int, str)
 native def get(url: str, headers: dict[str, str]) -> (int, str)
