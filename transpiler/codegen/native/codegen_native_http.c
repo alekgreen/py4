@@ -6,7 +6,6 @@
 
 void emit_native_http_runtime(CodegenContext *ctx)
 {
-    ValueType response_type = semantic_make_tuple_type((ValueType[]){TYPE_INT, TYPE_STR}, 2);
     ValueType request_headers_type = semantic_make_dict_type(TYPE_STR, TYPE_STR);
     ValueType response_header_item_type = semantic_make_tuple_type((ValueType[]){TYPE_STR, TYPE_STR}, 2);
     ValueType response_header_list_type = semantic_make_list_type(response_header_item_type);
@@ -321,15 +320,6 @@ void emit_native_http_runtime(CodegenContext *ctx)
     fputs("}\n\n", ctx->out);
 
     fputs("static ", ctx->out);
-    codegen_emit_type_name(ctx, response_type);
-    fprintf(ctx->out, " py4_http_request_text(const char *method, const char *url, const char *request_body, %s *request_headers, int timeout_ms)\n{\n", request_headers_struct_name);
-    fputs("    Py4HttpResult request_result = py4_http_request_raw(method, url, request_body, request_headers, timeout_ms, false);\n", ctx->out);
-    fputs("    return (", ctx->out);
-    codegen_emit_type_name(ctx, response_type);
-    fputs("){request_result.status_code, request_result.body};\n", ctx->out);
-    fputs("}\n\n", ctx->out);
-
-    fputs("static ", ctx->out);
     codegen_emit_type_name(ctx, response_headers_type);
     fprintf(ctx->out, " py4_http_request_text_with_response_headers(const char *method, const char *url, const char *request_body, %s *request_headers, int timeout_ms)\n{\n", request_headers_struct_name);
     fputs("    Py4HttpResult request_result = py4_http_request_raw(method, url, request_body, request_headers, timeout_ms, true);\n", ctx->out);
@@ -350,31 +340,12 @@ int emit_native_http_function_definition(
 {
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "get") == 0 &&
-        parameters->child_count == 1 &&
-        first_param_type == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, NULL, 30000);\n", url_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "post") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
         parameters->child_count == 2 &&
         first_param_type == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
 
         codegen_emit_type_name(ctx, return_type);
         fprintf(ctx->out, " %s(", c_name);
@@ -382,7 +353,8 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, NULL, 30000);\n", url_name, body_name);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, NULL, NULL, 30000);\n",
+            method_name, url_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
@@ -390,115 +362,13 @@ int emit_native_http_function_definition(
 
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "put") == 0 &&
-        parameters->child_count == 2 &&
-        first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"PUT\", %s, %s, NULL, 30000);\n", url_name, body_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "delete") == 0 &&
-        parameters->child_count == 1 &&
-        first_param_type == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"DELETE\", %s, NULL, NULL, 30000);\n", url_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "patch") == 0 &&
-        parameters->child_count == 2 &&
-        first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"PATCH\", %s, %s, NULL, 30000);\n", url_name, body_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "get_response_headers") == 0 &&
-        parameters->child_count == 1 &&
-        first_param_type == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(\"GET\", %s, NULL, NULL, 30000);\n", url_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "get") == 0 &&
-        parameters->child_count == 2 &&
-        first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_INT) {
-        const char *url_name = parameters->children[0]->value;
-        const char *timeout_name = parameters->children[1]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, NULL, %s);\n", url_name, timeout_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "get") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
         parameters->child_count == 3 &&
         first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) ==
-            semantic_make_dict_type(TYPE_STR, TYPE_STR) &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_INT) {
-        const char *url_name = parameters->children[0]->value;
-        const char *headers_name = parameters->children[1]->value;
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
         const char *timeout_name = parameters->children[2]->value;
 
         codegen_emit_type_name(ctx, return_type);
@@ -507,8 +377,8 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, %s, %s);\n",
-            url_name, headers_name, timeout_name);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, NULL, NULL, %s);\n",
+            method_name, url_name, timeout_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
@@ -516,78 +386,14 @@ int emit_native_http_function_definition(
 
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "post_response_headers") == 0 &&
-        parameters->child_count == 2 &&
-        first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(\"POST\", %s, %s, NULL, 30000);\n", url_name, body_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "post") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
         parameters->child_count == 3 &&
         first_param_type == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_INT) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
-        const char *timeout_name = parameters->children[2]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, NULL, %s);\n", url_name, body_name, timeout_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "get") == 0 &&
-        parameters->child_count == 2 &&
-        first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == semantic_make_dict_type(TYPE_STR, TYPE_STR)) {
-        const char *url_name = parameters->children[0]->value;
-        const char *headers_name = parameters->children[1]->value;
-
-        codegen_emit_type_name(ctx, return_type);
-        fprintf(ctx->out, " %s(", c_name);
-        emit_parameter_list(ctx, parameters, 0);
-        fputs(")\n{\n", ctx->out);
-        ctx->indent_level++;
-        codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"GET\", %s, NULL, %s, 30000);\n", url_name, headers_name);
-        ctx->indent_level--;
-        fputs("}\n\n", ctx->out);
-        return 1;
-    }
-
-    if (module_name != NULL &&
-        strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "post") == 0 &&
-        parameters->child_count == 3 &&
-        first_param_type == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
-        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == semantic_make_dict_type(TYPE_STR, TYPE_STR)) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) ==
+            semantic_make_dict_type(TYPE_STR, TYPE_STR)) {
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
         const char *headers_name = parameters->children[2]->value;
 
         codegen_emit_type_name(ctx, return_type);
@@ -596,7 +402,8 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, %s, 30000);\n", url_name, body_name, headers_name);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, NULL, %s, 30000);\n",
+            method_name, url_name, headers_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
@@ -604,15 +411,39 @@ int emit_native_http_function_definition(
 
     if (module_name != NULL &&
         strcmp(module_name, "http") == 0 &&
-        strcmp(name->value, "post") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
+        parameters->child_count == 3 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_STR) {
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
+        const char *body_name = parameters->children[2]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, %s, NULL, 30000);\n",
+            method_name, url_name, body_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
         parameters->child_count == 4 &&
         first_param_type == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) ==
             semantic_make_dict_type(TYPE_STR, TYPE_STR) &&
         semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[3], 0, NODE_TYPE)) == TYPE_INT) {
-        const char *url_name = parameters->children[0]->value;
-        const char *body_name = parameters->children[1]->value;
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
         const char *headers_name = parameters->children[2]->value;
         const char *timeout_name = parameters->children[3]->value;
 
@@ -622,8 +453,90 @@ int emit_native_http_function_definition(
         fputs(")\n{\n", ctx->out);
         ctx->indent_level++;
         codegen_emit_indent(ctx);
-        fprintf(ctx->out, "return py4_http_request_text(\"POST\", %s, %s, %s, %s);\n",
-            url_name, body_name, headers_name, timeout_name);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, NULL, %s, %s);\n",
+            method_name, url_name, headers_name, timeout_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
+        parameters->child_count == 4 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[3], 0, NODE_TYPE)) == TYPE_INT) {
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
+        const char *body_name = parameters->children[2]->value;
+        const char *timeout_name = parameters->children[3]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, %s, NULL, %s);\n",
+            method_name, url_name, body_name, timeout_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
+        parameters->child_count == 4 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[3], 0, NODE_TYPE)) ==
+            semantic_make_dict_type(TYPE_STR, TYPE_STR)) {
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
+        const char *body_name = parameters->children[2]->value;
+        const char *headers_name = parameters->children[3]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, %s, %s, 30000);\n",
+            method_name, url_name, body_name, headers_name);
+        ctx->indent_level--;
+        fputs("}\n\n", ctx->out);
+        return 1;
+    }
+
+    if (module_name != NULL &&
+        strcmp(module_name, "http") == 0 &&
+        strcmp(name->value, "_request_raw") == 0 &&
+        parameters->child_count == 5 &&
+        first_param_type == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[1], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[2], 0, NODE_TYPE)) == TYPE_STR &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[3], 0, NODE_TYPE)) ==
+            semantic_make_dict_type(TYPE_STR, TYPE_STR) &&
+        semantic_type_of(ctx->semantic, codegen_expect_child(parameters->children[4], 0, NODE_TYPE)) == TYPE_INT) {
+        const char *method_name = parameters->children[0]->value;
+        const char *url_name = parameters->children[1]->value;
+        const char *body_name = parameters->children[2]->value;
+        const char *headers_name = parameters->children[3]->value;
+        const char *timeout_name = parameters->children[4]->value;
+
+        codegen_emit_type_name(ctx, return_type);
+        fprintf(ctx->out, " %s(", c_name);
+        emit_parameter_list(ctx, parameters, 0);
+        fputs(")\n{\n", ctx->out);
+        ctx->indent_level++;
+        codegen_emit_indent(ctx);
+        fprintf(ctx->out, "return py4_http_request_text_with_response_headers(%s, %s, %s, %s, %s);\n",
+            method_name, url_name, body_name, headers_name, timeout_name);
         ctx->indent_level--;
         fputs("}\n\n", ctx->out);
         return 1;
