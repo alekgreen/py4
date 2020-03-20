@@ -11,6 +11,7 @@ static ParseNode *parse_DICT_TYPE(TokenStream *ts, Token dict_tok);
 static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok);
+static ParseNode *parse_TUPLE_TARGET_ITEM(TokenStream *ts);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
 static char *build_type_node_name(const ParseNode *node);
 static ParseNode *parse_OR(TokenStream *ts);
@@ -367,33 +368,44 @@ ParseNode *parse_ASSIGN_TARGET(TokenStream *ts)
         break;
     }
 
+    if (node->kind == NODE_PRIMARY && peek_ts(ts).type == TOKEN_COMMA) {
+        ParseNode *tuple_node = create_node_from_token(NODE_TUPLE_TARGET, tok);
+
+        add_child(tuple_node, node);
+        while (peek_ts(ts).type == TOKEN_COMMA) {
+            get_from_ts(ts);
+            add_child(tuple_node, parse_TUPLE_TARGET_ITEM(ts));
+        }
+        return tuple_node;
+    }
+
     return node;
+}
+
+static ParseNode *parse_TUPLE_TARGET_ITEM(TokenStream *ts)
+{
+    Token look = peek_ts(ts);
+
+    if (look.type == TOKEN_LPAREN) {
+        look = expect(ts, TOKEN_LPAREN);
+        return parse_TUPLE_TARGET(ts, look);
+    }
+
+    return create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER));
 }
 
 static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok)
 {
     ParseNode *node = create_node_from_token(NODE_TUPLE_TARGET, lparen_tok);
-    Token look = peek_ts(ts);
 
-    if (look.type == TOKEN_LPAREN) {
-        look = expect(ts, TOKEN_LPAREN);
-        add_child(node, parse_TUPLE_TARGET(ts, look));
-    } else {
-        add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
-    }
+    add_child(node, parse_TUPLE_TARGET_ITEM(ts));
     if (peek_ts(ts).type != TOKEN_COMMA) {
         parse_error(peek_ts(ts), "tuple target must have at least two elements");
     }
 
     while (peek_ts(ts).type == TOKEN_COMMA) {
         get_from_ts(ts);
-        look = peek_ts(ts);
-        if (look.type == TOKEN_LPAREN) {
-            look = expect(ts, TOKEN_LPAREN);
-            add_child(node, parse_TUPLE_TARGET(ts, look));
-        } else {
-            add_child(node, create_node_from_token(NODE_PRIMARY, expect(ts, TOKEN_IDENTIFIER)));
-        }
+        add_child(node, parse_TUPLE_TARGET_ITEM(ts));
     }
 
     expect(ts, TOKEN_RPAREN);

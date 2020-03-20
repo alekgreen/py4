@@ -428,6 +428,36 @@ static int tuple_target_matches_type(const ParseNode *target, ValueType type)
     return 1;
 }
 
+static int tuple_target_all_fresh(const ParseNode *target, Scope *scope)
+{
+    if (target->kind == NODE_PRIMARY) {
+        return semantic_find_variable(scope, target->value) == NULL;
+    }
+
+    for (size_t i = 0; i < target->child_count; i++) {
+        if (!tuple_target_all_fresh(target->children[i], scope)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int tuple_target_all_declared(const ParseNode *target, Scope *scope)
+{
+    if (target->kind == NODE_PRIMARY) {
+        return semantic_find_variable(scope, target->value) != NULL;
+    }
+
+    for (size_t i = 0; i < target->child_count; i++) {
+        if (!tuple_target_all_declared(target->children[i], scope)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static void bind_tuple_target_declaration(
     SemanticInfo *info,
     const ParseNode *target,
@@ -721,6 +751,16 @@ static int typecheck_simple_statement(
             semantic_error_at_node(expr,
                 "tuple target shape does not match %s",
                 semantic_type_name(expr_type));
+        }
+
+        if (current_function != NULL && tuple_target_all_fresh(target, scope)) {
+            bind_tuple_target_declaration(info, target, scope, expr_type);
+            semantic_record_inferred_declaration_target(info, target);
+            return 0;
+        }
+        if (!tuple_target_all_declared(target, scope)) {
+            semantic_error_at_node(target,
+                "tuple destructuring cannot mix declared and undeclared variables");
         }
 
         check_tuple_target_assignment(info, target, scope, expr_type, expr);

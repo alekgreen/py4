@@ -355,6 +355,8 @@ static void emit_tuple_destructuring_assignment(
     const ParseNode *statement_tail,
     const ParseNode *expr)
 {
+    int declare = codegen_is_type_assignment(statement_tail) ||
+        semantic_is_inferred_declaration_target(ctx->semantic, target);
     ValueType tuple_type = codegen_is_type_assignment(statement_tail)
         ? semantic_type_of(ctx->semantic, codegen_statement_tail_type_node(statement_tail))
         : semantic_type_of(ctx->semantic, target);
@@ -369,7 +371,7 @@ static void emit_tuple_destructuring_assignment(
         target,
         tuple_type,
         tuple_temp,
-        codegen_is_type_assignment(statement_tail));
+        declare);
 
     free(tuple_temp);
     free(tuple_type_name);
