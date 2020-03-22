@@ -142,6 +142,7 @@ static ParseNode *parse_BREAK_STATEMENT(TokenStream *ts);
 static ParseNode *parse_CONTINUE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_ASSERT_STATEMENT(TokenStream *ts);
 static ParseNode *parse_IF_STATEMENT(TokenStream *ts);
+static ParseNode *parse_MATCH_STATEMENT(TokenStream *ts);
 static ParseNode *parse_WHILE_STATEMENT(TokenStream *ts);
 static ParseNode *parse_FOR_STATEMENT(TokenStream *ts);
 static ParseNode *parse_WITH_STATEMENT(TokenStream *ts);
@@ -236,6 +237,8 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_CONTINUE_STATEMENT:   return "CONTINUE_STATEMENT";
         case NODE_ASSERT_STATEMENT:     return "ASSERT_STATEMENT";
         case NODE_IF_STATEMENT:         return "IF_STATEMENT";
+        case NODE_MATCH_STATEMENT:      return "MATCH_STATEMENT";
+        case NODE_MATCH_CASE:           return "MATCH_CASE";
         case NODE_WHILE_STATEMENT:      return "WHILE_STATEMENT";
         case NODE_FOR_STATEMENT:        return "FOR_STATEMENT";
         case NODE_WITH_STATEMENT:       return "WITH_STATEMENT";
@@ -332,6 +335,8 @@ ParseNode *parse_STATEMENT(TokenStream *ts)
         add_child(node, parse_IMPORT_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "if")) {
         add_child(node, parse_IF_STATEMENT(ts));
+    } else if (parse_is_keyword_token(peek_ts(ts), "match")) {
+        add_child(node, parse_MATCH_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "while")) {
         add_child(node, parse_WHILE_STATEMENT(ts));
     } else if (parse_is_keyword_token(peek_ts(ts), "for")) {
@@ -806,6 +811,42 @@ static ParseNode *parse_IF_STATEMENT(TokenStream *ts)
         add_child(node, else_node);
     }
 
+    return node;
+}
+
+static ParseNode *parse_MATCH_STATEMENT(TokenStream *ts)
+{
+    Token match_tok = parse_expect_keyword(ts, "match");
+    ParseNode *node = create_node_from_token(NODE_MATCH_STATEMENT, match_tok);
+    Token colon_tok;
+
+    add_child(node, parse_EXPRESSION(ts));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    parse_skip_newlines(ts);
+
+    while (parse_is_keyword_token(peek_ts(ts), "case")) {
+        Token case_tok = parse_expect_keyword(ts, "case");
+        ParseNode *case_node = create_node_from_token(NODE_MATCH_CASE, case_tok);
+
+        add_child(case_node, parse_EXPRESSION(ts));
+        colon_tok = expect(ts, TOKEN_COLON);
+        add_child(case_node, create_node_from_token(NODE_COLON, colon_tok));
+        expect(ts, TOKEN_NEWLINE);
+        expect(ts, TOKEN_INDENT);
+        add_child(case_node, parse_SUITE(ts));
+        expect(ts, TOKEN_DEDENT);
+        add_child(node, case_node);
+        parse_skip_newlines(ts);
+    }
+
+    if (node->child_count == 2) {
+        parse_error_at_node(node, "match statement must declare at least one case");
+    }
+
+    expect(ts, TOKEN_DEDENT);
     return node;
 }
 

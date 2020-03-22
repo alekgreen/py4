@@ -604,6 +604,80 @@ static void emit_if_statement(CodegenContext *ctx, const ParseNode *if_stmt)
     fputc('\n', ctx->out);
 }
 
+static int codegen_match_case_is_wildcard(const ParseNode *expr)
+{
+    const ParseNode *pattern;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    pattern = expr->children[0];
+    return pattern->kind == NODE_PRIMARY &&
+        pattern->token_type == TOKEN_IDENTIFIER &&
+        pattern->value != NULL &&
+        strcmp(pattern->value, "_") == 0;
+}
+
+static void emit_match_statement(CodegenContext *ctx, const ParseNode *match_stmt)
+{
+    const ParseNode *scrutinee = codegen_expect_child(match_stmt, 0, NODE_EXPRESSION);
+    ValueType scrutinee_type = semantic_type_of(ctx->semantic, scrutinee);
+    char *scrutinee_text = codegen_expression_to_c_string(ctx, scrutinee);
+    char *scrutinee_name = codegen_next_temp_name(ctx);
+    char *scrutinee_type_name = codegen_type_to_c_string(scrutinee_type);
+
+    codegen_emit_indent(ctx);
+    fputs("{\n", ctx->out);
+    ctx->indent_level++;
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", scrutinee_type_name, scrutinee_name, scrutinee_text);
+
+    for (size_t i = 2; i < match_stmt->child_count; i++) {
+        const ParseNode *case_node = codegen_expect_child(match_stmt, i, NODE_MATCH_CASE);
+        const ParseNode *pattern_expr = codegen_expect_child(case_node, 0, NODE_EXPRESSION);
+        const ParseNode *suite = codegen_expect_child(case_node, 2, NODE_SUITE);
+
+        if (codegen_match_case_is_wildcard(pattern_expr)) {
+            codegen_emit_indent(ctx);
+            if (i == 2) {
+                fputs("{\n", ctx->out);
+            } else {
+                fputs("else\n", ctx->out);
+                codegen_emit_indent(ctx);
+                fputs("{\n", ctx->out);
+            }
+        } else {
+            char *pattern_text = codegen_expression_to_c_string(ctx, pattern_expr);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s (%s == %s)\n",
+                i == 2 ? "if" : "else if",
+                scrutinee_name,
+                pattern_text);
+            free(pattern_text);
+            codegen_emit_indent(ctx);
+            fputs("{\n", ctx->out);
+        }
+
+        ctx->indent_level++;
+        codegen_push_cleanup_scope(ctx);
+        codegen_emit_suite(ctx, suite);
+        codegen_pop_cleanup_scope(ctx);
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+    }
+
+    ctx->indent_level--;
+    codegen_emit_indent(ctx);
+    fputs("}\n", ctx->out);
+
+    free(scrutinee_text);
+    free(scrutinee_name);
+    free(scrutinee_type_name);
+}
+
 static void emit_while_statement(CodegenContext *ctx, const ParseNode *while_stmt)
 {
     char *cond = codegen_expression_to_c_string(ctx, while_stmt->children[0]);
@@ -971,6 +1045,11 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         return;
     }
 
+    if (payload->kind == NODE_MATCH_STATEMENT) {
+        emit_match_statement(ctx, payload);
+        return;
+    }
+
     if (payload->kind == NODE_FOR_STATEMENT) {
         emit_for_statement(ctx, payload);
         return;
@@ -1163,6 +1242,8 @@ void emit_module_init(CodegenContext *ctx, const ParseNode *root)
 
         if (payload->kind == NODE_IF_STATEMENT) {
             emit_if_statement(ctx, payload);
+        } else if (payload->kind == NODE_MATCH_STATEMENT) {
+            emit_match_statement(ctx, payload);
         } else if (payload->kind == NODE_WHILE_STATEMENT) {
             emit_while_statement(ctx, payload);
         } else if (payload->kind == NODE_FOR_STATEMENT) {

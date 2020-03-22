@@ -23,6 +23,8 @@ static const char *KEYWORDS[] = {
     "class",
     "enum",
     "if",
+    "match",
+    "case",
     "while",
     "for",
     "with",
