@@ -12,6 +12,7 @@ static ParseNode *parse_TUPLE_TYPE(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_TARGET(TokenStream *ts, Token lparen_tok);
 static ParseNode *parse_TUPLE_TARGET_ITEM(TokenStream *ts);
+static ParseNode *parse_MATCH_EXPRESSION(TokenStream *ts);
 static ParseNode *parse_TYPE_ATOM(TokenStream *ts);
 static char *build_type_node_name(const ParseNode *node);
 static ParseNode *parse_OR(TokenStream *ts);
@@ -555,6 +556,8 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     } else if (tok.type == TOKEN_IDENTIFIER) {
         tok = get_from_ts(ts);
         base = create_node_from_token(NODE_PRIMARY, tok);
+    } else if (parse_is_keyword_token(tok, "match")) {
+        base = parse_MATCH_EXPRESSION(ts);
     } else if (tok.type == TOKEN_LPAREN) {
         tok = expect(ts, TOKEN_LPAREN);
         base = parse_TUPLE_LITERAL(ts, tok);
@@ -645,6 +648,42 @@ static ParseNode *parse_PRIMARY(TokenStream *ts)
     }
 
     return base;
+}
+
+static ParseNode *parse_MATCH_EXPRESSION(TokenStream *ts)
+{
+    Token match_tok = parse_expect_keyword(ts, "match");
+    ParseNode *node = create_node_from_token(NODE_MATCH_EXPRESSION, match_tok);
+    Token colon_tok;
+
+    add_child(node, parse_EXPRESSION(ts));
+    colon_tok = expect(ts, TOKEN_COLON);
+    add_child(node, create_node_from_token(NODE_COLON, colon_tok));
+    expect(ts, TOKEN_NEWLINE);
+    expect(ts, TOKEN_INDENT);
+    parse_skip_newlines(ts);
+
+    while (parse_is_keyword_token(peek_ts(ts), "case")) {
+        Token case_tok = parse_expect_keyword(ts, "case");
+        ParseNode *case_node = create_node_from_token(NODE_MATCH_CASE, case_tok);
+
+        add_child(case_node, parse_EXPRESSION(ts));
+        colon_tok = expect(ts, TOKEN_COLON);
+        add_child(case_node, create_node_from_token(NODE_COLON, colon_tok));
+        add_child(case_node, parse_EXPRESSION(ts));
+        if (peek_ts(ts).type == TOKEN_NEWLINE) {
+            get_from_ts(ts);
+        }
+        add_child(node, case_node);
+        parse_skip_newlines(ts);
+    }
+
+    if (node->child_count == 2) {
+        parse_error_at_node(node, "match expression must declare at least one case");
+    }
+
+    expect(ts, TOKEN_DEDENT);
+    return node;
 }
 
 static ParseNode *parse_TUPLE_LITERAL(TokenStream *ts, Token lparen_tok)

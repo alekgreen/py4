@@ -259,6 +259,7 @@ const char *node_kind_to_str(NodeKind kind)
         case NODE_SUITE:                return "SUITE";
         case NODE_EXPRESSION_STATEMENT: return "EXPRESSION_STATEMENT";
         case NODE_EXPRESSION:           return "EXPRESSION";
+        case NODE_MATCH_EXPRESSION:     return "MATCH_EXPRESSION";
         case NODE_PRIMARY:              return "PRIMARY";
         case NODE_LIST_LITERAL:         return "LIST_LITERAL";
         case NODE_DICT_LITERAL:         return "DICT_LITERAL";

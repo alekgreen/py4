@@ -391,7 +391,8 @@ static int node_is_owned_ref_value(CodegenContext *ctx, const ParseNode *node)
         node->kind == NODE_LIST_LITERAL ||
         node->kind == NODE_DICT_LITERAL ||
         node->kind == NODE_METHOD_CALL ||
-        node->kind == NODE_TUPLE_LITERAL) {
+        node->kind == NODE_TUPLE_LITERAL ||
+        node->kind == NODE_MATCH_EXPRESSION) {
         return 1;
     }
     if (node->kind == NODE_INDEX) {
@@ -409,6 +410,88 @@ static int node_is_owned_ref_value(CodegenContext *ctx, const ParseNode *node)
 char *codegen_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr);
 char *codegen_wrapped_expression_to_c_string(CodegenContext *ctx, const ParseNode *expr, ValueType target_type);
 char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary);
+
+static int codegen_match_case_is_wildcard(const ParseNode *expr)
+{
+    const ParseNode *pattern;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    pattern = expr->children[0];
+    return pattern->kind == NODE_PRIMARY &&
+        pattern->token_type == TOKEN_IDENTIFIER &&
+        pattern->value != NULL &&
+        strcmp(pattern->value, "_") == 0;
+}
+
+static char *codegen_match_expression_to_c_string(CodegenContext *ctx, const ParseNode *node)
+{
+    const ParseNode *scrutinee = codegen_expect_child(node, 0, NODE_EXPRESSION);
+    ValueType scrutinee_type = semantic_type_of(ctx->semantic, scrutinee);
+    ValueType result_type = semantic_type_of(ctx->semantic, node);
+    char *scrutinee_text = codegen_expression_to_c_string(ctx, scrutinee);
+    char *scrutinee_name = codegen_next_temp_name(ctx);
+    char *scrutinee_type_name = codegen_type_to_c_string(scrutinee_type);
+    char *result_name = codegen_next_temp_name(ctx);
+    char *result_type_name = codegen_type_to_c_string(result_type);
+
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s = %s;\n", scrutinee_type_name, scrutinee_name, scrutinee_text);
+    codegen_emit_indent(ctx);
+    fprintf(ctx->out, "%s %s;\n", result_type_name, result_name);
+
+    for (size_t i = 2; i < node->child_count; i++) {
+        const ParseNode *case_node = codegen_expect_child(node, i, NODE_MATCH_CASE);
+        const ParseNode *pattern_expr = codegen_expect_child(case_node, 0, NODE_EXPRESSION);
+        const ParseNode *value_expr = codegen_expect_child(case_node, 2, NODE_EXPRESSION);
+
+        if (codegen_match_case_is_wildcard(pattern_expr)) {
+            codegen_emit_indent(ctx);
+            if (i == 2) {
+                fputs("{\n", ctx->out);
+            } else {
+                fputs("else\n", ctx->out);
+                codegen_emit_indent(ctx);
+                fputs("{\n", ctx->out);
+            }
+        } else {
+            char *pattern_text = codegen_expression_to_c_string(ctx, pattern_expr);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s (%s == %s)\n",
+                i == 2 ? "if" : "else if",
+                scrutinee_name,
+                pattern_text);
+            free(pattern_text);
+            codegen_emit_indent(ctx);
+            fputs("{\n", ctx->out);
+        }
+
+        ctx->indent_level++;
+        {
+            char *value_text = codegen_wrapped_expression_to_c_string(ctx, value_expr, result_type);
+
+            codegen_emit_indent(ctx);
+            fprintf(ctx->out, "%s = %s;\n", result_name, value_text);
+            if (semantic_type_needs_management(result_type) &&
+                !codegen_expression_is_owned_ref(ctx, value_expr)) {
+                codegen_emit_value_retain(ctx, result_type, result_name);
+            }
+            free(value_text);
+        }
+        ctx->indent_level--;
+        codegen_emit_indent(ctx);
+        fputs("}\n", ctx->out);
+    }
+
+    free(scrutinee_text);
+    free(scrutinee_name);
+    free(scrutinee_type_name);
+    free(result_type_name);
+    return result_name;
+}
 
 static char *materialize_ref_node(
     CodegenContext *ctx,
@@ -1531,6 +1614,10 @@ char *codegen_primary_to_c_string(CodegenContext *ctx, const ParseNode *primary)
         free(type_name);
         free(values);
         return result;
+    }
+
+    if (primary->kind == NODE_MATCH_EXPRESSION) {
+        return codegen_match_expression_to_c_string(ctx, primary);
     }
 
     if (primary->kind == NODE_INDEX) {

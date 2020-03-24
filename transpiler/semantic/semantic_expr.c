@@ -4,6 +4,11 @@
 
 #include "semantic_internal.h"
 
+static ValueType infer_match_expression_type(
+    SemanticInfo *info,
+    const ParseNode *node,
+    Scope *scope);
+
 static void expect_argument_count(const char *name, const ParseNode *arguments, size_t expected)
 {
     size_t actual = arguments->child_count;
@@ -1287,6 +1292,12 @@ ValueType semantic_infer_primary_type(
         return type;
     }
 
+    if (node->kind == NODE_MATCH_EXPRESSION) {
+        type = infer_match_expression_type(info, node, scope);
+        semantic_record_node_type(info, node, type);
+        return type;
+    }
+
     if (node->kind == NODE_EXPRESSION) {
         type = semantic_infer_expression_type(info, node, scope);
         semantic_record_node_type(info, node, type);
@@ -1371,6 +1382,113 @@ static int is_arithmetic_operator(const char *op)
 static int is_boolean_operator(const char *op)
 {
     return strcmp(op, "and") == 0 || strcmp(op, "or") == 0;
+}
+
+static int match_case_is_wildcard(const ParseNode *expr)
+{
+    const ParseNode *pattern;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    pattern = expr->children[0];
+    return pattern->kind == NODE_PRIMARY &&
+        pattern->token_type == TOKEN_IDENTIFIER &&
+        pattern->value != NULL &&
+        strcmp(pattern->value, "_") == 0;
+}
+
+static ValueType combine_match_result_types(
+    const ParseNode *node,
+    ValueType current_type,
+    ValueType branch_type)
+{
+    if (current_type == 0) {
+        return branch_type;
+    }
+    if (semantic_is_assignable(current_type, branch_type) &&
+        semantic_is_assignable(branch_type, current_type)) {
+        return current_type;
+    }
+    if (semantic_is_assignable(branch_type, current_type)) {
+        return branch_type;
+    }
+    if (semantic_is_assignable(current_type, branch_type)) {
+        return current_type;
+    }
+
+    semantic_error_at_node(node, "match expression arms must resolve to one concrete type");
+    return TYPE_NONE;
+}
+
+static ValueType infer_match_expression_type(
+    SemanticInfo *info,
+    const ParseNode *node,
+    Scope *scope)
+{
+    ValueType scrutinee_type;
+    ValueType result_type = 0;
+    int saw_wildcard = 0;
+    unsigned char seen_variants[MAX_ENUM_VARIANTS] = {0};
+
+    scrutinee_type = semantic_infer_expression_type(info, node->children[0], scope);
+    if (!semantic_type_is_enum(scrutinee_type)) {
+        semantic_error_at_node(node->children[0], "match scrutinee must be an enum");
+    }
+
+    for (size_t i = 2; i < node->child_count; i++) {
+        const ParseNode *case_node = semantic_expect_child(node, i, NODE_MATCH_CASE);
+        const ParseNode *pattern_expr = semantic_expect_child(case_node, 0, NODE_EXPRESSION);
+        const ParseNode *value_expr = semantic_expect_child(case_node, 2, NODE_EXPRESSION);
+        ValueType branch_type;
+
+        if (saw_wildcard) {
+            semantic_error_at_node(case_node, "wildcard match case '_' must be the final case");
+        }
+
+        if (match_case_is_wildcard(pattern_expr)) {
+            saw_wildcard = 1;
+        } else {
+            if (pattern_expr->child_count != 1) {
+                semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+            }
+            if (semantic_infer_expression_type(info, pattern_expr, scope) != scrutinee_type) {
+                semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+                    semantic_enum_name(scrutinee_type));
+            }
+
+            {
+                ValueType case_enum_type = 0;
+                size_t variant_index = 0;
+
+                if (!semantic_enum_variant_for_node(info, pattern_expr->children[0], &case_enum_type, &variant_index)) {
+                    semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+                }
+                if (case_enum_type != scrutinee_type) {
+                    semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+                        semantic_enum_name(scrutinee_type));
+                }
+                if (seen_variants[variant_index]) {
+                    semantic_error_at_node(pattern_expr, "duplicate match case '%s'",
+                        semantic_enum_variant_name(scrutinee_type, variant_index));
+                }
+                seen_variants[variant_index] = 1;
+            }
+        }
+
+        branch_type = result_type == 0
+            ? semantic_infer_expression_type(info, value_expr, scope)
+            : semantic_infer_expression_type_with_hint(info, value_expr, scope, result_type);
+        result_type = combine_match_result_types(value_expr, result_type, branch_type);
+    }
+
+    if (!saw_wildcard) {
+        semantic_error_at_node(node, "match expression currently requires a wildcard case '_'");
+    }
+
+    semantic_record_node_type(info, node, result_type);
+    return result_type;
 }
 
 static void typecheck_comparison_operands(
