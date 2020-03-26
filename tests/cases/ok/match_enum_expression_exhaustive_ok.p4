@@ -4,9 +4,10 @@ enum TokenKind:
     END
 
 def main() -> None:
-    kind = TokenKind.INT
+    kind = TokenKind.END
     label = match kind:
         case TokenKind.INT: "int"
         case TokenKind.IDENT: "ident"
+        case TokenKind.END: "end"
 
     print(label)

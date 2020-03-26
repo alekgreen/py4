@@ -1422,6 +1422,24 @@ static ValueType combine_match_result_types(
     return TYPE_NONE;
 }
 
+static void require_exhaustive_enum_match(
+    const ParseNode *node,
+    ValueType enum_type,
+    const unsigned char *seen_variants)
+{
+    for (size_t i = 0; i < semantic_enum_variant_count(enum_type); i++) {
+        if (seen_variants[i]) {
+            continue;
+        }
+
+        semantic_error_at_node(
+            node,
+            "non-exhaustive match expression for enum '%s'; missing case '%s'",
+            semantic_enum_name(enum_type),
+            semantic_enum_variant_name(enum_type, i));
+    }
+}
+
 static ValueType infer_match_expression_type(
     SemanticInfo *info,
     const ParseNode *node,
@@ -1484,7 +1502,7 @@ static ValueType infer_match_expression_type(
     }
 
     if (!saw_wildcard) {
-        semantic_error_at_node(node, "match expression currently requires a wildcard case '_'");
+        require_exhaustive_enum_match(node, scrutinee_type, seen_variants);
     }
 
     semantic_record_node_type(info, node, result_type);

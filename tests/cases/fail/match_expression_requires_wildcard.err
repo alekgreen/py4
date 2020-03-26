@@ -1,1 +1,1 @@
-match expression currently requires a wildcard case '_'
+non-exhaustive match expression for enum 'TokenKind'; missing case 'END'
