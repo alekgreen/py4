@@ -886,21 +886,6 @@ static int typecheck_if_statement(
     return saw_else ? if_returns : 0;
 }
 
-static int match_case_is_wildcard(const ParseNode *expr)
-{
-    const ParseNode *pattern;
-
-    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
-        return 0;
-    }
-
-    pattern = expr->children[0];
-    return pattern->kind == NODE_PRIMARY &&
-        pattern->token_type == TOKEN_IDENTIFIER &&
-        pattern->value != NULL &&
-        strcmp(pattern->value, "_") == 0;
-}
-
 static int typecheck_match_statement(
     SemanticInfo *info,
     const ParseNode *match_stmt,
@@ -926,39 +911,19 @@ static int typecheck_match_statement(
             semantic_error_at_node(case_node, "wildcard match case '_' must be the final case");
         }
 
-        if (match_case_is_wildcard(pattern_expr)) {
+        if (semantic_match_case_is_wildcard(pattern_expr)) {
+            if (semantic_enum_match_is_exhaustive(scrutinee_type, seen_variants)) {
+                semantic_error_at_node(case_node,
+                    "wildcard match case '_' is unreachable; previous cases already cover enum '%s'",
+                    semantic_enum_name(scrutinee_type));
+            }
             saw_wildcard = 1;
             branch_returns = typecheck_branch_suite(info, case_node->children[2], scope, current_function);
             match_returns = match_returns && branch_returns;
             continue;
         }
 
-        if (pattern_expr->child_count != 1) {
-            semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
-        }
-
-        if (semantic_infer_expression_type(info, pattern_expr, scope) != scrutinee_type) {
-            semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
-                semantic_enum_name(scrutinee_type));
-        }
-
-        {
-            ValueType case_enum_type = 0;
-            size_t variant_index = 0;
-
-            if (!semantic_enum_variant_for_node(info, pattern_expr->children[0], &case_enum_type, &variant_index)) {
-                semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
-            }
-            if (case_enum_type != scrutinee_type) {
-                semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
-                    semantic_enum_name(scrutinee_type));
-            }
-            if (seen_variants[variant_index]) {
-                semantic_error_at_node(pattern_expr, "duplicate match case '%s'",
-                    semantic_enum_variant_name(scrutinee_type, variant_index));
-            }
-            seen_variants[variant_index] = 1;
-        }
+        semantic_validate_enum_match_pattern(info, pattern_expr, scope, scrutinee_type, seen_variants);
 
         branch_returns = typecheck_branch_suite(info, case_node->children[2], scope, current_function);
         match_returns = match_returns && branch_returns;

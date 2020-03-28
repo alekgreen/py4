@@ -184,6 +184,104 @@ int semantic_enum_variant_for_node(
     return 1;
 }
 
+int semantic_match_case_is_wildcard(const ParseNode *expr)
+{
+    const ParseNode *pattern;
+
+    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
+        return 0;
+    }
+
+    pattern = expr->children[0];
+    return pattern->kind == NODE_PRIMARY &&
+        pattern->token_type == TOKEN_IDENTIFIER &&
+        pattern->value != NULL &&
+        strcmp(pattern->value, "_") == 0;
+}
+
+void semantic_validate_enum_match_pattern(
+    SemanticInfo *info,
+    const ParseNode *pattern_expr,
+    Scope *scope,
+    ValueType scrutinee_type,
+    unsigned char *seen_variants)
+{
+    ValueType case_enum_type = 0;
+    size_t variant_index = 0;
+
+    if (pattern_expr->child_count != 1) {
+        semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+    }
+    if (semantic_infer_expression_type(info, pattern_expr, scope) != scrutinee_type) {
+        semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+            semantic_enum_name(scrutinee_type));
+    }
+    if (!semantic_enum_variant_for_node(info, pattern_expr->children[0], &case_enum_type, &variant_index)) {
+        semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+    }
+    if (case_enum_type != scrutinee_type) {
+        semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+            semantic_enum_name(scrutinee_type));
+    }
+    if (seen_variants[variant_index]) {
+        semantic_error_at_node(pattern_expr, "duplicate match case '%s'",
+            semantic_enum_variant_name(scrutinee_type, variant_index));
+    }
+    seen_variants[variant_index] = 1;
+}
+
+int semantic_enum_match_is_exhaustive(ValueType enum_type, const unsigned char *seen_variants)
+{
+    for (size_t i = 0; i < semantic_enum_variant_count(enum_type); i++) {
+        if (!seen_variants[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void semantic_error_missing_enum_match_cases(
+    const ParseNode *node,
+    ValueType enum_type,
+    const unsigned char *seen_variants)
+{
+    char buffer[512];
+    size_t used;
+    size_t missing_count = 0;
+
+    used = (size_t)snprintf(
+        buffer,
+        sizeof(buffer),
+        "non-exhaustive match expression for enum '%s'; missing cases ",
+        semantic_enum_name(enum_type));
+    if (used >= sizeof(buffer)) {
+        semantic_error_at_node(node, "non-exhaustive match expression for enum '%s'",
+            semantic_enum_name(enum_type));
+    }
+
+    for (size_t i = 0; i < semantic_enum_variant_count(enum_type); i++) {
+        int written;
+
+        if (seen_variants[i]) {
+            continue;
+        }
+        written = snprintf(
+            buffer + used,
+            sizeof(buffer) - used,
+            "%s'%s'",
+            missing_count == 0 ? "" : ", ",
+            semantic_enum_variant_name(enum_type, i));
+        if (written < 0 || (size_t)written >= sizeof(buffer) - used) {
+            semantic_error_at_node(node, "non-exhaustive match expression for enum '%s'",
+                semantic_enum_name(enum_type));
+        }
+        used += (size_t)written;
+        missing_count++;
+    }
+
+    semantic_error_at_node(node, "%s", buffer);
+}
+
 ValueType semantic_call_constructor_type(const SemanticInfo *info, const ParseNode *call)
 {
     return semantic_resolved_constructor_target(info, call);

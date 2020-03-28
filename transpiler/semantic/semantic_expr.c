@@ -1384,21 +1384,6 @@ static int is_boolean_operator(const char *op)
     return strcmp(op, "and") == 0 || strcmp(op, "or") == 0;
 }
 
-static int match_case_is_wildcard(const ParseNode *expr)
-{
-    const ParseNode *pattern;
-
-    if (expr == NULL || expr->kind != NODE_EXPRESSION || expr->child_count != 1) {
-        return 0;
-    }
-
-    pattern = expr->children[0];
-    return pattern->kind == NODE_PRIMARY &&
-        pattern->token_type == TOKEN_IDENTIFIER &&
-        pattern->value != NULL &&
-        strcmp(pattern->value, "_") == 0;
-}
-
 static ValueType combine_match_result_types(
     const ParseNode *node,
     ValueType current_type,
@@ -1420,24 +1405,6 @@ static ValueType combine_match_result_types(
 
     semantic_error_at_node(node, "match expression arms must resolve to one concrete type");
     return TYPE_NONE;
-}
-
-static void require_exhaustive_enum_match(
-    const ParseNode *node,
-    ValueType enum_type,
-    const unsigned char *seen_variants)
-{
-    for (size_t i = 0; i < semantic_enum_variant_count(enum_type); i++) {
-        if (seen_variants[i]) {
-            continue;
-        }
-
-        semantic_error_at_node(
-            node,
-            "non-exhaustive match expression for enum '%s'; missing case '%s'",
-            semantic_enum_name(enum_type),
-            semantic_enum_variant_name(enum_type, i));
-    }
 }
 
 static ValueType infer_match_expression_type(
@@ -1465,34 +1432,15 @@ static ValueType infer_match_expression_type(
             semantic_error_at_node(case_node, "wildcard match case '_' must be the final case");
         }
 
-        if (match_case_is_wildcard(pattern_expr)) {
-            saw_wildcard = 1;
-        } else {
-            if (pattern_expr->child_count != 1) {
-                semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
-            }
-            if (semantic_infer_expression_type(info, pattern_expr, scope) != scrutinee_type) {
-                semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+        if (semantic_match_case_is_wildcard(pattern_expr)) {
+            if (semantic_enum_match_is_exhaustive(scrutinee_type, seen_variants)) {
+                semantic_error_at_node(case_node,
+                    "wildcard match case '_' is unreachable; previous cases already cover enum '%s'",
                     semantic_enum_name(scrutinee_type));
             }
-
-            {
-                ValueType case_enum_type = 0;
-                size_t variant_index = 0;
-
-                if (!semantic_enum_variant_for_node(info, pattern_expr->children[0], &case_enum_type, &variant_index)) {
-                    semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
-                }
-                if (case_enum_type != scrutinee_type) {
-                    semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
-                        semantic_enum_name(scrutinee_type));
-                }
-                if (seen_variants[variant_index]) {
-                    semantic_error_at_node(pattern_expr, "duplicate match case '%s'",
-                        semantic_enum_variant_name(scrutinee_type, variant_index));
-                }
-                seen_variants[variant_index] = 1;
-            }
+            saw_wildcard = 1;
+        } else {
+            semantic_validate_enum_match_pattern(info, pattern_expr, scope, scrutinee_type, seen_variants);
         }
 
         branch_type = result_type == 0
@@ -1501,8 +1449,8 @@ static ValueType infer_match_expression_type(
         result_type = combine_match_result_types(value_expr, result_type, branch_type);
     }
 
-    if (!saw_wildcard) {
-        require_exhaustive_enum_match(node, scrutinee_type, seen_variants);
+    if (!saw_wildcard && !semantic_enum_match_is_exhaustive(scrutinee_type, seen_variants)) {
+        semantic_error_missing_enum_match_cases(node, scrutinee_type, seen_variants);
     }
 
     semantic_record_node_type(info, node, result_type);
