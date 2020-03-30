@@ -896,10 +896,11 @@ static int typecheck_match_statement(
     int match_returns = 1;
     int saw_wildcard = 0;
     unsigned char seen_variants[MAX_ENUM_VARIANTS] = {0};
+    unsigned char seen_bool_values[2] = {0};
 
     scrutinee_type = semantic_infer_expression_type(info, match_stmt->children[0], scope);
-    if (!semantic_type_is_enum(scrutinee_type)) {
-        semantic_error_at_node(match_stmt->children[0], "match scrutinee must be an enum");
+    if (!semantic_match_type_supported(scrutinee_type)) {
+        semantic_error_at_node(match_stmt->children[0], "match scrutinee must be enum, int, char, or bool");
     }
 
     for (size_t i = 2; i < match_stmt->child_count; i++) {
@@ -912,10 +913,10 @@ static int typecheck_match_statement(
         }
 
         if (semantic_match_case_is_wildcard(pattern_expr)) {
-            if (semantic_enum_match_is_exhaustive(scrutinee_type, seen_variants)) {
+            if (semantic_match_is_exhaustive(scrutinee_type, seen_variants, seen_bool_values)) {
                 semantic_error_at_node(case_node,
-                    "wildcard match case '_' is unreachable; previous cases already cover enum '%s'",
-                    semantic_enum_name(scrutinee_type));
+                    "wildcard match case '_' is unreachable; previous cases already cover %s",
+                    semantic_type_name(scrutinee_type));
             }
             saw_wildcard = 1;
             branch_returns = typecheck_branch_suite(info, case_node->children[2], scope, current_function);
@@ -923,7 +924,15 @@ static int typecheck_match_statement(
             continue;
         }
 
-        semantic_validate_enum_match_pattern(info, pattern_expr, scope, scrutinee_type, seen_variants);
+        semantic_validate_enum_match_pattern(
+            info,
+            pattern_expr,
+            scope,
+            scrutinee_type,
+            match_stmt,
+            i,
+            seen_variants,
+            seen_bool_values);
 
         branch_returns = typecheck_branch_suite(info, case_node->children[2], scope, current_function);
         match_returns = match_returns && branch_returns;

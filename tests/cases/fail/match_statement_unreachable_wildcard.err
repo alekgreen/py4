@@ -1,1 +1,1 @@
-wildcard match case '_' is unreachable; previous cases already cover enum 'TokenKind'
+wildcard match case '_' is unreachable; previous cases already cover TokenKind

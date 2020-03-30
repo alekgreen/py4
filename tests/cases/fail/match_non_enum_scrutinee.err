@@ -1,1 +1,1 @@
-match scrutinee must be an enum
+match scrutinee must be enum, int, char, or bool

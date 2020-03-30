@@ -1,5 +1,5 @@
 def main() -> None:
-    value = 1
+    value = "nope"
 
     match value:
         case _:

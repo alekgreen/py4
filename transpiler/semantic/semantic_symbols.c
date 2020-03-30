@@ -199,87 +199,216 @@ int semantic_match_case_is_wildcard(const ParseNode *expr)
         strcmp(pattern->value, "_") == 0;
 }
 
+int semantic_match_type_supported(ValueType type)
+{
+    return semantic_type_is_enum(type) ||
+        type == TYPE_INT ||
+        type == TYPE_CHAR ||
+        type == TYPE_BOOL;
+}
+
+int semantic_match_type_has_finite_coverage(ValueType type)
+{
+    return semantic_type_is_enum(type) || type == TYPE_BOOL;
+}
+
+static const char *scalar_match_pattern_description(ValueType type)
+{
+    if (type == TYPE_INT) {
+        return "an int literal or '_'";
+    }
+    if (type == TYPE_CHAR) {
+        return "a char literal or '_'";
+    }
+    if (type == TYPE_BOOL) {
+        return "'True', 'False', or '_'";
+    }
+    return "a compatible literal or '_'";
+}
+
+static int scalar_pattern_matches_type(const ParseNode *pattern, ValueType type)
+{
+    if (pattern == NULL || pattern->kind != NODE_PRIMARY || pattern->value == NULL) {
+        return 0;
+    }
+    if (type == TYPE_INT) {
+        return pattern->token_type == TOKEN_NUMBER && strchr(pattern->value, '.') == NULL;
+    }
+    if (type == TYPE_CHAR) {
+        return pattern->token_type == TOKEN_CHAR;
+    }
+    if (type == TYPE_BOOL) {
+        return pattern->token_type == TOKEN_KEYWORD &&
+            (strcmp(pattern->value, "True") == 0 || strcmp(pattern->value, "False") == 0);
+    }
+    return 0;
+}
+
+static int scalar_patterns_equal(const ParseNode *lhs, const ParseNode *rhs, ValueType type)
+{
+    if (!scalar_pattern_matches_type(lhs, type) || !scalar_pattern_matches_type(rhs, type)) {
+        return 0;
+    }
+    return strcmp(lhs->value, rhs->value) == 0;
+}
+
 void semantic_validate_enum_match_pattern(
     SemanticInfo *info,
     const ParseNode *pattern_expr,
     Scope *scope,
     ValueType scrutinee_type,
-    unsigned char *seen_variants)
+    const ParseNode *match_node,
+    size_t case_index,
+    unsigned char *seen_variants,
+    unsigned char *seen_bool_values)
 {
-    ValueType case_enum_type = 0;
-    size_t variant_index = 0;
-
     if (pattern_expr->child_count != 1) {
-        semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+        if (semantic_type_is_enum(scrutinee_type)) {
+            semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+        }
+        semantic_error_at_node(pattern_expr, "match case must be %s",
+            scalar_match_pattern_description(scrutinee_type));
     }
-    if (semantic_infer_expression_type(info, pattern_expr, scope) != scrutinee_type) {
-        semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
-            semantic_enum_name(scrutinee_type));
-    }
-    if (!semantic_enum_variant_for_node(info, pattern_expr->children[0], &case_enum_type, &variant_index)) {
-        semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
-    }
-    if (case_enum_type != scrutinee_type) {
-        semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
-            semantic_enum_name(scrutinee_type));
-    }
-    if (seen_variants[variant_index]) {
-        semantic_error_at_node(pattern_expr, "duplicate match case '%s'",
-            semantic_enum_variant_name(scrutinee_type, variant_index));
-    }
-    seen_variants[variant_index] = 1;
-}
 
-int semantic_enum_match_is_exhaustive(ValueType enum_type, const unsigned char *seen_variants)
-{
-    for (size_t i = 0; i < semantic_enum_variant_count(enum_type); i++) {
-        if (!seen_variants[i]) {
-            return 0;
+    if (semantic_type_is_enum(scrutinee_type)) {
+        ValueType case_enum_type = 0;
+        size_t variant_index = 0;
+
+        if (semantic_infer_expression_type(info, pattern_expr, scope) != scrutinee_type) {
+            semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+                semantic_enum_name(scrutinee_type));
+        }
+        if (!semantic_enum_variant_for_node(info, pattern_expr->children[0], &case_enum_type, &variant_index)) {
+            semantic_error_at_node(pattern_expr, "match case must be an enum member or '_'");
+        }
+        if (case_enum_type != scrutinee_type) {
+            semantic_error_at_node(pattern_expr, "match case must use members of enum '%s'",
+                semantic_enum_name(scrutinee_type));
+        }
+        if (seen_variants[variant_index]) {
+            semantic_error_at_node(pattern_expr, "duplicate match case '%s'",
+                semantic_enum_variant_name(scrutinee_type, variant_index));
+        }
+        seen_variants[variant_index] = 1;
+        return;
+    }
+
+    {
+        const ParseNode *pattern = pattern_expr->children[0];
+
+        if (!scalar_pattern_matches_type(pattern, scrutinee_type)) {
+            semantic_error_at_node(pattern_expr, "match case must be %s",
+                scalar_match_pattern_description(scrutinee_type));
+        }
+
+        for (size_t i = 2; i < case_index; i++) {
+            const ParseNode *previous_case = semantic_expect_child(match_node, i, NODE_MATCH_CASE);
+            const ParseNode *previous_pattern_expr = semantic_expect_child(previous_case, 0, NODE_EXPRESSION);
+
+            if (semantic_match_case_is_wildcard(previous_pattern_expr)) {
+                continue;
+            }
+            if (scalar_patterns_equal(previous_pattern_expr->children[0], pattern, scrutinee_type)) {
+                semantic_error_at_node(pattern_expr, "duplicate match case literal %s", pattern->value);
+            }
+        }
+
+        if (scrutinee_type == TYPE_BOOL) {
+            seen_bool_values[strcmp(pattern->value, "True") == 0 ? 1 : 0] = 1;
         }
     }
-    return 1;
 }
 
-void semantic_error_missing_enum_match_cases(
+int semantic_match_is_exhaustive(
+    ValueType type,
+    const unsigned char *seen_variants,
+    const unsigned char *seen_bool_values)
+{
+    if (semantic_type_is_enum(type)) {
+        for (size_t i = 0; i < semantic_enum_variant_count(type); i++) {
+            if (!seen_variants[i]) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+
+    if (type == TYPE_BOOL) {
+        return seen_bool_values[0] && seen_bool_values[1];
+    }
+
+    return 0;
+}
+
+void semantic_error_missing_match_cases(
     const ParseNode *node,
-    ValueType enum_type,
-    const unsigned char *seen_variants)
+    ValueType type,
+    const unsigned char *seen_variants,
+    const unsigned char *seen_bool_values)
 {
     char buffer[512];
     size_t used;
-    size_t missing_count = 0;
 
-    used = (size_t)snprintf(
-        buffer,
-        sizeof(buffer),
-        "non-exhaustive match expression for enum '%s'; missing cases ",
-        semantic_enum_name(enum_type));
-    if (used >= sizeof(buffer)) {
-        semantic_error_at_node(node, "non-exhaustive match expression for enum '%s'",
-            semantic_enum_name(enum_type));
-    }
+    if (semantic_type_is_enum(type)) {
+        size_t missing_count = 0;
 
-    for (size_t i = 0; i < semantic_enum_variant_count(enum_type); i++) {
-        int written;
-
-        if (seen_variants[i]) {
-            continue;
-        }
-        written = snprintf(
-            buffer + used,
-            sizeof(buffer) - used,
-            "%s'%s'",
-            missing_count == 0 ? "" : ", ",
-            semantic_enum_variant_name(enum_type, i));
-        if (written < 0 || (size_t)written >= sizeof(buffer) - used) {
+        used = (size_t)snprintf(
+            buffer,
+            sizeof(buffer),
+            "non-exhaustive match expression for enum '%s'; missing cases ",
+            semantic_enum_name(type));
+        if (used >= sizeof(buffer)) {
             semantic_error_at_node(node, "non-exhaustive match expression for enum '%s'",
-                semantic_enum_name(enum_type));
+                semantic_enum_name(type));
         }
-        used += (size_t)written;
-        missing_count++;
+
+        for (size_t i = 0; i < semantic_enum_variant_count(type); i++) {
+            int written;
+
+            if (seen_variants[i]) {
+                continue;
+            }
+            written = snprintf(
+                buffer + used,
+                sizeof(buffer) - used,
+                "%s'%s'",
+                missing_count == 0 ? "" : ", ",
+                semantic_enum_variant_name(type, i));
+            if (written < 0 || (size_t)written >= sizeof(buffer) - used) {
+                semantic_error_at_node(node, "non-exhaustive match expression for enum '%s'",
+                    semantic_enum_name(type));
+            }
+            used += (size_t)written;
+            missing_count++;
+        }
+
+        semantic_error_at_node(node, "%s", buffer);
     }
 
-    semantic_error_at_node(node, "%s", buffer);
+    if (type == TYPE_BOOL) {
+        used = (size_t)snprintf(
+            buffer,
+            sizeof(buffer),
+            "non-exhaustive match expression for bool; missing cases ");
+        if (used >= sizeof(buffer)) {
+            semantic_error_at_node(node, "non-exhaustive match expression for bool");
+        }
+        if (!seen_bool_values[1]) {
+            used += (size_t)snprintf(buffer + used, sizeof(buffer) - used, "'True'");
+        }
+        if (!seen_bool_values[0]) {
+            (void)snprintf(
+                buffer + used,
+                sizeof(buffer) - used,
+                "%s'False'",
+                seen_bool_values[1] ? "" : ", ");
+        }
+
+        semantic_error_at_node(node, "%s", buffer);
+    }
+
+    semantic_error_at_node(node, "match expression for %s requires a wildcard case '_'",
+        semantic_type_name(type));
 }
 
 ValueType semantic_call_constructor_type(const SemanticInfo *info, const ParseNode *call)

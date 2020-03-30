@@ -195,16 +195,25 @@ GlobalTargetInfo *semantic_find_global_target(const SemanticInfo *info, const Pa
 void semantic_record_inferred_declaration_target(SemanticInfo *info, const ParseNode *node);
 int semantic_is_inferred_declaration_target(const SemanticInfo *info, const ParseNode *node);
 int semantic_match_case_is_wildcard(const ParseNode *expr);
+int semantic_match_type_supported(ValueType type);
+int semantic_match_type_has_finite_coverage(ValueType type);
 void semantic_validate_enum_match_pattern(
     SemanticInfo *info,
     const ParseNode *pattern_expr,
     Scope *scope,
     ValueType scrutinee_type,
-    unsigned char *seen_variants);
-int semantic_enum_match_is_exhaustive(ValueType enum_type, const unsigned char *seen_variants);
-void semantic_error_missing_enum_match_cases(
+    const ParseNode *match_node,
+    size_t case_index,
+    unsigned char *seen_variants,
+    unsigned char *seen_bool_values);
+int semantic_match_is_exhaustive(
+    ValueType type,
+    const unsigned char *seen_variants,
+    const unsigned char *seen_bool_values);
+void semantic_error_missing_match_cases(
     const ParseNode *node,
-    ValueType enum_type,
-    const unsigned char *seen_variants);
+    ValueType type,
+    const unsigned char *seen_variants,
+    const unsigned char *seen_bool_values);
 
 #endif

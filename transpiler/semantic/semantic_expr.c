@@ -1416,10 +1416,11 @@ static ValueType infer_match_expression_type(
     ValueType result_type = 0;
     int saw_wildcard = 0;
     unsigned char seen_variants[MAX_ENUM_VARIANTS] = {0};
+    unsigned char seen_bool_values[2] = {0};
 
     scrutinee_type = semantic_infer_expression_type(info, node->children[0], scope);
-    if (!semantic_type_is_enum(scrutinee_type)) {
-        semantic_error_at_node(node->children[0], "match scrutinee must be an enum");
+    if (!semantic_match_type_supported(scrutinee_type)) {
+        semantic_error_at_node(node->children[0], "match scrutinee must be enum, int, char, or bool");
     }
 
     for (size_t i = 2; i < node->child_count; i++) {
@@ -1433,14 +1434,22 @@ static ValueType infer_match_expression_type(
         }
 
         if (semantic_match_case_is_wildcard(pattern_expr)) {
-            if (semantic_enum_match_is_exhaustive(scrutinee_type, seen_variants)) {
+            if (semantic_match_is_exhaustive(scrutinee_type, seen_variants, seen_bool_values)) {
                 semantic_error_at_node(case_node,
-                    "wildcard match case '_' is unreachable; previous cases already cover enum '%s'",
-                    semantic_enum_name(scrutinee_type));
+                    "wildcard match case '_' is unreachable; previous cases already cover %s",
+                    semantic_type_name(scrutinee_type));
             }
             saw_wildcard = 1;
         } else {
-            semantic_validate_enum_match_pattern(info, pattern_expr, scope, scrutinee_type, seen_variants);
+            semantic_validate_enum_match_pattern(
+                info,
+                pattern_expr,
+                scope,
+                scrutinee_type,
+                node,
+                i,
+                seen_variants,
+                seen_bool_values);
         }
 
         branch_type = result_type == 0
@@ -1449,8 +1458,8 @@ static ValueType infer_match_expression_type(
         result_type = combine_match_result_types(value_expr, result_type, branch_type);
     }
 
-    if (!saw_wildcard && !semantic_enum_match_is_exhaustive(scrutinee_type, seen_variants)) {
-        semantic_error_missing_enum_match_cases(node, scrutinee_type, seen_variants);
+    if (!saw_wildcard && !semantic_match_is_exhaustive(scrutinee_type, seen_variants, seen_bool_values)) {
+        semantic_error_missing_match_cases(node, scrutinee_type, seen_variants, seen_bool_values);
     }
 
     semantic_record_node_type(info, node, result_type);
