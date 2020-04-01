@@ -34,6 +34,44 @@ FunctionInfo *semantic_find_function_by_node(FunctionInfo *functions, const Pars
     return NULL;
 }
 
+void semantic_record_function_capture(FunctionInfo *fn, const char *name, ValueType type)
+{
+    if (fn == NULL || name == NULL) {
+        semantic_error("cannot record function capture without a target function");
+    }
+
+    for (size_t i = 0; i < fn->capture_count; i++) {
+        if (strcmp(fn->capture_names[i], name) == 0) {
+            if (fn->capture_types[i] != type) {
+                semantic_error("closure capture '%s' changed from %s to %s",
+                    name,
+                    semantic_type_name(fn->capture_types[i]),
+                    semantic_type_name(type));
+            }
+            return;
+        }
+    }
+
+    if (fn->capture_count == fn->capture_capacity) {
+        size_t next_capacity = fn->capture_capacity == 0 ? 4 : fn->capture_capacity * 2;
+        const char **next_names = realloc(fn->capture_names, sizeof(const char *) * next_capacity);
+        ValueType *next_types = realloc(fn->capture_types, sizeof(ValueType) * next_capacity);
+
+        if (next_names == NULL || next_types == NULL) {
+            perror("realloc");
+            exit(1);
+        }
+
+        fn->capture_names = next_names;
+        fn->capture_types = next_types;
+        fn->capture_capacity = next_capacity;
+    }
+
+    fn->capture_names[fn->capture_count] = name;
+    fn->capture_types[fn->capture_count] = type;
+    fn->capture_count++;
+}
+
 void semantic_record_call_target(SemanticInfo *info, const ParseNode *call, FunctionInfo *function)
 {
     CallTargetInfo *target;
@@ -439,6 +477,75 @@ ValueType semantic_call_parameter_type(const SemanticInfo *info, const ParseNode
     return fn->param_types[index];
 }
 
+int semantic_function_is_nested(const SemanticInfo *info, const ParseNode *function_def)
+{
+    FunctionInfo *fn = semantic_find_function_by_node(info->functions, function_def);
+
+    if (fn == NULL) {
+        return 0;
+    }
+    return fn->enclosing != NULL;
+}
+
+size_t semantic_function_capture_count(const SemanticInfo *info, const ParseNode *function_def)
+{
+    FunctionInfo *fn = semantic_find_function_by_node(info->functions, function_def);
+
+    if (fn == NULL) {
+        return 0;
+    }
+    return fn->capture_count;
+}
+
+const char *semantic_function_capture_name(const SemanticInfo *info, const ParseNode *function_def, size_t index)
+{
+    FunctionInfo *fn = semantic_find_function_by_node(info->functions, function_def);
+
+    if (fn == NULL) {
+        semantic_error("unknown function definition during code generation");
+    }
+    if (index >= fn->capture_count) {
+        semantic_error("function capture index out of range");
+    }
+    return fn->capture_names[index];
+}
+
+ValueType semantic_function_capture_type(const SemanticInfo *info, const ParseNode *function_def, size_t index)
+{
+    FunctionInfo *fn = semantic_find_function_by_node(info->functions, function_def);
+
+    if (fn == NULL) {
+        semantic_error("unknown function definition during code generation");
+    }
+    if (index >= fn->capture_count) {
+        semantic_error("function capture index out of range");
+    }
+    return fn->capture_types[index];
+}
+
+size_t semantic_call_capture_count(const SemanticInfo *info, const ParseNode *call)
+{
+    FunctionInfo *fn = semantic_resolved_call_target(info, call);
+
+    if (fn == NULL) {
+        semantic_error("unresolved function call during code generation");
+    }
+    return fn->capture_count;
+}
+
+const char *semantic_call_capture_name(const SemanticInfo *info, const ParseNode *call, size_t index)
+{
+    FunctionInfo *fn = semantic_resolved_call_target(info, call);
+
+    if (fn == NULL) {
+        semantic_error("unresolved function call during code generation");
+    }
+    if (index >= fn->capture_count) {
+        semantic_error("call capture index out of range");
+    }
+    return fn->capture_names[index];
+}
+
 ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name)
 {
     for (ModuleInfo *module = modules; module != NULL; module = module->next) {
@@ -733,6 +840,7 @@ void semantic_bind_variable(Scope *scope, const char *name, ValueType type)
     binding->name = name;
     binding->module_name = scope->parent == NULL && scope->module != NULL ? scope->module->name : NULL;
     binding->type = type;
+    binding->function = scope->function;
     binding->next = scope->vars;
     scope->vars = binding;
 }

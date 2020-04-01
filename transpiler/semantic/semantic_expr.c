@@ -1341,6 +1341,19 @@ ValueType semantic_infer_primary_type(
                 semantic_record_global_target(info, node, global->module_name, global->name);
                 break;
             }
+            if (var->module_name == NULL && var->function != NULL) {
+                const FunctionInfo *current_function = scope_function(scope);
+
+                if (current_function != NULL &&
+                    current_function->enclosing != NULL &&
+                    var->function != current_function) {
+                    if (var->function != current_function->enclosing) {
+                        semantic_error_at_node(node,
+                            "nested functions can only capture variables from their enclosing function");
+                    }
+                    semantic_record_function_capture((FunctionInfo *)current_function, var->name, var->type);
+                }
+            }
             if (var->module_name != NULL) {
                 semantic_record_global_target(info, node, var->module_name, var->name);
             }

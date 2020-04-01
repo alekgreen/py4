@@ -1,0 +1,2 @@
+main__add__int(int x, int base);
+main__add__int(5, base)

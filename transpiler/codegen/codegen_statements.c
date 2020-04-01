@@ -1020,7 +1020,6 @@ void codegen_emit_statement(CodegenContext *ctx, const ParseNode *statement, int
         if (!allow_function_defs) {
             codegen_error("nested function definitions are not supported in C output");
         }
-        emit_function_definition(ctx, payload);
         return;
     }
 

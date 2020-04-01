@@ -36,6 +36,49 @@ void emit_parameter_list(CodegenContext *ctx, const ParseNode *parameters, int i
     }
 }
 
+static void emit_function_parameter_list(CodegenContext *ctx, const ParseNode *function_def, int is_c_main)
+{
+    const ParseNode *parameters = codegen_function_parameters(function_def);
+    size_t capture_count = semantic_function_capture_count(ctx->semantic, function_def);
+    int wrote_any = 0;
+
+    if (is_c_main) {
+        fputs("void", ctx->out);
+        return;
+    }
+
+    if (!(parameters->child_count == 1 && codegen_is_epsilon_node(parameters->children[0]))) {
+        for (size_t i = 0; i < parameters->child_count; i++) {
+            const ParseNode *param = parameters->children[i];
+            const ParseNode *type_node = codegen_expect_child(param, 0, NODE_TYPE);
+
+            if (wrote_any) {
+                fputs(", ", ctx->out);
+            }
+            codegen_emit_type_name(ctx, semantic_type_of(ctx->semantic, type_node));
+            if (ctx->current_function_is_init && i == 0) {
+                fprintf(ctx->out, " *%s", param->value);
+            } else {
+                fprintf(ctx->out, " %s", param->value);
+            }
+            wrote_any = 1;
+        }
+    }
+
+    for (size_t i = 0; i < capture_count; i++) {
+        if (wrote_any) {
+            fputs(", ", ctx->out);
+        }
+        codegen_emit_type_name(ctx, semantic_function_capture_type(ctx->semantic, function_def, i));
+        fprintf(ctx->out, " %s", semantic_function_capture_name(ctx->semantic, function_def, i));
+        wrote_any = 1;
+    }
+
+    if (!wrote_any) {
+        fputs("void", ctx->out);
+    }
+}
+
 static const ParseNode *find_class_init_definition(const ParseNode *class_def)
 {
     for (size_t i = class_member_start_index(class_def); i < class_def->child_count; i++) {
@@ -110,7 +153,6 @@ static ValueType codegen_method_owner_type(CodegenContext *ctx, const ParseNode 
 static void emit_function_signature(CodegenContext *ctx, const ParseNode *function_def, int prototype_only)
 {
     const ParseNode *name = codegen_expect_child(function_def, 0, NODE_PRIMARY);
-    const ParseNode *parameters = codegen_function_parameters(function_def);
     ValueType owner_type = codegen_method_owner_type(ctx, function_def);
     int is_c_main = owner_type == 0 && codegen_is_main_function(function_def);
     int prev_is_init = ctx->current_function_is_init;
@@ -126,7 +168,7 @@ static void emit_function_signature(CodegenContext *ctx, const ParseNode *functi
             ? semantic_method_c_name(ctx->semantic, owner_type, name->value)
             : semantic_function_c_name(ctx->semantic, function_def));
     }
-    emit_parameter_list(ctx, parameters, is_c_main);
+    emit_function_parameter_list(ctx, function_def, is_c_main);
     fputc(')', ctx->out);
     if (prototype_only) {
         fputs(";\n", ctx->out);
@@ -172,13 +214,41 @@ void emit_function_definition(CodegenContext *ctx, const ParseNode *function_def
             codegen_register_ref_local(ctx, param->value, param_type);
         }
     }
+    for (size_t i = 0; i < semantic_function_capture_count(ctx->semantic, function_def); i++) {
+        ValueType capture_type = semantic_function_capture_type(ctx->semantic, function_def, i);
+        const char *capture_name = semantic_function_capture_name(ctx->semantic, function_def, i);
+
+        if (!semantic_type_needs_management(capture_type)) {
+            continue;
+        }
+
+        codegen_emit_value_retain(ctx, capture_type, capture_name);
+        codegen_register_ref_local(ctx, capture_name, capture_type);
+    }
 
     if (is_c_main && ctx->has_top_level_executable_statements) {
         codegen_emit_indent(ctx);
         fputs("py4_module_init();\n", ctx->out);
     }
 
-    codegen_emit_suite(ctx, codegen_function_suite(function_def));
+    {
+        int allow_nested_functions = !semantic_function_is_nested(ctx->semantic, function_def) && owner_type == 0;
+
+        if (allow_nested_functions) {
+            const ParseNode *suite = codegen_function_suite(function_def);
+
+            if (suite->child_count == 1 && codegen_is_epsilon_node(suite->children[0])) {
+                codegen_emit_indent(ctx);
+                fputs("/* empty */\n", ctx->out);
+            } else {
+                for (size_t i = 0; i < suite->child_count; i++) {
+                    codegen_emit_statement(ctx, suite->children[i], 1);
+                }
+            }
+        } else {
+            codegen_emit_suite(ctx, codegen_function_suite(function_def));
+        }
+    }
     codegen_pop_cleanup_scope(ctx);
 
     if (is_c_main) {
@@ -294,6 +364,32 @@ static void emit_constructor_helper_definition(
     fputs("}\n", ctx->out);
 }
 
+static void emit_nested_function_entries(
+    CodegenContext *ctx,
+    const ParseNode *function_def,
+    int prototype_only)
+{
+    const ParseNode *suite = codegen_function_suite(function_def);
+
+    if (suite->child_count == 1 && codegen_is_epsilon_node(suite->children[0])) {
+        return;
+    }
+
+    for (size_t i = 0; i < suite->child_count; i++) {
+        const ParseNode *payload = codegen_statement_payload(suite->children[i]);
+
+        if (payload->kind != NODE_FUNCTION_DEF) {
+            continue;
+        }
+        if (prototype_only) {
+            emit_function_signature(ctx, payload, 1);
+        } else {
+            emit_function_definition(ctx, payload);
+            fputc('\n', ctx->out);
+        }
+    }
+}
+
 void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
 {
     int wrote_any = 0;
@@ -340,6 +436,7 @@ void emit_function_prototypes(CodegenContext *ctx, const ParseNode *root)
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_signature(ctx, payload, 1);
+            emit_nested_function_entries(ctx, payload, 1);
             wrote_any = 1;
         }
     }
@@ -390,6 +487,7 @@ void emit_top_level_functions(CodegenContext *ctx, const ParseNode *root)
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
             emit_function_definition(ctx, payload);
+            emit_nested_function_entries(ctx, payload, 0);
             fputc('\n', ctx->out);
         }
     }

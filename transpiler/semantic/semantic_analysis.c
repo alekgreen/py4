@@ -49,7 +49,11 @@ static void collect_methods(SemanticInfo *info, const ParseNode *root);
 static void collect_functions(SemanticInfo *info, const ParseNode *root);
 static void collect_module_bindings(SemanticInfo *info, const LoadedProgram *program);
 static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *program);
-static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope);
+static void typecheck_function(
+    SemanticInfo *info,
+    const ParseNode *function_def,
+    Scope *global_scope,
+    FunctionInfo *function_info);
 static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_def, Scope *global_scope);
 
 static int is_private_member_name(const char *name)
@@ -326,10 +330,14 @@ static void collect_native_types(SemanticInfo *info, const ParseNode *root)
 
 static int same_function_signature(
     FunctionInfo *fn,
+    const FunctionInfo *enclosing,
     const char *module_name,
     size_t param_count,
     const ValueType *param_types)
 {
+    if (fn->enclosing != enclosing) {
+        return 0;
+    }
     if (strcmp(fn->module_name, module_name) != 0) {
         return 0;
     }
@@ -346,6 +354,7 @@ static int same_function_signature(
 
 static char *build_function_c_name(
     const ParseNode *function_def,
+    const FunctionInfo *enclosing,
     const char *module_name,
     const char *name,
     size_t param_count,
@@ -355,7 +364,7 @@ static char *build_function_c_name(
     char buffer[512];
     size_t length = 0;
 
-    if (!is_native && strcmp(name, "main") == 0) {
+    if (!is_native && enclosing == NULL && strcmp(name, "main") == 0) {
         return dup_string("main");
     }
 
@@ -389,6 +398,10 @@ static char *build_function_c_name(
         append_text(buffer, sizeof(buffer), &length, "py4_fn_");
         append_identifier_text(buffer, sizeof(buffer), &length, module_name);
         append_text(buffer, sizeof(buffer), &length, "_");
+        if (enclosing != NULL) {
+            append_identifier_text(buffer, sizeof(buffer), &length, enclosing->name);
+            append_text(buffer, sizeof(buffer), &length, "__");
+        }
         append_identifier_text(buffer, sizeof(buffer), &length, name);
     }
 
@@ -480,6 +493,18 @@ static void bind_tuple_target_declaration(
     }
 }
 
+static int binding_is_captured_from_outer_scope(Scope *scope, VariableBinding *var)
+{
+    const FunctionInfo *current_function = scope_function(scope);
+
+    return current_function != NULL &&
+        current_function->enclosing != NULL &&
+        var != NULL &&
+        var->module_name == NULL &&
+        var->function != NULL &&
+        var->function != current_function;
+}
+
 static void check_tuple_target_assignment(
     SemanticInfo *info,
     const ParseNode *target,
@@ -492,6 +517,9 @@ static void check_tuple_target_assignment(
 
         if (var == NULL) {
             semantic_error_at_node(target, "assignment to undeclared variable '%s'", target->value);
+        }
+        if (binding_is_captured_from_outer_scope(scope, var)) {
+            semantic_error_at_node(target, "assigning to captured variable '%s' is not supported", target->value);
         }
         if (!semantic_is_assignable(var->type, tuple_type)) {
             semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
@@ -804,6 +832,9 @@ static int typecheck_simple_statement(
     }
 
     expr_type = semantic_infer_expression_type_with_hint(info, expr, scope, var->type);
+    if (binding_is_captured_from_outer_scope(scope, var)) {
+        semantic_error_at_node(target, "assigning to captured variable '%s' is not supported", target->value);
+    }
     if (!semantic_is_assignable(var->type, expr_type)) {
         semantic_error_at_node(expr, "cannot assign %s to %s '%s'",
             semantic_type_name(expr_type),
@@ -1337,78 +1368,119 @@ static void collect_methods(SemanticInfo *info, const ParseNode *root)
     }
 }
 
+static FunctionInfo *register_function(
+    SemanticInfo *info,
+    const ParseNode *payload,
+    const FunctionInfo *enclosing)
+{
+    const ParseNode *parameters;
+    size_t count;
+    ValueType *param_types;
+    const char *name;
+    char *module_name;
+    FunctionInfo *existing;
+    FunctionInfo *fn;
+
+    name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
+    {
+        ModuleInfo *module = module_info_for_path(info, payload->source_path);
+        module_name = module != NULL ? dup_string(module->name) : module_name_from_path(payload->source_path);
+    }
+    if (semantic_find_class_type(name) != 0) {
+        semantic_error_at_node(payload->children[0], "function name '%s' conflicts with class", name);
+    }
+
+    parameters = semantic_function_parameters(payload);
+    count = semantic_parameter_count(parameters);
+    if (strcmp(name, "main") == 0 && enclosing == NULL) {
+        if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
+            semantic_error_at_node(payload->children[0], "main cannot be declared as native");
+        }
+        if (count != 0 || semantic_function_return_type(info, payload) != TYPE_NONE) {
+            semantic_error_at_node(payload->children[0], "main must have no parameters and return None");
+        }
+        if (semantic_find_function(info->functions, name) != NULL) {
+            semantic_error_at_node(payload->children[0], "duplicate function 'main'");
+        }
+    }
+
+    param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
+    if (count > 0 && param_types == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+    for (size_t j = 0; j < count; j++) {
+        param_types[j] = semantic_parameter_type(info, semantic_expect_child(parameters, j, NODE_PARAMETER));
+    }
+    for (existing = info->functions; existing != NULL; existing = existing->next) {
+        if (strcmp(existing->name, name) != 0) {
+            continue;
+        }
+        if (same_function_signature(existing, enclosing, module_name, count, param_types)) {
+            semantic_error_at_node(payload->children[0], "duplicate overload '%s' with the same parameter types", name);
+        }
+    }
+
+    fn = calloc(1, sizeof(FunctionInfo));
+    if (fn == NULL) {
+        perror("calloc");
+        exit(1);
+    }
+
+    fn->name = name;
+    fn->module_name = module_name;
+    fn->c_name = build_function_c_name(payload, enclosing, module_name, name, count, param_types, payload->kind == NODE_NATIVE_FUNCTION_DEF);
+    fn->return_type = semantic_function_return_type(info, payload);
+    fn->param_count = count;
+    fn->param_types = param_types;
+    fn->is_native = payload->kind == NODE_NATIVE_FUNCTION_DEF;
+    fn->node = payload;
+    fn->enclosing = enclosing;
+    fn->next = info->functions;
+    info->functions = fn;
+    return fn;
+}
+
+static void collect_nested_functions_in_suite(
+    SemanticInfo *info,
+    const ParseNode *suite,
+    const FunctionInfo *enclosing)
+{
+    if (suite == NULL || enclosing == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < suite->child_count; i++) {
+        const ParseNode *payload = semantic_statement_payload(suite->children[i]);
+
+        if (payload->kind != NODE_FUNCTION_DEF) {
+            continue;
+        }
+
+        if (enclosing->enclosing != NULL) {
+            continue;
+        }
+
+        (void)register_function(info, payload, enclosing);
+    }
+}
+
 static void collect_functions(SemanticInfo *info, const ParseNode *root)
 {
     for (size_t i = 0; i < root->child_count; i++) {
         const ParseNode *payload = semantic_statement_payload(root->children[i]);
-        const ParseNode *parameters;
-        size_t count;
-        ValueType *param_types;
-        const char *name;
-        char *module_name;
-        FunctionInfo *existing;
         FunctionInfo *fn;
 
         if (payload->kind != NODE_FUNCTION_DEF && payload->kind != NODE_NATIVE_FUNCTION_DEF) {
             continue;
         }
 
-        name = semantic_expect_child(payload, 0, NODE_PRIMARY)->value;
-        {
-            ModuleInfo *module = module_info_for_path(info, payload->source_path);
-            module_name = module != NULL ? dup_string(module->name) : module_name_from_path(payload->source_path);
-        }
-        if (semantic_find_class_type(name) != 0) {
-            semantic_error_at_node(payload->children[0], "function name '%s' conflicts with class", name);
-        }
+        fn = register_function(info, payload, NULL);
+        if (payload->kind == NODE_FUNCTION_DEF) {
+            const ParseNode *suite = payload->children[payload->child_count - 1];
 
-        parameters = semantic_function_parameters(payload);
-        count = semantic_parameter_count(parameters);
-        if (strcmp(name, "main") == 0) {
-            if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
-                semantic_error_at_node(payload->children[0], "main cannot be declared as native");
-            }
-            if (count != 0 || semantic_function_return_type(info, payload) != TYPE_NONE) {
-                semantic_error_at_node(payload->children[0], "main must have no parameters and return None");
-            }
-            if (semantic_find_function(info->functions, name) != NULL) {
-                semantic_error_at_node(payload->children[0], "duplicate function 'main'");
-            }
+            collect_nested_functions_in_suite(info, suite, fn);
         }
-
-        param_types = count > 0 ? malloc(sizeof(ValueType) * count) : NULL;
-        if (count > 0 && param_types == NULL) {
-            perror("malloc");
-            exit(1);
-        }
-        for (size_t j = 0; j < count; j++) {
-            param_types[j] = semantic_parameter_type(info, semantic_expect_child(parameters, j, NODE_PARAMETER));
-        }
-        for (existing = info->functions; existing != NULL; existing = existing->next) {
-            if (strcmp(existing->name, name) != 0) {
-                continue;
-            }
-            if (same_function_signature(existing, module_name, count, param_types)) {
-                semantic_error_at_node(payload->children[0], "duplicate overload '%s' with the same parameter types", name);
-            }
-        }
-
-        fn = malloc(sizeof(FunctionInfo));
-        if (fn == NULL) {
-            perror("malloc");
-            exit(1);
-        }
-
-        fn->name = name;
-        fn->module_name = module_name;
-        fn->c_name = build_function_c_name(payload, module_name, name, count, param_types, payload->kind == NODE_NATIVE_FUNCTION_DEF);
-        fn->return_type = semantic_function_return_type(info, payload);
-        fn->param_count = count;
-        fn->param_types = param_types;
-        fn->is_native = payload->kind == NODE_NATIVE_FUNCTION_DEF;
-        fn->node = payload;
-        fn->next = info->functions;
-        info->functions = fn;
     }
 }
 
@@ -1524,7 +1596,35 @@ static void collect_global_bindings(SemanticInfo *info, const LoadedProgram *pro
     }
 }
 
-static void typecheck_function(SemanticInfo *info, const ParseNode *function_def, Scope *global_scope)
+static int typecheck_function_suite(
+    SemanticInfo *info,
+    const ParseNode *suite,
+    Scope *scope,
+    FunctionContext *current_function,
+    int allow_nested_functions)
+{
+    int returns = 0;
+
+    if (suite->child_count == 1 && semantic_is_epsilon_node(suite->children[0])) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < suite->child_count; i++) {
+        if (!returns) {
+            returns = typecheck_statement(info, suite->children[i], scope, current_function, allow_nested_functions);
+        } else {
+            (void)typecheck_statement(info, suite->children[i], scope, current_function, allow_nested_functions);
+        }
+    }
+
+    return returns;
+}
+
+static void typecheck_function(
+    SemanticInfo *info,
+    const ParseNode *function_def,
+    Scope *global_scope,
+    FunctionInfo *function_info)
 {
     const ParseNode *parameters = semantic_function_parameters(function_def);
     const ParseNode *suite = function_def->children[function_def->child_count - 1];
@@ -1534,6 +1634,7 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
     local_scope.parent = global_scope;
     local_scope.module = global_scope->module;
     local_scope.current_class_type = global_scope->current_class_type;
+    local_scope.function = function_info;
     current.name = semantic_expect_child(function_def, 0, NODE_PRIMARY)->value;
     current.return_type = semantic_function_return_type(info, function_def);
     current.loop_depth = 0;
@@ -1546,7 +1647,12 @@ static void typecheck_function(SemanticInfo *info, const ParseNode *function_def
     }
 
     {
-        int returns = typecheck_suite(info, suite, &local_scope, &current);
+        int returns = typecheck_function_suite(
+            info,
+            suite,
+            &local_scope,
+            &current,
+            function_info != NULL && function_info->enclosing == NULL);
 
         if (current.return_type != TYPE_NONE && !returns) {
             semantic_error_at_node(function_def->children[0], "function '%s' must return %s on all paths",
@@ -1567,7 +1673,9 @@ static void typecheck_class_methods(SemanticInfo *info, const ParseNode *class_d
             semantic_error_at_node(class_def->children[i]->children[0], "native methods are not supported");
         }
         if (class_def->children[i]->kind == NODE_FUNCTION_DEF) {
-            typecheck_function(info, class_def->children[i], &class_scope);
+            FunctionInfo *function_info = semantic_find_function_by_node(info->functions, class_def->children[i]);
+
+            typecheck_function(info, class_def->children[i], &class_scope, function_info);
         }
     }
 }
@@ -1582,25 +1690,28 @@ static int typecheck_statement(
     const ParseNode *payload = semantic_statement_payload(statement);
 
     if (payload->kind == NODE_FUNCTION_DEF) {
+        FunctionInfo *function_info = semantic_find_function_by_node(info->functions, payload);
+
         if (!allow_function_defs) {
             semantic_error_at_node(payload->children[0], "nested function definitions are not supported");
         }
-        typecheck_function(info, payload, scope);
+        if (function_info == NULL) {
+            semantic_error("missing nested function metadata");
+        }
+        if (function_info->enclosing != scope_function(scope)) {
+            semantic_error_at_node(payload->children[0],
+                "nested functions are only supported directly inside their enclosing function");
+        }
+        typecheck_function(info, payload, scope, function_info);
         return 0;
     }
 
     if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
-        if (!allow_function_defs) {
-            semantic_error_at_node(payload->children[0], "native function declarations are only supported at module scope");
-        }
-        return 0;
+        semantic_error_at_node(payload->children[0], "native function declarations are only supported at module scope");
     }
 
     if (payload->kind == NODE_NATIVE_TYPE_DEF) {
-        if (!allow_function_defs) {
-            semantic_error_at_node(payload->children[0], "native type declarations are only supported at module scope");
-        }
-        return 0;
+        semantic_error_at_node(payload->children[0], "native type declarations are only supported at module scope");
     }
 
     if (payload->kind == NODE_ENUM_DEF) {
@@ -1690,7 +1801,9 @@ SemanticInfo *analyze_program(const LoadedProgram *program)
         } else if (payload->kind == NODE_NATIVE_TYPE_DEF) {
             continue;
         } else if (payload->kind == NODE_FUNCTION_DEF) {
-            typecheck_function(info, payload, &global_scope);
+            FunctionInfo *function_info = semantic_find_function_by_node(info->functions, payload);
+
+            typecheck_function(info, payload, &global_scope, function_info);
         } else if (payload->kind == NODE_NATIVE_FUNCTION_DEF) {
             continue;
         } else {
@@ -1725,6 +1838,8 @@ void free_semantic_info(SemanticInfo *info)
         free((char *) functions->module_name);
         free(functions->c_name);
         free(functions->param_types);
+        free(functions->capture_names);
+        free(functions->capture_types);
         free(functions);
         functions = next;
     }

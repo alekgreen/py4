@@ -116,6 +116,17 @@ const ModuleInfo *scope_module(Scope *scope)
     return NULL;
 }
 
+const FunctionInfo *scope_function(Scope *scope)
+{
+    while (scope != NULL) {
+        if (scope->function != NULL) {
+            return scope->function;
+        }
+        scope = scope->parent;
+    }
+    return NULL;
+}
+
 ValueType scope_class_type(Scope *scope)
 {
     while (scope != NULL) {
@@ -376,12 +387,53 @@ static int function_matches_module(FunctionInfo *fn, const char *module_name)
     return fn->module_name != NULL && strcmp(fn->module_name, module_name) == 0;
 }
 
+static int function_visible_lexically(FunctionInfo *fn, const FunctionInfo *current_function)
+{
+    if (fn->enclosing == NULL || current_function == NULL) {
+        return 0;
+    }
+
+    return fn == current_function || current_function->node == fn->enclosing->node;
+}
+
+static int has_visible_lexical_function_named(
+    SemanticInfo *info,
+    const FunctionInfo *current_function,
+    const char *name)
+{
+    if (current_function == NULL) {
+        return 0;
+    }
+
+    for (FunctionInfo *fn = info->functions; fn != NULL; fn = fn->next) {
+        if (strcmp(fn->name, name) != 0) {
+            continue;
+        }
+        if (function_visible_lexically(fn, current_function)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int function_visible_for_call(
     FunctionInfo *fn,
     const ModuleInfo *current_module,
     ImportBinding *import_binding,
-    const char *module_name)
+    const char *module_name,
+    const FunctionInfo *current_function,
+    int lexical_only)
 {
+    if (fn->enclosing != NULL) {
+        if (module_name != NULL) {
+            return 0;
+        }
+        return function_visible_lexically(fn, current_function);
+    }
+    if (lexical_only) {
+        return 0;
+    }
     if (module_name != NULL) {
         return function_matches_module(fn, module_name);
     }
@@ -451,6 +503,7 @@ static void format_candidate_signatures(
     const char *display_name,
     const char *function_name,
     const ModuleInfo *current_module,
+    const FunctionInfo *current_function,
     ImportBinding *import_binding,
     const char *module_name,
     size_t arity_filter,
@@ -459,6 +512,8 @@ static void format_candidate_signatures(
     size_t buffer_size)
 {
     int first = 1;
+    int lexical_only = module_name == NULL &&
+        has_visible_lexical_function_named(info, current_function, function_name);
 
     buffer[0] = '\0';
     for (FunctionInfo *fn = info->functions; fn != NULL; fn = fn->next) {
@@ -467,7 +522,7 @@ static void format_candidate_signatures(
                 continue;
             }
         }
-        if (!function_visible_for_call(fn, current_module, import_binding, module_name)) {
+        if (!function_visible_for_call(fn, current_module, import_binding, module_name, current_function, lexical_only)) {
             continue;
         }
         if (require_arity && fn->param_count != arity_filter) {
@@ -497,9 +552,12 @@ ValueType resolve_function_call_type(
     size_t arity_match_count = 0;
     FunctionInfo *sole_arity_match = NULL;
     const ModuleInfo *current_module = scope_module(scope);
+    const FunctionInfo *current_function = scope_function(scope);
     ImportBinding *import_binding = module_name == NULL && current_module != NULL
         ? find_import_binding(current_module, function_name, 0)
         : NULL;
+    int lexical_only = module_name == NULL &&
+        has_visible_lexical_function_named(info, current_function, function_name);
 
     if (module_name != NULL && is_module_private_name(function_name)) {
         semantic_error_at_node(call, "name '%s' is private to module '%s'",
@@ -550,7 +608,7 @@ ValueType resolve_function_call_type(
                 continue;
             }
         }
-        if (!function_visible_for_call(fn, current_module, import_binding, module_name)) {
+        if (!function_visible_for_call(fn, current_module, import_binding, module_name, current_function, lexical_only)) {
             continue;
         }
 
@@ -609,6 +667,7 @@ ValueType resolve_function_call_type(
                 display_name,
                 function_name,
                 current_module,
+                current_function,
                 import_binding,
                 module_name,
                 0,
@@ -637,15 +696,16 @@ ValueType resolve_function_call_type(
         }
         format_actual_argument_types(info, arguments, scope, actual_types, sizeof(actual_types));
         format_candidate_signatures(
-            info,
-            display_name,
-            function_name,
-            current_module,
-            import_binding,
-            module_name,
-            actual_count,
-            1,
-            candidates,
+                info,
+                display_name,
+                function_name,
+                current_module,
+                current_function,
+                import_binding,
+                module_name,
+                actual_count,
+                1,
+                candidates,
             sizeof(candidates));
         semantic_error_at_node(call, "no overload of function '%s' matches argument types (%s); candidates: %s",
             display_name, actual_count == 0 ? "" : actual_types, candidates);
@@ -657,6 +717,7 @@ ValueType resolve_function_call_type(
             display_name,
             function_name,
             current_module,
+            current_function,
             import_binding,
             module_name,
             actual_count,

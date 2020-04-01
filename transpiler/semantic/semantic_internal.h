@@ -8,6 +8,7 @@ typedef struct VariableBinding {
     const char *name;
     const char *module_name;
     ValueType type;
+    const struct FunctionInfo *function;
     struct VariableBinding *next;
 } VariableBinding;
 
@@ -15,6 +16,7 @@ typedef struct Scope {
     VariableBinding *vars;
     const struct ModuleInfo *module;
     ValueType current_class_type;
+    const struct FunctionInfo *function;
     struct Scope *parent;
 } Scope;
 
@@ -27,6 +29,11 @@ typedef struct FunctionInfo {
     ValueType *param_types;
     int is_native;
     const ParseNode *node;
+    const struct FunctionInfo *enclosing;
+    size_t capture_count;
+    size_t capture_capacity;
+    const char **capture_names;
+    ValueType *capture_types;
     struct FunctionInfo *next;
 } FunctionInfo;
 
@@ -132,6 +139,7 @@ FunctionInfo *semantic_find_function(FunctionInfo *functions, const char *name);
 FunctionInfo *semantic_find_function_by_node(FunctionInfo *functions, const ParseNode *node);
 void semantic_record_call_target(SemanticInfo *info, const ParseNode *call, FunctionInfo *function);
 FunctionInfo *semantic_resolved_call_target(const SemanticInfo *info, const ParseNode *call);
+void semantic_record_function_capture(FunctionInfo *fn, const char *name, ValueType type);
 void semantic_record_constructor_target(SemanticInfo *info, const ParseNode *call, ValueType class_type);
 ValueType semantic_resolved_constructor_target(const SemanticInfo *info, const ParseNode *call);
 void semantic_record_enum_variant_target(
@@ -166,6 +174,7 @@ ModuleInfo *semantic_find_module_info(ModuleInfo *modules, const char *name);
 int is_module_private_name(const char *name);
 char *module_ref_string(const ParseNode *node);
 const ModuleInfo *scope_module(Scope *scope);
+const FunctionInfo *scope_function(Scope *scope);
 ValueType scope_class_type(Scope *scope);
 ImportBinding *find_module_binding_for_receiver(const ModuleInfo *module, const ParseNode *receiver);
 GlobalBinding *resolve_visible_global(SemanticInfo *info, Scope *scope, const char *name);

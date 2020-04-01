@@ -650,6 +650,17 @@ static char *call_to_c_string(CodegenContext *ctx, const ParseNode *call)
         free(args);
         args = joined;
     }
+    if (semantic_has_call_target(ctx->semantic, call)) {
+        for (size_t i = 0; i < semantic_call_capture_count(ctx->semantic, call); i++) {
+            const char *capture_name = semantic_call_capture_name(ctx->semantic, call, i);
+            char *joined = args[0] == '\0'
+                ? codegen_dup_printf("%s", capture_name)
+                : codegen_dup_printf("%s, %s", args, capture_name);
+
+            free(args);
+            args = joined;
+        }
+    }
 
     if (strcmp(callee->value, "list_append") == 0) {
         result = codegen_list_unary_call(semantic_type_of(ctx->semantic, arguments->children[0]), "append", args);
@@ -862,6 +873,15 @@ static char *method_call_to_c_string(CodegenContext *ctx, const ParseNode *call)
                 free(args);
                 args = joined;
             }
+        }
+        for (size_t i = 0; i < semantic_call_capture_count(ctx->semantic, call); i++) {
+            const char *capture_name = semantic_call_capture_name(ctx->semantic, call, i);
+            char *joined = args[0] == '\0'
+                ? codegen_dup_printf("%s", capture_name)
+                : codegen_dup_printf("%s, %s", args, capture_name);
+
+            free(args);
+            args = joined;
         }
 
         result = codegen_dup_printf("%s(%s)", semantic_call_c_name(ctx->semantic, call), args);

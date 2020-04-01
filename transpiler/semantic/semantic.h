@@ -107,6 +107,12 @@ const char *semantic_call_c_name(const SemanticInfo *info, const ParseNode *call
 int semantic_has_call_target(const SemanticInfo *info, const ParseNode *call);
 size_t semantic_call_arity(const SemanticInfo *info, const ParseNode *call);
 ValueType semantic_call_parameter_type(const SemanticInfo *info, const ParseNode *call, size_t index);
+int semantic_function_is_nested(const SemanticInfo *info, const ParseNode *function_def);
+size_t semantic_function_capture_count(const SemanticInfo *info, const ParseNode *function_def);
+const char *semantic_function_capture_name(const SemanticInfo *info, const ParseNode *function_def, size_t index);
+ValueType semantic_function_capture_type(const SemanticInfo *info, const ParseNode *function_def, size_t index);
+size_t semantic_call_capture_count(const SemanticInfo *info, const ParseNode *call);
+const char *semantic_call_capture_name(const SemanticInfo *info, const ParseNode *call, size_t index);
 const char *semantic_global_c_name(const SemanticInfo *info, const char *module_name, const char *name);
 const char *semantic_global_target_c_name(const SemanticInfo *info, const ParseNode *node);
 const char *semantic_method_c_name(const SemanticInfo *info, ValueType owner_type, const char *method_name);
